@@ -27,6 +27,9 @@ export {
   writeReleaseManifest,
 } from './app-release/create-release-manifest';
 export {resolveDeclaredStaticAssets} from './app-release/static-assets';
+export {planReleasePublish, publishRelease} from './app-release/publisher';
+export {assertArtifactStore} from './app-release/storage-adapter';
+export {publishApp} from './commands/publish-app';
 export {
   joinObjectKey,
   joinStaticAssetUrl,
