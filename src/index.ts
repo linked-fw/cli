@@ -22,6 +22,12 @@ export {safeYarn} from './commands/safe-yarn';
 export {setupPublish} from './commands/setup-publish';
 export {resolveBuildTarget} from './app-release/resolve-build-target';
 export {
+  createReleaseManifest,
+  serializeReleaseManifest,
+  writeReleaseManifest,
+} from './app-release/create-release-manifest';
+export {resolveDeclaredStaticAssets} from './app-release/static-assets';
+export {
   joinObjectKey,
   joinStaticAssetUrl,
   normalizeReleasePath,
@@ -37,3 +43,4 @@ export type {
   PublishPlan,
   PublishResult,
 } from './app-release/types';
+export type {CreateReleaseManifestOptions} from './app-release/create-release-manifest';
