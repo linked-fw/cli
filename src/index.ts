@@ -31,6 +31,10 @@ export {planReleasePublish, publishRelease} from './app-release/publisher';
 export {assertArtifactStore} from './app-release/storage-adapter';
 export {publishApp} from './commands/publish-app';
 export {
+  serveCompiledApp,
+  validateCompiledAppArtifacts,
+} from './commands/serve-app';
+export {
   joinObjectKey,
   joinStaticAssetUrl,
   normalizeReleasePath,
