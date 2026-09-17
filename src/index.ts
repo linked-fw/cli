@@ -20,3 +20,20 @@ export type {
 export {buildPackageByPath} from './commands/build-package';
 export {safeYarn} from './commands/safe-yarn';
 export {setupPublish} from './commands/setup-publish';
+export {resolveBuildTarget} from './app-release/resolve-build-target';
+export {
+  joinObjectKey,
+  joinStaticAssetUrl,
+  normalizeReleasePath,
+  resolveExistingPathWithinRoot,
+} from './app-release/paths';
+export type {
+  AppBuildTarget,
+  AppPublishConfig,
+  BuildAppOptions,
+  LinkedAppReleaseDestination,
+  LinkedAppReleaseFile,
+  LinkedAppReleaseManifest,
+  PublishPlan,
+  PublishResult,
+} from './app-release/types';
