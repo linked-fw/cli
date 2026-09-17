@@ -287,19 +287,26 @@ program
     const hasViteConfig = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']
       .some((f) => fs.existsSync(path.join(process.cwd(), f)));
     if (hasViteConfig) {
-      const {ensureEnvironmentLoaded} = await import('./cli-methods.js');
+      const {buildBackend, ensureEnvironmentLoaded} = await import(
+        './cli-methods.js'
+      );
       await ensureEnvironmentLoaded();
       const {build} = await import('vite');
       console.log('🛠 Building production client bundle via vite build');
       await build({root: process.cwd()});
       console.log('✅ vite build complete');
+      const backendBuilt = await buildBackend();
+      if (backendBuilt !== true) {
+        throw new Error('Backend build did not complete successfully');
+      }
+      console.log('✅ app frontend and backend build complete');
       return;
     }
     buildApp();
   })
   .option('--env', 'The node environment to use. Default is "development"')
   .description(
-    'Build the linked app for production. Uses `vite build` when vite.config exists; falls back to webpack.',
+    'Build the linked app frontend and backend for production. Uses Vite for the frontend when vite.config exists; falls back to webpack.',
   );
 
 program.command('publish-updated').action(() => {
