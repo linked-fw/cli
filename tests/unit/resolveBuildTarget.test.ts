@@ -23,6 +23,12 @@ describe('resolveBuildTarget', () => {
     );
   });
 
+  test('invalid target', () => {
+    expect(() => resolveBuildTarget({target: 'desktop' as 'web'})).toThrow(
+      'Unknown app build target "desktop"',
+    );
+  });
+
   test.each(['', '0', 'false', 'NO', 'off'])(
     'false-like APP_ENV value %p does not select capacitor',
     (appEnv) => {
@@ -30,4 +36,3 @@ describe('resolveBuildTarget', () => {
     },
   );
 });
-

@@ -22,6 +22,11 @@ export const resolveBuildTarget = ({
   target,
   appEnv = process.env.APP_ENV,
 }: ResolveBuildTargetOptions = {}): AppBuildTarget => {
+  if (target !== undefined && target !== 'web' && target !== 'capacitor') {
+    throw new Error(
+      `Unknown app build target "${String(target)}". Expected "web" or "capacitor".`,
+    );
+  }
   const isCapacitorEnvironment = isTruthyEnvironmentValue(appEnv);
 
   if (target === 'web' && isCapacitorEnvironment) {
@@ -36,4 +41,3 @@ export const resolveBuildTarget = ({
 
   return isCapacitorEnvironment ? 'capacitor' : 'web';
 };
-
