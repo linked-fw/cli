@@ -51,7 +51,10 @@ describe('release publisher', () => {
     store = new MemoryArtifactStore();
     fs.mkdirSync(path.join(appRoot, 'public/bundles'), {recursive: true});
     fs.writeFileSync(path.join(appRoot, 'public/bundles/a.12345678.js'), 'aaa');
-    fs.writeFileSync(path.join(appRoot, 'public/bundles/b.12345678.css'), 'bbbb');
+    fs.writeFileSync(
+      path.join(appRoot, 'public/bundles/b.12345678.css'),
+      'bbbb',
+    );
     const file = (sourcePath: string, content: string) => ({
       sourcePath,
       objectKey: sourcePath,
@@ -96,16 +99,32 @@ describe('release publisher', () => {
   });
 
   test('confirmed publish uploads assets before the release manifest', async () => {
-    await publishRelease({appRoot, store, yes: true});
+    const progress: string[] = [];
+    await publishRelease({
+      appRoot,
+      store,
+      yes: true,
+      onProgress: ({completed, total, objectKey}) => {
+        progress.push(`${completed}/${total}:${objectKey}`);
+      },
+    });
     expect(store.writes.map((write) => write.key)).toEqual([
       'public/bundles/a.12345678.js',
       'public/bundles/b.12345678.css',
       'public/bundles/linked-release.json',
     ]);
+    expect(progress).toEqual([
+      '1/3:public/bundles/a.12345678.js',
+      '2/3:public/bundles/b.12345678.css',
+      '3/3:public/bundles/linked-release.json',
+    ]);
   });
 
   test('rejects a mobile manifest without writes', async () => {
-    const manifestPath = path.join(appRoot, 'public/bundles/linked-release.json');
+    const manifestPath = path.join(
+      appRoot,
+      'public/bundles/linked-release.json',
+    );
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     manifest.target = 'capacitor';
     manifest.publishable = false;
@@ -118,7 +137,8 @@ describe('release publisher', () => {
 
   test('rejects a destination mismatch without writes', async () => {
     jest.spyOn(store, 'describeDestination').mockReturnValue({
-      bucket: 'pg-prod', prefix: '4.2.6',
+      bucket: 'pg-prod',
+      prefix: '4.2.6',
     });
     await expect(publishRelease({appRoot, store, yes: true})).rejects.toThrow(
       'Static destination does not match',
@@ -127,7 +147,10 @@ describe('release publisher', () => {
   });
 
   test('rejects a changed local file before any write', async () => {
-    fs.writeFileSync(path.join(appRoot, 'public/bundles/a.12345678.js'), 'changed');
+    fs.writeFileSync(
+      path.join(appRoot, 'public/bundles/a.12345678.js'),
+      'changed',
+    );
     await expect(publishRelease({appRoot, store, yes: true})).rejects.toThrow(
       'changed after build',
     );

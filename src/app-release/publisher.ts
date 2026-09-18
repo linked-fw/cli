@@ -18,6 +18,13 @@ export interface PlanReleasePublishOptions {
 
 export interface PublishReleaseOptions extends PlanReleasePublishOptions {
   yes?: boolean;
+  onProgress?: (progress: PublishProgress) => void;
+}
+
+export interface PublishProgress {
+  completed: number;
+  total: number;
+  objectKey: string;
 }
 
 const DEFAULT_MANIFEST_PATH = 'public/bundles/linked-release.json';
@@ -32,7 +39,9 @@ const readManifest = (
   ) as LinkedAppReleaseManifest;
 
   if (manifest.schemaVersion !== 1) {
-    throw new Error(`Unsupported release manifest schema: ${manifest.schemaVersion}`);
+    throw new Error(
+      `Unsupported release manifest schema: ${manifest.schemaVersion}`,
+    );
   }
   if (manifest.target !== 'web' || manifest.publishable !== true) {
     throw new Error('Only publishable web release manifests may be uploaded');
@@ -66,7 +75,10 @@ const validateDestination = (
 };
 
 const hashFile = (absolutePath: string): string =>
-  crypto.createHash('sha256').update(fs.readFileSync(absolutePath)).digest('hex');
+  crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(absolutePath))
+    .digest('hex');
 
 const validateLocalFile = (
   appRoot: string,
@@ -127,6 +139,8 @@ export const publishRelease = async (
     };
   }
 
+  const totalUploads = plan.files.length + 1;
+  let completedUploads = 0;
   for (const file of plan.files) {
     const absolutePath = resolveExistingPathWithinRoot(
       options.appRoot,
@@ -140,11 +154,20 @@ export const publishRelease = async (
       sha256: file.sha256,
     });
     await verifyArtifact(options.store, file);
+    completedUploads += 1;
+    options.onProgress?.({
+      completed: completedUploads,
+      total: totalUploads,
+      objectKey: file.objectKey,
+    });
   }
 
   const manifestBody = fs.readFileSync(plan.manifestPath);
   const manifestKey = DEFAULT_MANIFEST_PATH;
-  const manifestHash = crypto.createHash('sha256').update(manifestBody).digest('hex');
+  const manifestHash = crypto
+    .createHash('sha256')
+    .update(manifestBody)
+    .digest('hex');
   await options.store.putArtifact({
     key: manifestKey,
     body: manifestBody,
@@ -159,6 +182,12 @@ export const publishRelease = async (
   ) {
     throw new Error('Uploaded release manifest verification failed');
   }
+  completedUploads += 1;
+  options.onProgress?.({
+    completed: completedUploads,
+    total: totalUploads,
+    objectKey: manifestKey,
+  });
 
   return {
     releaseId: manifest.releaseId,
@@ -167,4 +196,3 @@ export const publishRelease = async (
     dryRun: false,
   };
 };
-
