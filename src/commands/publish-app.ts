@@ -81,8 +81,8 @@ export const publishApp = async (options: PublishAppOptions) => {
       ...options,
       appRoot,
       store,
-      onProgress: ({completed, total, objectKey}) => {
-        const message = `${completed}/${total}: Published ${objectKey}`;
+      onProgress: ({completed, total}) => {
+        const message = `Publishing ${completed}/${total} files`;
         if (progressSpinner) {
           progressSpinner.text = message;
         } else if (
