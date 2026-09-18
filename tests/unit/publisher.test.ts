@@ -160,9 +160,12 @@ describe('release publisher', () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     try {
-      await expect(publishApp({appRoot, store, yes: true})).rejects.toThrow(
-        'provider rejected [REDACTED]',
+      const failure = await publishApp({appRoot, store, yes: true}).catch(
+        (error: Error) => error,
       );
+      expect(failure.message).toBe('provider rejected [REDACTED]');
+      expect(failure.stack).toContain('publisher.test.ts');
+      expect(failure.stack).not.toContain(secret);
     } finally {
       delete process.env.STATIC_AWS_SECRET_ACCESS_KEY;
       log.mockRestore();

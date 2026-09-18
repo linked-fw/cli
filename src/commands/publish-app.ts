@@ -19,12 +19,19 @@ const secretEnvironmentKeys = [
 ];
 
 export const redactPublishError = (error: unknown): Error => {
-  let message = error instanceof Error ? error.message : String(error);
+  const source = error instanceof Error ? error : new Error(String(error));
+  let message = source.message;
+  let stack = source.stack;
   for (const key of secretEnvironmentKeys) {
     const value = process.env[key];
-    if (value) message = message.split(value).join('[REDACTED]');
+    if (value) {
+      message = message.split(value).join('[REDACTED]');
+      stack = stack?.split(value).join('[REDACTED]');
+    }
   }
-  return new Error(message);
+  source.message = message;
+  if (stack) source.stack = stack;
+  return source;
 };
 
 export const publishApp = async (options: PublishAppOptions) => {
