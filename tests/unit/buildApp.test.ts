@@ -95,7 +95,12 @@ describe('buildViteApp', () => {
       fs.existsSync(path.join(appRoot, 'public/bundles/linked-release.json')),
     ).toBe(true);
     expect(publish).toHaveBeenCalledWith(
-      expect.objectContaining({appRoot, store, yes: true}),
+      expect.objectContaining({
+        appRoot,
+        manifestPath: 'public/bundles/linked-release.json',
+        store,
+        yes: true,
+      }),
     );
   });
 

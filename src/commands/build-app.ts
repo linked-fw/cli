@@ -185,6 +185,7 @@ export const buildViteApp = async (
     staticAssets: publishConfig.staticAssets,
   });
   const manifestPath = writeManifest(appRoot, manifest);
+  const relativeManifestPath = path.relative(appRoot, manifestPath);
   console.log(
     `✅ Release manifest ready: ${manifest.files.length} artifacts (${path.relative(
       appRoot,
@@ -196,6 +197,11 @@ export const buildViteApp = async (
   // verified manifest and explicit static store instead of scanning public/.
   const publish = dependencies.publish || publishApp;
   console.log('🔄 Starting verified release publisher...');
-  await publish({appRoot, manifestPath, store, yes: true});
+  await publish({
+    appRoot,
+    manifestPath: relativeManifestPath,
+    store,
+    yes: true,
+  });
   console.log('✅ Build and release workflow complete');
 };
