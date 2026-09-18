@@ -34,6 +34,8 @@ linked create-component <name>    # add a React component file
 ```bash
 linked build                      # build the current package (tsc + checks)
 linked build-app                  # build frontend + backend for the current app
+linked build-app --target web     # web release: build, write linked-release.json, auto-publish when eligible
+linked build-app --target capacitor  # Capacitor/local native build (never CDN-publishes)
 linked build-workspace            # build all linked packages in the workspace in dependency order
 linked build-updated              # incremental: only packages that changed since last build
 linked build-package <file>       # walk up from a file path to find its package and rebuild
@@ -42,6 +44,17 @@ linked build-package <file>       # walk up from a file path to find its package
 `linked build` exits with code 1 whenever the build does not succeed, including when it is run in a `linkedApp` or
 in a package without `"linkedPackage": true` (it used to exit 0 there). A build that finishes with warnings still
 exits 0.
+
+### App release / production runtime
+
+```bash
+linked publish-app                # dry-run the release manifest upload (pass --yes to write)
+linked serve-app                  # run the compiled backend without Vite/HMR (production runtime)
+```
+
+Web publishing uploads only files listed in `public/bundles/linked-release.json` through the app's
+configured static `IArtifactStore`. It does not recursively upload `public/`. Use `linked start` for
+development; use `linked serve-app` after `linked build-app` for staging/production.
 
 ### Publishing / release
 
