@@ -31,6 +31,9 @@ export const publishApp = async (options: PublishAppOptions) => {
   const appRoot = options.appRoot || process.cwd();
   const store = assertArtifactStore(options.store);
   try {
+    // This command reuses a completed build. It validates the manifest and
+    // destination before dry-run output or any confirmed retry upload.
+    console.log('🔄 Validating release manifest and destination...');
     const plan = planReleasePublish({
       appRoot,
       manifestPath: options.manifestPath,
@@ -45,7 +48,19 @@ export const publishApp = async (options: PublishAppOptions) => {
       console.log('Dry run only; pass --yes to upload this release.');
     }
 
-    return await publishRelease({...options, appRoot, store});
+    console.log('✅ Release plan validated');
+    if (options.yes) {
+      console.log('🔄 Uploading and verifying release artifacts...');
+    }
+    const result = await publishRelease({...options, appRoot, store});
+    if (result.dryRun) {
+      console.log('✅ Dry run complete; no files uploaded');
+    } else {
+      console.log(
+        `✅ Release upload complete: ${result.uploadedFiles} files, ${result.uploadedBytes} bytes`,
+      );
+    }
+    return result;
   } catch (error) {
     throw redactPublishError(error);
   }

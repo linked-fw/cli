@@ -47,6 +47,8 @@ export const hasViteConfig = (appRoot = process.cwd()): boolean =>
 const loadDefaultPublishConfig = async (
   appRoot: string,
 ): Promise<AppPublishConfig> => {
+  // App config declares extra public files; Vite bundle files come from its
+  // own manifest and do not need to be repeated here.
   const configPath = ['linked.config.js', 'lincd.config.js']
     .map((fileName) => path.join(appRoot, fileName))
     .find((candidate) => fs.existsSync(candidate));
@@ -66,6 +68,8 @@ export const loadStaticArtifactStore = async (
       return loadBackendStorageConfig();
     });
   const storageConfig = await loader();
+  // User uploads are normally the default file store. Releases must use the
+  // separate static store so a build cannot write into upload storage.
   if (!storageConfig?.staticFileStore) {
     throw new Error(
       'The app storage config must export staticFileStore for release publishing. The default uploads store is not accepted.',
@@ -101,7 +105,15 @@ export const buildViteApp = async (
       const {ensureEnvironmentLoaded} = await import('../lifecycle.js');
       return ensureEnvironmentLoaded();
     });
+  console.log('🔄 Loading build environment...');
   await loadEnvironment();
+  console.log(
+    `✅ Build environment loaded${
+      options.environmentNames?.length
+        ? `: ${options.environmentNames.join(', ')}`
+        : ''
+    }`,
+  );
 
   const target = resolveBuildTarget({
     target: options.target,
@@ -117,9 +129,7 @@ export const buildViteApp = async (
     dependencies.buildFrontend ||
     (async (root: string) => {
       const {build} = await import('vite');
-      console.log('🛠 Building production client bundle via vite build');
       await build({root});
-      console.log('✅ vite build complete');
     });
   const buildBackend =
     dependencies.buildBackend ||
@@ -128,12 +138,18 @@ export const buildViteApp = async (
       return compileBackend();
     });
 
+  // The client and backend must both finish before release files are created
+  // or any remote storage write is allowed.
+  console.log('🔄 Building Vite client bundle...');
   await buildFrontend(appRoot);
+  console.log('✅ Vite client bundle complete');
+
+  console.log('🔄 Building application backend...');
   const backendBuilt = await buildBackend();
   if (backendBuilt !== true) {
     throw new Error('Backend build did not complete successfully');
   }
-  console.log('✅ app frontend and backend build complete');
+  console.log('✅ Application backend build complete');
 
   if (
     process.env.NODE_ENV === 'development' ||
@@ -145,20 +161,41 @@ export const buildViteApp = async (
     return;
   }
 
+  console.log('🔄 Loading and validating static release storage...');
   const store = await loadStaticArtifactStore(dependencies.loadStorageConfig);
+  const destination = describeReleaseDestination(store);
+  console.log(
+    `✅ Static release storage ready: ${destination.bucket}/${destination.destinationPrefix}`,
+  );
+
   const loadPublishConfig =
     dependencies.loadPublishConfig || loadDefaultPublishConfig;
   const publishConfig = await loadPublishConfig(appRoot);
   const createManifest = dependencies.createManifest || createReleaseManifest;
   const writeManifest = dependencies.writeManifest || writeReleaseManifest;
+
+  // The release manifest is the hand-off between build and publishing. Only
+  // files listed here can be uploaded by the publisher.
+  console.log('🔄 Creating verified release manifest...');
   const manifest = createManifest({
     appRoot,
     environmentNames: options.environmentNames || [],
     target,
-    destination: describeReleaseDestination(store),
+    destination,
     staticAssets: publishConfig.staticAssets,
   });
   const manifestPath = writeManifest(appRoot, manifest);
+  console.log(
+    `✅ Release manifest ready: ${manifest.files.length} artifacts (${path.relative(
+      appRoot,
+      manifestPath,
+    )})`,
+  );
+
+  // Automatic publishing restores the old one-command workflow, but uses the
+  // verified manifest and explicit static store instead of scanning public/.
   const publish = dependencies.publish || publishApp;
+  console.log('🔄 Starting verified release publisher...');
   await publish({appRoot, manifestPath, store, yes: true});
+  console.log('✅ Build and release workflow complete');
 };

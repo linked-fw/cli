@@ -287,12 +287,14 @@ program
     const hasViteConfig = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']
       .some((f) => fs.existsSync(path.join(process.cwd(), f)));
     if (hasViteConfig) {
+      // Vite apps use the manifest-verified build and static publishing flow.
       const {buildViteApp} = await import('./commands/build-app.js');
       return buildViteApp({
         environmentNames: options?.env ? options.env.split(',') : [],
         target: options?.target,
       });
     }
+    // Older apps without Vite keep the existing Webpack build temporarily.
     return buildApp();
   })
   .option('--env <env>', 'The node environment to use. Default is "development"')
@@ -308,6 +310,7 @@ program
   .option('--dry-run', 'Validate and print the release plan without uploading')
   .option('--yes', 'Upload the verified release')
   .action(async (options) => {
+    // Retry or inspect an existing release without rebuilding the app.
     const {ensureEnvironmentLoaded} = await import('./lifecycle.js');
     const {loadStaticArtifactStore} = await import('./commands/build-app.js');
     const {publishApp} = await import('./commands/publish-app.js');
@@ -327,6 +330,7 @@ program
   .command('serve-app')
   .option('--env <env>', 'The node environment to use')
   .action(async () => {
+    // Production runtime loads compiled output and never starts Vite/HMR.
     const {serveCompiledApp} = await import('./commands/serve-app.js');
     await serveCompiledApp();
   })
