@@ -2,7 +2,7 @@
 // linkedSetComponent for the list (auto-runs the query, injects results and
 // an injected _refresh); linkedComponent for each row (see PersonPreview).
 // After Person.create the form calls _refresh() to re-run the list query.
-// A React Native port of the web app-template's example (linked-cm/app-template).
+// A React Native port of the web app-template's example (linked-fw/app-template).
 //
 // `linkedSetComponent` checks LinkedStorage when this module loads, so storage is imported first.
 // Replace or extend this with your own shapes (see https://linked.cm).

@@ -3,7 +3,7 @@
 // result keys + `source` + `_refresh` into the render function. _refresh
 // patches local query state for optimistic UI; on delete, the parent
 // list re-runs via the PersonListRefresh context.
-// A React Native port of the web app-template's example (linked-cm/app-template).
+// A React Native port of the web app-template's example (linked-fw/app-template).
 // Storage is imported first, so the row's queries go to the API store however this module is reached.
 import '../shell/storage';
 
