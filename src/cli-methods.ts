@@ -189,20 +189,7 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
   if (fs.existsSync(gitignoreTemplate)) {
     fs.renameSync(gitignoreTemplate, path.join(targetFolder, '.gitignore'));
   }
-  const yarnrcTemplate = path.join(targetFolder, 'yarnrc.yml.template');
-  if (fs.existsSync(yarnrcTemplate)) {
-    fs.renameSync(yarnrcTemplate, path.join(targetFolder, '.yarnrc.yml'));
-  }
-
-  // Mark the new app as a self-contained Yarn project root. Without this,
-  // Yarn climbs ancestor dirs looking for the project root and may decide
-  // a stray yarn.lock further up the tree is "the project" — aborting
-  // install with "the nearest package directory doesn't seem to be part
-  // of the project declared in <ancestor>".
-  const yarnLockPath = path.join(targetFolder, 'yarn.lock');
-  if (!fs.existsSync(yarnLockPath)) {
-    fs.writeFileSync(yarnLockPath, '');
-  }
+  stripYarnProjectFiles(targetFolder);
 
   // Seed the real (gitignored) Layer 2 config from the committed example so
   // the scaffolded app boots first try. Users can edit either file later.
@@ -227,21 +214,14 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
   // relying on ${var} substitution.
   applyAppIdentity(targetFolder, {appName, appPrefix, hyphenName});
 
-  // Pick a package manager. When both are available and the user is running
-  // create-app interactively, ask. Carry the choice through both the install
-  // step AND the final "next command" message so the user can copy-paste.
-  const interactive = !(
-    options.appName ||
-    options.appPrefix ||
-    options.appDomain
-  );
-  const pm = await choosePackageManager(interactive);
+  // New apps are npm apps: npm is the package manager the templates, the CI
+  // workflows and the published @_linked/* packages are all tested against, and
+  // the react-native template already installs with npm. Keeping a single
+  // package manager also keeps the scaffolded app to a single lockfile.
+  const pm: PackageManager = CREATE_APP_PACKAGE_MANAGER;
 
   if (!options.skipInstall) {
-    const installCommand =
-      pm === 'yarn'
-        ? 'export NODE_OPTIONS="--no-network-family-autoselection" && yarn install'
-        : 'npm install';
+    const installCommand = installCommandFor(pm);
 
     const spinner = ora({
       text: `Installing dependencies (${pm})...`,
@@ -281,7 +261,7 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
     }
   }
 
-  const startCommand = pm === 'yarn' ? 'yarn start' : 'npm start';
+  const startCommand = startCommandFor(pm);
 
   log(
     `Your Linked app is ready at ${chalk.blueBright(targetFolder)}`,
@@ -516,13 +496,31 @@ function setEnvVar(envText: string, key: string, value: string): string {
  *  - `src/package.ts`: the runtime `linkedPackage` id — shape URIs derive from it.
  *  - pm2 process names + the VS Code launch name (cosmetic, but should match).
  */
+/**
+ * Scaffolded apps are npm apps, so the new app must not also look like a yarn
+ * project. Removes every yarn project file a template clone may still carry —
+ * including the legacy `yarnrc.yml.template` that create-app used to rename
+ * into `.yarnrc.yml`. (No empty `yarn.lock` is written any more either; that
+ * file only existed to pin down Yarn's project-root search.)
+ */
+export function stripYarnProjectFiles(targetFolder: string) {
+  for (const yarnLeftover of [
+    'yarnrc.yml.template',
+    '.yarnrc.yml',
+    '.yarn',
+    'yarn.lock',
+  ]) {
+    fs.removeSync(path.join(targetFolder, yarnLeftover));
+  }
+}
+
 function applyAppIdentity(
   targetFolder: string,
   ids: {appName: string; appPrefix: string; hyphenName: string},
 ) {
   const {appName, appPrefix, hyphenName} = ids;
 
-  // 1. .env.example (+ seed .env from it so the first `yarn start` is correct).
+  // 1. .env.example (+ seed .env from it so the first `npm start` is correct).
   const envExample = path.join(targetFolder, '.env.example');
   if (fs.existsSync(envExample)) {
     let env = fs.readFileSync(envExample, 'utf8');
@@ -1635,47 +1633,24 @@ const replaceVariablesInFilesWithRoot = function (
 ) {
   return replaceVariablesInFiles(...files.map((f) => path.join(root, f)));
 };
-type PackageManager = 'npm' | 'yarn';
+export type PackageManager = 'npm' | 'yarn';
 
-async function isAvailable(cmd: string): Promise<boolean> {
-  try {
-    const out = (await execPromise(`${cmd} --version`, false, false)) as string;
-    return /\d+/.test(String(out));
-  } catch {
-    return false;
-  }
+/**
+ * The package manager `create-app` scaffolds with. Both templates (web and
+ * react-native) install with npm, so a scaffolded app has exactly one lockfile.
+ */
+export const CREATE_APP_PACKAGE_MANAGER: PackageManager = 'npm';
+
+/** The shell command that installs a scaffolded app's dependencies. */
+export function installCommandFor(pm: PackageManager): string {
+  return pm === 'yarn'
+    ? 'export NODE_OPTIONS="--no-network-family-autoselection" && yarn install'
+    : 'npm install';
 }
 
-async function detectPackageManagers(): Promise<PackageManager[]> {
-  const found: PackageManager[] = [];
-  if (await isAvailable('npm')) found.push('npm');
-  if (await isAvailable('yarn')) found.push('yarn');
-  return found;
-}
-
-async function choosePackageManager(
-  interactive: boolean,
-): Promise<PackageManager> {
-  const available = await detectPackageManagers();
-  if (available.length === 0) {
-    throw new Error(
-      'Neither npm nor yarn is available on PATH. Install one and retry.',
-    );
-  }
-  if (available.length === 1) return available[0];
-  if (!interactive) {
-    // Match the historical default: prefer yarn when both are installed.
-    return available.includes('yarn') ? 'yarn' : 'npm';
-  }
-  const fallback: PackageManager = available.includes('yarn') ? 'yarn' : 'npm';
-  const answer = await promptUser(
-    `Package manager [${available.join('/')}] (default: ${chalk.gray(fallback)}): `,
-  );
-  const choice = answer.trim().toLowerCase();
-  if (choice === 'npm' || choice === 'yarn') {
-    if (available.includes(choice)) return choice;
-  }
-  return fallback;
+/** The command printed to the user for starting their new app. */
+export function startCommandFor(pm: PackageManager): string {
+  return pm === 'yarn' ? 'yarn start' : 'npm start';
 }
 
 const ensureFolderExists = function (...folders: string[]) {
