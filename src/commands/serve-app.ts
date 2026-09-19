@@ -5,6 +5,8 @@ import {ensureEnvironmentLoaded} from '../lifecycle.js';
 export interface ServeAppOptions {
   appRoot?: string;
   allowDevelopment?: boolean;
+  /** Profiles from `--env a,b`, passed on to the environment loader. */
+  environmentNames?: string[];
 }
 
 export interface ServeAppDependencies {
@@ -48,7 +50,8 @@ export const serveCompiledApp = async (
 ): Promise<unknown> => {
   const appRoot = options.appRoot || process.cwd();
   const loadEnvironment =
-    dependencies.loadEnvironment || ensureEnvironmentLoaded;
+    dependencies.loadEnvironment ||
+    (() => ensureEnvironmentLoaded(options.environmentNames));
   const startCompiledServer =
     dependencies.startCompiledServer ||
     (async () => {

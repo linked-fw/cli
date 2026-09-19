@@ -1,16 +1,15 @@
 import fs from 'fs';
 import path from 'path';
-import type {IArtifactStore} from '@_linked/core/interfaces/IArtifactStore';
+import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
+import {resolveAppAssetsStore} from '../app-release/app-assets-store.js';
 import {
   createReleaseManifest,
   writeReleaseManifest,
 } from '../app-release/create-release-manifest.js';
 import {resolveBuildTarget} from '../app-release/resolve-build-target.js';
-import {assertArtifactStore} from '../app-release/storage-adapter.js';
 import type {
   AppBuildTarget,
   AppPublishConfig,
-  LinkedAppReleaseDestination,
   LinkedAppReleaseManifest,
 } from '../app-release/types.js';
 import {publishApp} from './publish-app.js';
@@ -19,13 +18,18 @@ export interface BuildViteAppOptions {
   appRoot?: string;
   environmentNames?: string[];
   target?: AppBuildTarget;
+  /**
+   * Upload the release straight after building. Off by default: building
+   * produces a manifest, `linked publish-app` uploads it.
+   */
+  publish?: boolean;
 }
 
 export interface BuildViteAppDependencies {
   loadEnvironment?: () => Promise<void>;
   buildFrontend?: (appRoot: string) => Promise<void>;
   buildBackend?: () => Promise<boolean>;
-  loadStorageConfig?: () => Promise<Record<string, unknown> | undefined>;
+  resolveStore?: () => Promise<IFileStore>;
   loadPublishConfig?: (appRoot: string) => Promise<AppPublishConfig>;
   createManifest?: typeof createReleaseManifest;
   writeManifest?: (
@@ -35,12 +39,14 @@ export interface BuildViteAppDependencies {
   publish?: typeof publishApp;
 }
 
-const hasTruthyValue = (value: string | undefined): boolean =>
-  value !== undefined &&
-  !['', '0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
+const VITE_CONFIG_FILES = [
+  'vite.config.ts',
+  'vite.config.js',
+  'vite.config.mjs',
+];
 
 export const hasViteConfig = (appRoot = process.cwd()): boolean =>
-  ['vite.config.ts', 'vite.config.js', 'vite.config.mjs'].some((fileName) =>
+  VITE_CONFIG_FILES.some((fileName) =>
     fs.existsSync(path.join(appRoot, fileName)),
   );
 
@@ -58,52 +64,24 @@ const loadDefaultPublishConfig = async (
   return loaded.default?.publish || {};
 };
 
-export const loadStaticArtifactStore = async (
-  loadStorageConfig?: () => Promise<Record<string, unknown> | undefined>,
-): Promise<IArtifactStore> => {
-  const loader =
-    loadStorageConfig ||
-    (async () => {
-      const {loadBackendStorageConfig} = await import('../lifecycle.js');
-      return loadBackendStorageConfig();
-    });
-  const storageConfig = await loader();
-  // User uploads are normally the default file store. Releases must use the
-  // separate static store so a build cannot write into upload storage.
-  if (!storageConfig?.staticFileStore) {
-    throw new Error(
-      'The app storage config must export staticFileStore for release publishing. The default uploads store is not accepted.',
-    );
-  }
-  return assertArtifactStore(storageConfig.staticFileStore);
-};
-
-const describeReleaseDestination = (
-  store: IArtifactStore,
-): LinkedAppReleaseDestination => {
-  const destination = store.describeDestination();
-  return {
-    bucket: destination.bucket,
-    destinationPrefix: destination.prefix,
-    endpoint: destination.endpoint,
-    publicBaseUrl: destination.publicBaseUrl,
-  };
-};
-
 /**
- * Build a Vite web app and, for eligible non-development environments,
- * publish its verified release through the app's explicit static store.
+ * Build a Linked app with Vite and write a verified release manifest.
+ *
+ * Building never uploads on its own — pass `publish` (the `--publish` flag) to
+ * chain `publish-app` onto a successful web build. A Capacitor build ships its
+ * assets inside the native app, so it writes a local, non-publishable manifest
+ * and resolves no file store at all.
  */
 export const buildViteApp = async (
   options: BuildViteAppOptions = {},
   dependencies: BuildViteAppDependencies = {},
-): Promise<void> => {
+): Promise<LinkedAppReleaseManifest> => {
   const appRoot = options.appRoot || process.cwd();
   const loadEnvironment =
     dependencies.loadEnvironment ||
     (async () => {
       const {ensureEnvironmentLoaded} = await import('../lifecycle.js');
-      return ensureEnvironmentLoaded();
+      return ensureEnvironmentLoaded(options.environmentNames);
     });
   console.log('🔄 Loading build environment...');
   await loadEnvironment();
@@ -119,11 +97,6 @@ export const buildViteApp = async (
     target: options.target,
     appEnv: process.env.APP_ENV,
   });
-  if (target === 'capacitor') {
-    throw new Error(
-      'The Vite Capacitor build target is not ready yet. Keep using the existing mobile build command; no CDN files were published.',
-    );
-  }
 
   const buildFrontend =
     dependencies.buildFrontend ||
@@ -138,7 +111,7 @@ export const buildViteApp = async (
       return compileBackend();
     });
 
-  // The client and backend must both finish before release files are created
+  // The client and backend must both finish before release files are described
   // or any remote storage write is allowed.
   console.log('🔄 Building Vite client bundle...');
   await buildFrontend(appRoot);
@@ -151,22 +124,19 @@ export const buildViteApp = async (
   }
   console.log('✅ Application backend build complete');
 
-  if (
-    process.env.NODE_ENV === 'development' ||
-    hasTruthyValue(process.env.APP_ENV)
-  ) {
+  // A publishable build has to know where it will be published before the
+  // manifest is written, because the manifest records that destination.
+  let store: IFileStore | undefined;
+  if (target === 'web') {
+    console.log('🔄 Resolving the appAssets file store...');
+    const resolveStore = dependencies.resolveStore || resolveAppAssetsStore;
+    store = await resolveStore();
+    console.log(`✅ Publishing destination: ${store.accessURL}`);
+  } else {
     console.log(
-      'Skipping release publishing for development or APP_ENV build.',
+      'Capacitor build: writing a local manifest. These assets ship inside the native app and are never uploaded.',
     );
-    return;
   }
-
-  console.log('🔄 Loading and validating static release storage...');
-  const store = await loadStaticArtifactStore(dependencies.loadStorageConfig);
-  const destination = describeReleaseDestination(store);
-  console.log(
-    `✅ Static release storage ready: ${destination.bucket}/${destination.destinationPrefix}`,
-  );
 
   const loadPublishConfig =
     dependencies.loadPublishConfig || loadDefaultPublishConfig;
@@ -181,22 +151,27 @@ export const buildViteApp = async (
     appRoot,
     environmentNames: options.environmentNames || [],
     target,
-    destination,
+    accessURL: store ? store.accessURL : null,
     staticAssets: publishConfig.staticAssets,
+    releasePrefix: publishConfig.releasePrefix,
   });
   const manifestPath = writeManifest(appRoot, manifest);
   const relativeManifestPath = path.relative(appRoot, manifestPath);
   console.log(
-    `✅ Release manifest ready: ${manifest.files.length} artifacts (${path.relative(
-      appRoot,
-      manifestPath,
-    )})`,
+    `✅ Release manifest ready: ${manifest.files.length} artifacts under ${manifest.destination.releasePrefix} (${relativeManifestPath})`,
   );
 
-  // Automatic publishing restores the old one-command workflow, but uses the
-  // verified manifest and explicit static store instead of scanning public/.
+  if (!options.publish || !store) {
+    if (options.publish && !store) {
+      console.log('Nothing to publish for a Capacitor build.');
+    } else if (manifest.publishable) {
+      console.log('Run `linked publish-app --yes` to upload this release.');
+    }
+    return manifest;
+  }
+
   const publish = dependencies.publish || publishApp;
-  console.log('🔄 Starting verified release publisher...');
+  console.log('🔄 Publishing the release...');
   await publish({
     appRoot,
     manifestPath: relativeManifestPath,
@@ -204,4 +179,5 @@ export const buildViteApp = async (
     yes: true,
   });
   console.log('✅ Build and release workflow complete');
+  return manifest;
 };

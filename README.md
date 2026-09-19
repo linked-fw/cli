@@ -34,8 +34,8 @@ linked create-component <name>    # add a React component file
 ```bash
 linked build                      # build the current package (tsc + checks)
 linked build-app                  # build frontend + backend for the current app
-linked build-app --target web     # web release: build, write linked-release.json, auto-publish when eligible
-linked build-app --target capacitor  # Capacitor/local native build (never CDN-publishes)
+linked build-app --target web     # web release: build and write public/bundles/linked-release.json
+linked build-app --target capacitor  # Capacitor/local native build: local manifest only, never published
 linked build-workspace            # build all linked packages in the workspace in dependency order
 linked build-updated              # incremental: only packages that changed since last build
 linked build-package <file>       # walk up from a file path to find its package and rebuild
@@ -48,13 +48,53 @@ exits 0.
 ### App release / production runtime
 
 ```bash
+linked build-app                  # build and write the release manifest (never uploads)
+linked build-app --publish        # ...and upload it in the same run
 linked publish-app                # dry-run the release manifest upload (pass --yes to write)
+linked publish-app --yes          # upload the release described by the manifest
 linked serve-app                  # run the compiled backend without Vite/HMR (production runtime)
 ```
 
-Web publishing uploads only files listed in `public/bundles/linked-release.json` through the app's
-configured static `IArtifactStore`. It does not recursively upload `public/`. Use `linked start` for
-development; use `linked serve-app` after `linked build-app` for staging/production.
+**Building is not publishing.** `build-app` compiles the app and writes
+`public/bundles/linked-release.json`, a manifest listing every file of the release with its sha256,
+size, content type and cache policy. `publish-app` uploads exactly the files in that manifest —
+nothing else in `public/` is touched. Pass `--publish` to `build-app` only when you want the two
+chained in one command.
+
+**Where it publishes.** Uploads go to the store returned by
+`LinkedFileStorage.getStore(FileStorePurposes.appAssets)`. Configure a dedicated bundle store with
+`LinkedFileStorage.setStore(FileStorePurposes.appAssets, store)`; an app that configures only
+`setDefaultStore(store)` publishes to that store through the purpose fallback, which needs no extra
+configuration.
+
+**Every release gets its own prefix.** Object keys are
+`releases/<appVersion>-<gitRevision>/<path>`, so publishing a new release cannot overwrite the
+previous one and a rollback means pointing at an older prefix. Set `publish.releasePrefix` in
+`linked.config.js` to change the `releases` base.
+
+**Verification.** Files are re-hashed from disk and compared against the manifest immediately before
+upload, so a build that changed since the manifest was written is refused. After upload the store is
+asked for `statFile`; that method is optional and may report no `sha256`, in which case the remote
+check is skipped with a single warning rather than a failure. An `etag` is never used as a content
+hash. The manifest also records the store's `accessURL`, and publishing refuses to run against a
+store that now writes somewhere else.
+
+**The store must keep keys verbatim.** A release object has to be stored under exactly the key it
+was given, or the URLs baked into the bundle point at nothing, so publishing passes
+`preventDuplicates: false` and fails with a clear message if the store reports a different location.
+`@_linked/server`'s `LocalFileStore` lowercases the keys it is handed, so an app publishing to it
+needs lowercase asset filenames (`rollupOptions.output.hashCharacters: 'hex'` in `vite.config`).
+
+**Cache policy.** A filename carrying a content hash gets
+`public, max-age=31536000, immutable`; everything else, including `index.html` and the release
+manifest, gets `public, max-age=60, must-revalidate`.
+
+**Capacitor.** `--target capacitor` (or `APP_ENV`) writes a local, non-publishable manifest for
+inspection. Its assets ship inside the native app, so no file store is resolved and nothing is
+uploaded, even with `--publish`.
+
+Use `linked start` for development; use `linked serve-app` after `linked build-app` for
+staging/production.
 
 ### Publishing / release
 

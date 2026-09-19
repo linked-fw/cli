@@ -41,6 +41,13 @@ import fs from 'fs-extra';
 import path from 'path';
 import 'require-extensions';
 
+/** `--env a,b` → `['a', 'b']`. */
+const splitEnvOption = (value?: string): string[] =>
+  (value || '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+
 program
   .command('create-app')
   .action((name, options) => {
@@ -282,25 +289,29 @@ program
     // If vite.config.{ts,js,mjs} exists in cwd,
     // run `vite build` for the client bundle. Falls back to webpack
     // buildApp() when no Vite config (legacy apps).
-    const fs = await import('fs');
-    const path = await import('path');
-    const hasViteConfig = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']
-      .some((f) => fs.existsSync(path.join(process.cwd(), f)));
-    if (hasViteConfig) {
-      // Vite apps use the manifest-verified build and static publishing flow.
-      const {buildViteApp} = await import('./commands/build-app.js');
-      return buildViteApp({
-        environmentNames: options?.env ? options.env.split(',') : [],
+    const {hasViteConfig, buildViteApp} = await import(
+      './commands/build-app.js'
+    );
+    if (hasViteConfig()) {
+      // Vite apps use the manifest-verified build and publishing flow.
+      await buildViteApp({
+        environmentNames: splitEnvOption(options?.env),
         target: options?.target,
+        publish: options?.publish === true,
       });
+      return;
     }
     // Older apps without Vite keep the existing Webpack build temporarily.
     return buildApp();
   })
   .option('--env <env>', 'The node environment to use. Default is "development"')
   .option('--target <target>', 'Build target: web or capacitor')
+  .option(
+    '--publish',
+    'Upload the release after a successful web build (off by default; use `linked publish-app`)',
+  )
   .description(
-    'Build the linked app frontend and backend for production. Uses Vite for the frontend when vite.config exists; falls back to webpack.',
+    'Build the linked app frontend and backend for production, and write a release manifest. Uses Vite for the frontend when vite.config exists; falls back to webpack.',
   );
 
 program
@@ -312,10 +323,12 @@ program
   .action(async (options) => {
     // Retry or inspect an existing release without rebuilding the app.
     const {ensureEnvironmentLoaded} = await import('./lifecycle.js');
-    const {loadStaticArtifactStore} = await import('./commands/build-app.js');
+    const {resolveAppAssetsStore} = await import(
+      './app-release/app-assets-store.js'
+    );
     const {publishApp} = await import('./commands/publish-app.js');
-    await ensureEnvironmentLoaded();
-    const store = await loadStaticArtifactStore();
+    await ensureEnvironmentLoaded(splitEnvOption(options?.env));
+    const store = await resolveAppAssetsStore();
     await publishApp({
       manifestPath: options?.manifest,
       store,
@@ -329,10 +342,10 @@ program
 program
   .command('serve-app')
   .option('--env <env>', 'The node environment to use')
-  .action(async () => {
+  .action(async (options) => {
     // Production runtime loads compiled output and never starts Vite/HMR.
     const {serveCompiledApp} = await import('./commands/serve-app.js');
-    await serveCompiledApp();
+    await serveCompiledApp({environmentNames: splitEnvOption(options?.env)});
   })
   .description('Start a compiled Linked app without Vite or HMR.');
 

@@ -1,5 +1,4 @@
-import type {IArtifactStore} from '@_linked/core/interfaces/IArtifactStore';
-import {assertArtifactStore} from '../app-release/storage-adapter.js';
+import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
 import {planReleasePublish, publishRelease} from '../app-release/publisher.js';
 
 interface ProgressSpinner {
@@ -11,7 +10,7 @@ interface ProgressSpinner {
 export interface PublishAppOptions {
   appRoot?: string;
   manifestPath?: string;
-  store: IArtifactStore;
+  store: IFileStore;
   yes?: boolean;
 }
 
@@ -42,20 +41,22 @@ export const redactPublishError = (error: unknown): Error => {
 
 export const publishApp = async (options: PublishAppOptions) => {
   const appRoot = options.appRoot || process.cwd();
-  const store = assertArtifactStore(options.store);
   let progressSpinner: ProgressSpinner | undefined;
   try {
     // This command reuses a completed build. It validates the manifest and
-    // destination before dry-run output or any confirmed retry upload.
+    // destination before dry-run output or any confirmed upload.
     console.log('🔄 Validating release manifest and destination...');
     const plan = planReleasePublish({
       appRoot,
       manifestPath: options.manifestPath,
-      store,
+      store: options.store,
     });
 
+    console.log(`Release: ${plan.releaseId}`);
     console.log(
-      `Release destination: ${plan.destination.bucket}/${plan.destination.destinationPrefix}`,
+      `Destination: ${plan.destination.accessURL || '(no accessURL)'} under ${
+        plan.destination.releasePrefix
+      }/`,
     );
     console.log(`Artifacts: ${plan.files.length} (${plan.totalBytes} bytes)`);
     if (!options.yes) {
@@ -78,17 +79,22 @@ export const publishApp = async (options: PublishAppOptions) => {
     }
     let lastLoggedProgress = 0;
     const result = await publishRelease({
-      ...options,
       appRoot,
-      store,
+      manifestPath: options.manifestPath,
+      store: options.store,
+      yes: options.yes,
+      onWarning: (message) => {
+        // Printed once per run, not once per file.
+        if (progressSpinner) {
+          progressSpinner.text = message;
+        }
+        console.warn(`⚠️  ${message}`);
+      },
       onProgress: ({completed, total}) => {
         const message = `Publishing ${completed}/${total} files`;
         if (progressSpinner) {
           progressSpinner.text = message;
-        } else if (
-          completed === total ||
-          completed - lastLoggedProgress >= 25
-        ) {
+        } else if (completed === total || completed - lastLoggedProgress >= 25) {
           console.log(message);
           lastLoggedProgress = completed;
         }
@@ -97,10 +103,15 @@ export const publishApp = async (options: PublishAppOptions) => {
     if (result.dryRun) {
       console.log('✅ Dry run complete; no files uploaded');
     } else {
-      const completedMessage = `Release upload complete: ${result.uploadedFiles} files, ${result.uploadedBytes} bytes`;
+      const completedMessage = `Release ${result.releaseId} uploaded: ${result.uploadedFiles} files, ${result.uploadedBytes} bytes`;
       progressSpinner?.succeed(completedMessage);
       if (!progressSpinner) console.log(`✅ ${completedMessage}`);
       progressSpinner = undefined;
+      if (result.unverified.length) {
+        console.warn(
+          `⚠️  ${result.unverified.length} of ${result.uploadedFiles} objects could not be verified against a store hash.`,
+        );
+      }
     }
     return result;
   } catch (error) {

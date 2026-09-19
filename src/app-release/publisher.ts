@@ -1,7 +1,13 @@
 import crypto from 'crypto';
 import fs from 'fs';
-import path from 'path';
-import type {IArtifactStore} from '@_linked/core/interfaces/IArtifactStore';
+import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
+import {normalizeAccessURL} from './app-assets-store.js';
+import {
+  MANIFEST_CONTENT_TYPE,
+  MANIFEST_SOURCE_PATH,
+  ENTRY_CACHE_CONTROL,
+  releaseObjectKey,
+} from './create-release-manifest.js';
 import {normalizeReleasePath, resolveExistingPathWithinRoot} from './paths.js';
 import type {
   LinkedAppReleaseFile,
@@ -13,12 +19,13 @@ import type {
 export interface PlanReleasePublishOptions {
   appRoot: string;
   manifestPath?: string;
-  store: IArtifactStore;
+  store: IFileStore;
 }
 
 export interface PublishReleaseOptions extends PlanReleasePublishOptions {
   yes?: boolean;
   onProgress?: (progress: PublishProgress) => void;
+  onWarning?: (message: string) => void;
 }
 
 export interface PublishProgress {
@@ -27,11 +34,9 @@ export interface PublishProgress {
   objectKey: string;
 }
 
-const DEFAULT_MANIFEST_PATH = 'public/bundles/linked-release.json';
-
 const readManifest = (
   appRoot: string,
-  manifestPath = DEFAULT_MANIFEST_PATH,
+  manifestPath = MANIFEST_SOURCE_PATH,
 ): {absolutePath: string; manifest: LinkedAppReleaseManifest} => {
   const absolutePath = resolveExistingPathWithinRoot(appRoot, manifestPath);
   const manifest = JSON.parse(
@@ -49,45 +54,48 @@ const readManifest = (
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
     throw new Error('Release manifest contains no files');
   }
+  if (!manifest.destination?.releasePrefix) {
+    throw new Error('Release manifest has no release prefix');
+  }
 
   return {absolutePath, manifest};
 };
 
-const sameOptionalValue = (a?: string, b?: string): boolean =>
-  (a || '').replace(/\/+$/, '') === (b || '').replace(/\/+$/, '');
-
+/**
+ * The manifest records the `accessURL` of the store it was built for. If the
+ * configured store now writes somewhere else, the release is not the one that
+ * was built and publishing stops. Trailing slashes are not significant.
+ */
 const validateDestination = (
   manifest: LinkedAppReleaseManifest,
-  store: IArtifactStore,
+  store: IFileStore,
 ) => {
-  const actual = store.describeDestination();
-  if (
-    actual.bucket !== manifest.destination.bucket ||
-    actual.prefix !== manifest.destination.destinationPrefix ||
-    !sameOptionalValue(actual.endpoint, manifest.destination.endpoint) ||
-    !sameOptionalValue(actual.publicBaseUrl, manifest.destination.publicBaseUrl)
-  ) {
+  const expected = normalizeAccessURL(manifest.destination.accessURL);
+  const actual = normalizeAccessURL(store.accessURL);
+  if (expected !== actual) {
     throw new Error(
-      `Static destination does not match release manifest (expected bucket ${manifest.destination.bucket}, prefix ${manifest.destination.destinationPrefix})`,
+      `Release destination does not match the manifest (manifest was built for ${
+        expected || '(empty)'
+      }, the configured appAssets store writes to ${actual || '(empty)'})`,
     );
   }
-  return actual;
 };
 
-const hashFile = (absolutePath: string): string =>
-  crypto
-    .createHash('sha256')
-    .update(fs.readFileSync(absolutePath))
-    .digest('hex');
+const hashBuffer = (content: Buffer): string =>
+  crypto.createHash('sha256').update(content).digest('hex');
 
+/**
+ * Re-hash the file on disk before uploading. This needs no support from the
+ * store and is what actually guarantees the bytes match the manifest.
+ */
 const validateLocalFile = (
   appRoot: string,
   file: LinkedAppReleaseFile,
 ): string => {
   normalizeReleasePath(file.objectKey, 'object key');
   const absolutePath = resolveExistingPathWithinRoot(appRoot, file.sourcePath);
-  const stat = fs.statSync(absolutePath);
-  if (stat.size !== file.size || hashFile(absolutePath) !== file.sha256) {
+  const content = fs.readFileSync(absolutePath);
+  if (content.byteLength !== file.size || hashBuffer(content) !== file.sha256) {
     throw new Error(`Release artifact changed after build: ${file.sourcePath}`);
   }
   return absolutePath;
@@ -107,37 +115,113 @@ export const planReleasePublish = (
   }
 
   return {
+    releaseId: manifest.releaseId,
     manifestPath: absolutePath,
+    manifestObjectKey: releaseObjectKey(
+      manifest.destination.releasePrefix,
+      MANIFEST_SOURCE_PATH,
+    ),
     destination: manifest.destination,
     files: manifest.files,
     totalBytes: manifest.files.reduce((total, file) => total + file.size, 0),
   };
 };
 
-const verifyArtifact = async (
-  store: IArtifactStore,
-  file: LinkedAppReleaseFile,
-) => {
-  const metadata = await store.statArtifact(file.objectKey);
-  if (metadata.size !== file.size || metadata.sha256 !== file.sha256) {
-    throw new Error(`Uploaded artifact verification failed: ${file.objectKey}`);
+/**
+ * Verify one uploaded object against the hash in the manifest.
+ *
+ * `statFile` is optional on `IFileStore`, and a store that has it may still
+ * report no `sha256` (S3 only returns one when the object carries a checksum).
+ * Neither case is a failure: verification is skipped, the key is reported back
+ * as unverified, and the caller warns once. An `etag` is deliberately not used
+ * as a substitute — it is not a content hash.
+ */
+const verifyUpload = async (
+  store: IFileStore,
+  objectKey: string,
+  expected: {size: number; sha256: string},
+): Promise<'verified' | 'unsupported' | 'no-hash'> => {
+  if (typeof store.statFile !== 'function') return 'unsupported';
+
+  const stat = await store.statFile(objectKey);
+  if (!stat) {
+    throw new Error(`Uploaded artifact is missing from the store: ${objectKey}`);
   }
+  if (stat.size !== expected.size) {
+    throw new Error(
+      `Uploaded artifact size does not match the manifest: ${objectKey}`,
+    );
+  }
+  if (!stat.sha256) return 'no-hash';
+  if (stat.sha256 !== expected.sha256) {
+    throw new Error(`Uploaded artifact verification failed: ${objectKey}`);
+  }
+  return 'verified';
 };
 
 export const publishRelease = async (
   options: PublishReleaseOptions,
 ): Promise<PublishResult> => {
-  const {manifest} = readManifest(options.appRoot, options.manifestPath);
   const plan = planReleasePublish(options);
 
   if (!options.yes) {
     return {
-      releaseId: manifest.releaseId,
+      releaseId: plan.releaseId,
       uploadedFiles: 0,
       uploadedBytes: 0,
       dryRun: true,
+      unverified: [],
     };
   }
+
+  const unverified: string[] = [];
+  let warnedAboutVerification = false;
+  const noteUnverified = (objectKey: string, reason: string) => {
+    unverified.push(objectKey);
+    if (warnedAboutVerification) return;
+    warnedAboutVerification = true;
+    options.onWarning?.(
+      `Cannot verify uploads against a store hash (${reason}). Files are still ` +
+        'checked against the manifest before upload; the remote copy is not re-checked.',
+    );
+  };
+
+  const upload = async (
+    objectKey: string,
+    content: Buffer,
+    contentType: string,
+    cacheControl: string,
+    sha256: string,
+  ) => {
+    // `preventDuplicates: false` is explicit: a release key must be exactly the
+    // key in the manifest. `LocalFileStore` otherwise appends a random suffix,
+    // which would both break the URL and make verification meaningless.
+    const storedURL = await options.store.saveFile(objectKey, content, {
+      mimeType: contentType,
+      cacheControl,
+      preventDuplicates: false,
+    });
+    // A release key has to survive the round trip verbatim, or the published
+    // URLs in the bundle point at nothing. Some stores sanitise or suffix the
+    // path they are given; say so plainly instead of failing later with a
+    // confusing "missing from the store".
+    if (typeof storedURL === 'string' && !storedURL.endsWith(objectKey)) {
+      throw new Error(
+        `The file store did not store the release object under its own key. ` +
+          `Expected a location ending in "${objectKey}", got "${storedURL}". ` +
+          'A release store must keep object keys verbatim.',
+      );
+    }
+    const outcome = await verifyUpload(options.store, objectKey, {
+      size: content.byteLength,
+      sha256,
+    });
+    if (outcome === 'unsupported') {
+      noteUnverified(objectKey, 'this store does not implement statFile');
+    } else if (outcome === 'no-hash') {
+      noteUnverified(objectKey, 'the store reports no sha256 for stored objects');
+    }
+  };
 
   const totalUploads = plan.files.length + 1;
   let completedUploads = 0;
@@ -146,14 +230,13 @@ export const publishRelease = async (
       options.appRoot,
       file.sourcePath,
     );
-    await options.store.putArtifact({
-      key: file.objectKey,
-      body: fs.readFileSync(absolutePath),
-      contentType: file.contentType,
-      cacheControl: file.cacheControl,
-      sha256: file.sha256,
-    });
-    await verifyArtifact(options.store, file);
+    await upload(
+      file.objectKey,
+      fs.readFileSync(absolutePath),
+      file.contentType,
+      file.cacheControl,
+      file.sha256,
+    );
     completedUploads += 1;
     options.onProgress?.({
       completed: completedUploads,
@@ -162,37 +245,28 @@ export const publishRelease = async (
     });
   }
 
+  // The manifest goes last: its presence under the release prefix is what marks
+  // the release as complete.
   const manifestBody = fs.readFileSync(plan.manifestPath);
-  const manifestKey = DEFAULT_MANIFEST_PATH;
-  const manifestHash = crypto
-    .createHash('sha256')
-    .update(manifestBody)
-    .digest('hex');
-  await options.store.putArtifact({
-    key: manifestKey,
-    body: manifestBody,
-    contentType: 'application/json; charset=utf-8',
-    cacheControl: 'no-cache',
-    sha256: manifestHash,
-  });
-  const manifestMetadata = await options.store.statArtifact(manifestKey);
-  if (
-    manifestMetadata.size !== manifestBody.byteLength ||
-    manifestMetadata.sha256 !== manifestHash
-  ) {
-    throw new Error('Uploaded release manifest verification failed');
-  }
+  await upload(
+    plan.manifestObjectKey,
+    manifestBody,
+    MANIFEST_CONTENT_TYPE,
+    ENTRY_CACHE_CONTROL,
+    hashBuffer(manifestBody),
+  );
   completedUploads += 1;
   options.onProgress?.({
     completed: completedUploads,
     total: totalUploads,
-    objectKey: manifestKey,
+    objectKey: plan.manifestObjectKey,
   });
 
   return {
-    releaseId: manifest.releaseId,
-    uploadedFiles: plan.files.length + 1,
+    releaseId: plan.releaseId,
+    uploadedFiles: totalUploads,
     uploadedBytes: plan.totalBytes + manifestBody.byteLength,
     dryRun: false,
+    unverified,
   };
 };

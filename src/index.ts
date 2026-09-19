@@ -22,13 +22,24 @@ export {safeYarn} from './commands/safe-yarn';
 export {setupPublish} from './commands/setup-publish';
 export {resolveBuildTarget} from './app-release/resolve-build-target';
 export {
+  buildReleasePrefix,
   createReleaseManifest,
+  getCacheControl,
+  releaseObjectKey,
   serializeReleaseManifest,
   writeReleaseManifest,
+  DEFAULT_RELEASE_PREFIX,
+  ENTRY_CACHE_CONTROL,
+  IMMUTABLE_CACHE_CONTROL,
+  MANIFEST_SOURCE_PATH,
 } from './app-release/create-release-manifest';
 export {resolveDeclaredStaticAssets} from './app-release/static-assets';
 export {planReleasePublish, publishRelease} from './app-release/publisher';
-export {assertArtifactStore} from './app-release/storage-adapter';
+export {
+  normalizeAccessURL,
+  resolveAppAssetsStore,
+} from './app-release/app-assets-store';
+export {buildViteApp, hasViteConfig} from './commands/build-app';
 export {publishApp} from './commands/publish-app';
 export {
   serveCompiledApp,

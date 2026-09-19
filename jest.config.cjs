@@ -13,8 +13,12 @@ module.exports = {
   rootDir: '.',
   roots: ['<rootDir>/tests/unit'],
   testMatch: ['**/*.test.{ts,js}'],
+  // `@_linked/core` is ESM-only (its export map has no `require` condition) and
+  // ships untranspiled ESM, so it is both mapped to its real file path and run
+  // through babel like the rest of the sources.
+  transformIgnorePatterns: ['/node_modules/(?!@_linked/)'],
   transform: {
-    '^.+\\.tsx?$': [
+    '^.+\\.(t|j)sx?$': [
       'babel-jest',
       {
         configFile: false,
@@ -30,6 +34,8 @@ module.exports = {
   },
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^@_linked/core/(.*)$': '<rootDir>/node_modules/@_linked/core/lib/esm/$1.js',
+    '^@_linked/core$': '<rootDir>/node_modules/@_linked/core/lib/esm/index.js',
   },
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
 };

@@ -392,14 +392,7 @@ export function ssrNoExternal(
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
   return defineConfig(async ({mode}) => {
     const isDev = mode === 'development';
-    // Discover source workspaces in every mode. The source resolver below remains
-    // development-only, but production still needs the package names for Vite's
-    // dedupe list. Otherwise a compiled workspace package can resolve one of its
-    // dependencies from a stale nested node_modules copy instead of the canonical
-    // package installed at the app root (for example profile-plus loading an older
-    // @_linked/auth without the current subpath exports).
-    const discoveredWorkspaces = await discoverWorkspaces(opts.workspaceGlobs);
-    const workspaces = isDev ? discoveredWorkspaces : [];
+    const workspaces = isDev ? await discoverWorkspaces(opts.workspaceGlobs) : [];
     // STANDALONE = dev mode with no source-shipping workspaces discovered
     // (an app installed from npm outside the monorepo — its `@_linked/*` /
     // `lincd-*` deps are lib-only). discoverWorkspaces() only registers
@@ -599,12 +592,6 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         },
         jsx: 'automatic',
       },
-      resolve: {
-        // Keep one package instance across both source-workspace development and
-        // production builds from compiled lib/esm output. Besides singleton safety,
-        // this prevents nested legacy installs from shadowing current export maps.
-        dedupe: discoveredWorkspaces.map((workspace) => workspace.name),
-      },
       // STANDALONE resolve conditions.
       //
       // The published `@_linked/*` / `lincd-*` packages export
@@ -635,11 +622,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
               // (LinkedServer + the app graph) resolve to ONE `server-utils`/`react`
               // instance — otherwise their `AppContext` objects differ and
               // `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
-              dedupe: [
-                ...discoveredWorkspaces.map((workspace) => workspace.name),
-                '@_linked/server-utils',
-                '@_linked/react',
-              ],
+              dedupe: ['@_linked/server-utils', '@_linked/react'],
             },
           }
         : {}),

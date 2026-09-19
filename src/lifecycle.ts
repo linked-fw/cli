@@ -28,7 +28,9 @@ import type {PackageDetails} from './interfaces.js';
  * injected into the child process at spawn time, so there's nothing to read
  * from disk.
  */
-export const ensureEnvironmentLoaded = async (): Promise<void> => {
+export const ensureEnvironmentLoaded = async (
+  environmentNames?: string[],
+): Promise<void> => {
   if (process.env.ENV_VARS_LOADED) return;
   const cwd = process.cwd();
   const envCmdrcPath = path.join(cwd, '.env-cmdrc.json');
@@ -39,7 +41,7 @@ export const ensureEnvironmentLoaded = async (): Promise<void> => {
   const shellEnv = {...process.env};
 
   if (fs.existsSync(envCmdrcPath)) {
-    await loadEnvCmdrc(envCmdrcPath);
+    await loadEnvCmdrc(envCmdrcPath, environmentNames);
   } else if (fs.existsSync(dotEnvPath)) {
     // Native flat-file loader (Node 20.12+). Populates process.env from `.env`.
     process.loadEnvFile(dotEnvPath);
@@ -59,7 +61,10 @@ export const ensureEnvironmentLoaded = async (): Promise<void> => {
  * named by `--env a,b` (default `development`). Kept for CN and existing apps
  * until they migrate to a flat `.env`.
  */
-const loadEnvCmdrc = async (envCmdrcPath: string): Promise<void> => {
+const loadEnvCmdrc = async (
+  envCmdrcPath: string,
+  environmentNames?: string[],
+): Promise<void> => {
   // env-cmd ships ESM; literal specifier is fine for Vite's analyzer.
   const {GetEnvVars} = await import('env-cmd');
   const vars = await GetEnvVars({envFile: {filePath: envCmdrcPath}});
@@ -68,11 +73,13 @@ const loadEnvCmdrc = async (envCmdrcPath: string): Promise<void> => {
   if (environments.includes('_main')) {
     process.env = {...process.env, ...vars._main};
   }
-  const args = process.argv.splice(2);
-  if (args.includes('--env')) {
-    const envIndex = args.indexOf('--env');
-    const envArg = args[envIndex + 1];
-    envArg.split(',').forEach((name) => {
+  // Callers that parsed `--env` themselves pass the names in. Commands that
+  // have not been converted yet still have their names scraped off argv.
+  const requested = environmentNames?.length
+    ? environmentNames
+    : readEnvNamesFromArgv();
+  if (requested.length) {
+    requested.forEach((name) => {
       if (environments.includes(name)) {
         console.log('Environment: ' + name);
         process.env = {...process.env, ...vars[name]};
@@ -86,6 +93,13 @@ const loadEnvCmdrc = async (envCmdrcPath: string): Promise<void> => {
     process.env = {...process.env, ...vars.development};
     console.log('No environment specified, using development');
   }
+};
+
+const readEnvNamesFromArgv = (): string[] => {
+  const args = process.argv.slice(2);
+  const envIndex = args.indexOf('--env');
+  if (envIndex === -1) return [];
+  return (args[envIndex + 1] || '').split(',').filter(Boolean);
 };
 
 /**
