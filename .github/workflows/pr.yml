@@ -15,4 +15,7 @@ jobs:
       pull-requests: write
     with:
       require-tests: true
+      # `test` chains test:unit && test:e2e; the e2e half starts containers and times out in
+      # CI, which is why the previous workflow ran it only when RUN_E2E was set.
+      test-script: test:unit
       run-e2e: false
