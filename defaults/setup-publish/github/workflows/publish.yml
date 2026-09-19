@@ -1,3 +1,9 @@
+# Calls the shared workflow in linked-fw/.github. That repo is public, so community repos in
+# linked-cm call the same workflow — only the npm secret differs.
+#
+# This FILENAME is what npm's trusted-publisher check validates — not the shared workflow's.
+# Renaming this file invalidates this package's trusted publisher, and the only symptom is
+# that releases quietly start needing manual approval again.
 name: Publish
 
 on:
@@ -9,76 +15,17 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
-    name: Publish Release
-    runs-on: ubuntu-latest
+    uses: linked-fw/.github/.github/workflows/publish.yml@v1
     permissions:
       contents: write
       pull-requests: write
-    steps:
-      # Author the changesets "Version Packages" PR as the org release App (not the default
-      # GITHUB_TOKEN) so its CI runs without a manual "Approve and run" gate. Requires the org
-      # App installed on this repo + org secrets RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY.
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.16.0
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-
-      - name: Build
-        run: npm run build
-
-      - name: Create release Pull Request or Publish
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          publish: npx changeset publish
-          title: 'chore: release'
-          commit: 'chore: release'
-        # npm auth uses the npm token below. Do NOT switch to OIDC trusted publishing
-        # (id-token: write + publishConfig.provenance) unless you FIRST register this package's
-        # trusted publisher on npmjs.com — otherwise publishes fail with 404 / permission errors.
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          NODE_AUTH_TOKEN: ${{ secrets.{{NPM_SECRET_NAME}} }}
-          NPM_TOKEN: ${{ secrets.{{NPM_SECRET_NAME}} }}
-
-      # When changesets opened/updated the version PR (rather than publishing), merge it so the
-      # release ships without a manual click. The App token is used so the merge's push to `main`
-      # re-triggers this workflow, which — now that no changesets remain — runs `changeset publish`.
-      #
-      # NB: DIRECT-merge (not `--auto`). If `main` requires a review, GitHub's auto-merge queue does
-      # NOT honor branch-protection review-bypass allowances and would wait forever on
-      # REVIEW_REQUIRED; a required *status check* is not bypassable either. This repo's `main` is
-      # check-only (no required review), so a direct merge succeeds once the required check is
-      # green — we retry until then.
-      - name: Merge the version PR to publish
-        if: steps.changesets.outputs.hasChangesets == 'true' && steps.changesets.outputs.published != 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          pr=$(gh pr list --base main --head changeset-release/main --state open --json number --jq '.[0].number // empty')
-          if [ -z "$pr" ]; then echo "No open version PR (nothing to merge)."; exit 0; fi
-          for i in $(seq 1 40); do
-            if gh pr merge "$pr" --merge 2>/tmp/merge_err; then
-              echo "Merged version PR #$pr on attempt $i — publish will run on the resulting push to main."
-              exit 0
-            fi
-            echo "Attempt $i/40: version PR #$pr not mergeable yet ($(tr -d '\n' < /tmp/merge_err)); waiting for the required check…"
-            sleep 15
-          done
-          echo "::warning::Version PR #$pr not merged after retries — merge it manually to publish."
+      # Needed HERE as well as in the shared workflow: a reusable workflow cannot widen the
+      # permissions its caller was granted, and without this npm never gets an id-token and
+      # every release silently falls back to the staged approval queue.
+      id-token: write
+    # Named rather than `inherit`: `inherit` forwards everything this repo can see, which is
+    # how a community repo would end up forwarding a first-party token.
+    secrets:
+      NPM_TOKEN: ${{ secrets.{{NPM_SECRET_NAME}} }}
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

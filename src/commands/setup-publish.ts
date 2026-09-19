@@ -14,18 +14,60 @@ const dirname__ =
 // levels to reach the package root, then into defaults/setup-publish.
 const TEMPLATE_ROOT = path.resolve(dirname__, '..', '..', '..', 'defaults', 'setup-publish');
 
+// Both are callers of the shared reusable workflows. `publish.yml` in particular cannot be
+// renamed: npm's trusted-publisher check validates the calling workflow's filename, and a
+// mismatch only shows up as releases quietly needing manual approval again.
+export const WORKFLOW_FILES = ['pr.yml', 'publish.yml'] as const;
+
+/**
+ * The uniform branch-protection profile every `@_linked` repo runs on `main`.
+ *
+ * The required check is `checks / Build & Test`, not `Build & Test`: GitHub reports a job invoked
+ * through `workflow_call` as `<caller-job-id> / <job name>`, and the caller job in pr.yml is
+ * `checks`. A repo pinning the bare name waits forever on a check that never reports.
+ */
+export function buildBranchProtectionPayload() {
+  return {
+    required_status_checks: {strict: false, contexts: ['checks / Build & Test']},
+    // Admins included: the point of the gate is that no release skips the build, and the people
+    // most likely to push straight to main are the admins.
+    enforce_admins: true,
+    // Reviews enabled but zero approvals required. The publish workflow direct-merges the version
+    // PR (GitHub's auto-merge queue does not honor review-bypass allowances), so a non-zero count
+    // would stall every release; the block itself still has to exist for the profile to match.
+    required_pull_request_reviews: {
+      required_approving_review_count: 0,
+      dismiss_stale_reviews: false,
+      require_code_owner_reviews: false,
+    },
+    restrictions: null,
+    allow_force_pushes: false,
+    allow_deletions: false,
+  };
+}
+
 export type SetupPublishOptions = {
   configureGithub?: boolean;
   scope?: 'core' | 'community'; // which NPM secret name to use
-  dualBranch?: boolean; // main + dev with `@next` prereleases on dev
+  /**
+   * @deprecated The dual-branch (`main` + `dev`) flow and its `@next` prereleases are retired —
+   * every package repo is `main`-only. Kept as an accepted no-op rather than removed because
+   * commander aborts the whole command on an unknown option, so a stale script or copied
+   * command line would fail to set the repo up at all instead of setting it up correctly.
+   */
+  dualBranch?: boolean;
   grantTeam?: string; // GitHub team slug to grant push access on the repo
 };
 
 /**
- * Set up a single-branch changesets publish workflow in the current package repo.
+ * Set up the changesets publish pipeline in the current package repo.
+ *
+ * The workflows are thin callers of the shared reusable workflows in `linked-fw/.github`
+ * (pinned `@v1`, a deliberately moving tag) — one edit there changes every package's pipeline,
+ * which is why nothing about the build or publish steps is scaffolded per repo any more.
  *
  * Installs:
- * - .github/workflows/{ci,publish,changeset-check}.yml
+ * - .github/workflows/{pr,publish}.yml — caller stubs, nothing else
  * - .changeset/config.json + README.md
  * - .changeset/initial-release.md
  * - .gitignore entries for node_modules, lib, yarn.lock, src-compiled-artifacts
@@ -33,18 +75,22 @@ export type SetupPublishOptions = {
  *   publishConfig: {access: public}
  * - package-lock.json generated via npm install --package-lock-only
  *
- * With --configure-github: if `gh` CLI is available and authenticated, also sets
- * branch protection on main (strict + required "Build & Test" check).
+ * With --configure-github: if `gh` CLI is available and authenticated, also applies the uniform
+ * branch-protection profile on main and enables auto-merge.
  */
 export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void> {
   const cwd = process.cwd();
   const scope = opts.scope || 'core';
   const npmSecretName = scope === 'community' ? 'NPM_AUTH_TOKEN_CM' : 'NPM_AUTH_TOKEN';
-  const templateDir = opts.dualBranch
-    ? path.join(TEMPLATE_ROOT, 'dual-branch')
-    : TEMPLATE_ROOT;
 
-  console.log(chalk.magenta(`Setting up ${opts.dualBranch ? 'dual-branch (main + dev)' : 'single-branch (main only)'} publish workflow...`));
+  console.log(chalk.magenta('Setting up the publish pipeline (main only)...'));
+  if (opts.dualBranch) {
+    console.log(
+      chalk.yellow(
+        '  ⚠ --dual-branch is deprecated and ignored: the main + dev flow and its @next prereleases are retired.',
+      ),
+    );
+  }
   console.log(`  target: ${cwd}`);
   console.log(`  npm secret: ${npmSecretName} (${scope})`);
 
@@ -61,10 +107,10 @@ export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void
   console.log('');
 
   // 1. Workflow files (with {{NPM_SECRET_NAME}} substitution in publish.yml)
-  await copyWorkflows(cwd, npmSecretName, templateDir);
+  await copyWorkflows(cwd, npmSecretName);
 
   // 2. Changesets config + README
-  await copyChangesetConfig(cwd, repoSlug, templateDir);
+  await copyChangesetConfig(cwd, repoSlug);
 
   // 3. Initial changeset
   await writeInitialChangeset(cwd, pkgJson.name);
@@ -114,21 +160,33 @@ async function resolveRepoSlug(cwd: string, pkgJson: any): Promise<string> {
   return 'OWNER/REPO';
 }
 
-async function copyWorkflows(cwd: string, npmSecretName: string, templateDir: string): Promise<void> {
-  const srcDir = path.join(templateDir, 'github', 'workflows');
+async function copyWorkflows(cwd: string, npmSecretName: string): Promise<void> {
+  const srcDir = path.join(TEMPLATE_ROOT, 'github', 'workflows');
   const dstDir = path.join(cwd, '.github', 'workflows');
   fs.mkdirpSync(dstDir);
 
-  for (const file of ['ci.yml', 'publish.yml', 'changeset-check.yml']) {
+  for (const file of WORKFLOW_FILES) {
     let content = fs.readFileSync(path.join(srcDir, file), 'utf8');
     content = content.replace(/\{\{NPM_SECRET_NAME\}\}/g, npmSecretName);
     fs.writeFileSync(path.join(dstDir, file), content);
     console.log(chalk.green('  ✓') + ` .github/workflows/${file}`);
   }
+
+  // ci.yml and changeset-check.yml became the two jobs of the shared pr.yml. Left behind on a
+  // repo that was set up before the consolidation they keep running, so the old bare
+  // `Build & Test` check reports alongside `checks / Build & Test` and re-setting a repo up
+  // looks like it worked while the duplicate gate quietly stays.
+  for (const stale of ['ci.yml', 'changeset-check.yml']) {
+    const stalePath = path.join(dstDir, stale);
+    if (fs.existsSync(stalePath)) {
+      fs.removeSync(stalePath);
+      console.log(chalk.green('  ✓') + ` removed superseded .github/workflows/${stale}`);
+    }
+  }
 }
 
-async function copyChangesetConfig(cwd: string, repoSlug: string, templateDir: string): Promise<void> {
-  const srcDir = path.join(templateDir, 'changeset');
+async function copyChangesetConfig(cwd: string, repoSlug: string): Promise<void> {
+  const srcDir = path.join(TEMPLATE_ROOT, 'changeset');
   const dstDir = path.join(cwd, '.changeset');
   fs.mkdirpSync(dstDir);
 
@@ -190,6 +248,16 @@ async function patchPackageJson(
   pkgJson: any,
   repoSlug: string,
 ): Promise<void> {
+  if (applyPackageJsonPatches(pkgJson, repoSlug)) {
+    fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
+    console.log(chalk.green('  ✓') + ' package.json (publishConfig + changesets devDeps)');
+  } else {
+    console.log(chalk.gray('  · package.json already configured'));
+  }
+}
+
+/** Mutates `pkgJson` in place; returns whether anything changed. Pure enough to test. */
+export function applyPackageJsonPatches(pkgJson: any, repoSlug: string): boolean {
   let modified = false;
 
   // `repository.url` must be set, and must match the repo the workflow builds in.
@@ -222,13 +290,10 @@ async function patchPackageJson(
       pkgJson.publishConfig.access = 'public';
       modified = true;
     }
-    // Strip provenance: true — it requires OIDC (id-token: write permission +
-    // npm Trusted Publisher config), which conflicts with our NPM_AUTH_TOKEN
-    // flow. Users who want provenance should use OIDC separately.
-    if (pkgJson.publishConfig.provenance) {
-      delete pkgJson.publishConfig.provenance;
-      modified = true;
-    }
+    // `provenance` is deliberately left alone. It used to be stripped because publishing went
+    // through NPM_AUTH_TOKEN only; the shared workflow now publishes with OIDC trusted publishing
+    // first (`npm publish --provenance`, id-token: write on both caller and reusable workflow) and
+    // falls back to the staged token release, so provenance is wanted, not a conflict.
   }
 
   pkgJson.devDependencies = pkgJson.devDependencies || {};
@@ -241,12 +306,7 @@ async function patchPackageJson(
     modified = true;
   }
 
-  if (modified) {
-    fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
-    console.log(chalk.green('  ✓') + ' package.json (publishConfig + changesets devDeps)');
-  } else {
-    console.log(chalk.gray('  · package.json already configured'));
-  }
+  return modified;
 }
 
 async function ensureLockfile(cwd: string): Promise<void> {
@@ -308,14 +368,7 @@ async function configureGithub(repoSlug: string): Promise<void> {
     return;
   }
 
-  const payload = JSON.stringify({
-    required_status_checks: {strict: true, contexts: ['Build & Test']},
-    enforce_admins: false,
-    required_pull_request_reviews: null,
-    restrictions: null,
-    allow_force_pushes: false,
-    allow_deletions: false,
-  });
+  const payload = JSON.stringify(buildBranchProtectionPayload());
 
   try {
     // Use --input - to pass the JSON payload via stdin
@@ -325,15 +378,20 @@ async function configureGithub(repoSlug: string): Promise<void> {
       false,
     );
     console.log(chalk.green('  ✓') + ` branch protection enabled on ${repoSlug}/main`);
+    // A repo can pin a required check in a *ruleset* as well as in classic branch protection, and
+    // the two are stored separately — this call only writes the classic one, so a leftover ruleset
+    // keeps blocking merges on a check name that no longer reports.
+    console.log(
+      chalk.gray(`  · check for a competing ruleset: gh api /repos/${repoSlug}/rulesets`),
+    );
   } catch (err) {
     console.warn(chalk.yellow('  ⚠ Failed to set branch protection. Do it manually:'));
     console.warn(chalk.yellow(`    https://github.com/${repoSlug}/settings/branches`));
   }
 
-  // Enable "Allow auto-merge" so the post-release back-merge PR (dual-branch) self-merges once
-  // checks pass. Harmless for single-branch repos. The publish workflow authors release/back-merge
-  // PRs via the org App token (org secrets RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY) so their CI
-  // runs without a manual approval gate.
+  // Enable "Allow auto-merge" so a PR can be queued to merge itself once checks pass. The publish
+  // workflow authors the Release PR via the org App token (org secrets RELEASE_APP_ID /
+  // RELEASE_APP_PRIVATE_KEY) so its CI runs without a manual approval gate.
   try {
     await execPromise(
       `gh api -X PATCH /repos/${repoSlug} -F allow_auto_merge=true`,
@@ -386,25 +444,43 @@ function printNextSteps(
   console.log('');
   console.log(chalk.bold('Next steps:'));
   console.log('');
+  const [owner, repo] = repoSlug.split('/');
+
   console.log(`  1. Review the generated files, adjust as needed.`);
   console.log(`  2. Commit:`);
-  console.log(chalk.cyan('       git add . && git commit -m "set up single-branch publish workflow"'));
+  console.log(chalk.cyan('       git add . && git commit -m "set up the publish pipeline"'));
   console.log(`  3. Push to main — the publish workflow will trigger.`);
   console.log('');
-  console.log(chalk.bold('One-time org-level setup (if not already done):'));
+  console.log(chalk.bold('Register the trusted publisher on npmjs.com (before the first release):'));
   console.log('');
-  console.log(`  a. Create an org secret ${chalk.cyan(npmSecretName)} with a granular npm token`);
-  console.log(`     (2FA-bypass, write access to the @_linked* scope).`);
-  console.log(`     → https://github.com/organizations/${repoSlug.split('/')[0]}/settings/secrets/actions`);
+  console.log(`  package → Settings → Trusted Publisher, matching the caller workflow exactly:`);
+  console.log(`    organization: ${chalk.cyan(owner)}   repository: ${chalk.cyan(repo)}`);
+  console.log(`    workflow filename: ${chalk.cyan('publish.yml')}   environment: ${chalk.cyan('(empty)')}`);
+  console.log(`    "Allow npm publish": ${chalk.cyan('ticked')}`);
+  console.log('');
+  console.log(chalk.gray(`  Without it the release still ships — the workflow falls back to a staged`));
+  console.log(chalk.gray(`  npm release that a maintainer approves with 2FA. A typo in the organization`));
+  console.log(chalk.gray(`  field looks exactly the same, so check that field first if a package that`));
+  console.log(chalk.gray(`  should publish directly keeps staging instead.`));
+  console.log('');
+  // No per-repo secret grant step: NPM_AUTH_TOKEN, RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY are
+  // "All repositories" org secrets, which is the whole reason first-party and community packages
+  // live in separate orgs. Only mention what is genuinely still one-time-per-org.
+  console.log(chalk.bold('One-time org-level setup (already done on linked-fw):'));
+  console.log('');
+  console.log(`  a. Org secrets ${chalk.cyan(npmSecretName)}, ${chalk.cyan('RELEASE_APP_ID')} and ${chalk.cyan('RELEASE_APP_PRIVATE_KEY')},`);
+  console.log(`     visible to ${chalk.cyan('All repositories')} — there is no per-repo grant step.`);
+  console.log(`     → https://github.com/organizations/${owner}/settings/secrets/actions`);
   console.log('');
   console.log(`  b. Enable "Allow GitHub Actions to create and approve pull requests":`);
-  console.log(`     → https://github.com/organizations/${repoSlug.split('/')[0]}/settings/actions`);
+  console.log(`     → https://github.com/organizations/${owner}/settings/actions`);
 
   if (!configuredGithub) {
     console.log('');
     console.log(chalk.bold('Branch protection:'));
     console.log(`  Rerun with ${chalk.cyan('linked setup-publish --configure-github')} to configure automatically,`);
-    console.log(`  or set manually at https://github.com/${repoSlug}/settings/branches`);
+    console.log(`  or set manually at https://github.com/${repoSlug}/settings/branches —`);
+    console.log(`  the required check is ${chalk.cyan('checks / Build & Test')}, not ${chalk.cyan('Build & Test')}.`);
   }
   console.log('');
 }

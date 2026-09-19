@@ -46,15 +46,15 @@ exits 0.
 ### Publishing / release
 
 ```bash
-linked setup-publish              # install a changesets-based publish workflow in the current repo
-linked setup-publish --dual-branch          # use main + dev with @next prereleases
-linked setup-publish --configure-github     # also set branch protection via gh CLI
+linked setup-publish              # install the changesets-based publish pipeline in the current repo
+linked setup-publish --configure-github     # also apply the uniform branch protection via gh CLI
 linked setup-publish --scope community      # use NPM_AUTH_TOKEN_CM instead of NPM_AUTH_TOKEN
 ```
 
 `setup-publish` writes:
 
-- `.github/workflows/ci.yml`, `publish.yml`, `changeset-check.yml`
+- `.github/workflows/pr.yml` and `publish.yml` — thin callers of the shared reusable workflows in
+  `linked-fw/.github`, pinned `@v1`. Any pre-consolidation `ci.yml` / `changeset-check.yml` is removed.
 - `.changeset/config.json` + `README.md`
 - `.gitignore` entries
 - `publishConfig: {access: public}` + `@changesets/cli` devDeps in `package.json`
@@ -140,7 +140,7 @@ Templates live in `defaults/`:
 - `defaults/app-with-backend/` — used by `linked create-app`
 - `defaults/app-static/` — minimal static app
 - `defaults/package/` — used by `linked create-package`
-- `defaults/setup-publish/` — workflow + changeset files written by `linked setup-publish` (single-branch default; `dual-branch/` subdirectory for the `--dual-branch` variant)
+- `defaults/setup-publish/` — caller workflows + changeset files written by `linked setup-publish` (`main`-only; `--dual-branch` is a deprecated no-op)
 
 ### `linked create-app` template structure
 
