@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.18.0
+
+### Minor Changes
+
+- [#98](https://github.com/linked-fw/cli/pull/98) [`0d2c4c0`](https://github.com/linked-fw/cli/commit/0d2c4c04f7354af8add4a31c2780597b61d27098) Thanks [@flyon](https://github.com/flyon)! - `setup-publish` scaffolds the consolidated pipeline: two thin caller stubs (`pr.yml`, `publish.yml`) for the shared reusable workflows in `linked-fw/.github` instead of three standalone workflows, and `--configure-github` applies the uniform branch-protection profile (required check `checks / Build & Test`, non-strict, admins enforced). `publishConfig.provenance` is no longer stripped now that publishing is OIDC-first, and `--dual-branch` is a deprecated no-op.
+
 ## 1.17.0
 
 ### Minor Changes
