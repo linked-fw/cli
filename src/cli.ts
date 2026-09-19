@@ -386,15 +386,15 @@ program
 program
   .command('setup-publish')
   .description(
-    'Set up a changesets publish workflow in the current package repo. Writes GitHub Actions workflows, changesets config, .gitignore entries, and patches package.json.',
+    'Set up the changesets publish pipeline in the current package repo. Writes the pr.yml/publish.yml callers of the shared workflows in linked-fw/.github, changesets config, .gitignore entries, and patches package.json.',
   )
   .option(
     '--configure-github',
-    'Also configure GitHub branch protection on main (requires gh CLI installed and authenticated).',
+    'Also apply the uniform branch protection on main and enable auto-merge (requires gh CLI installed and authenticated).',
   )
   .option(
     '--dual-branch',
-    'Use dual-branch (main + dev) flow with @next prereleases on dev. Default is single-branch (main only).',
+    'Deprecated and ignored: the main + dev flow and its @next prereleases are retired. Accepted only so stale scripts still set the repo up.',
   )
   .option(
     '--scope <scope>',
