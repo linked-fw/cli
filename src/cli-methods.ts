@@ -19,6 +19,11 @@ import {
 } from './utils.js';
 import {renameShippedDotfiles} from './utils/shippedDotfiles.js';
 import {planPackageSetup} from './utils/packageSetup.js';
+import {
+  detectPackageManager,
+  execBinCommand,
+  runScriptCommand,
+} from './utils/packageManager.js';
 import {rewriteExtensionlessImports} from './utils/esmSpecifiers.js';
 
 import {spawn as spawnChild} from 'child_process';
@@ -567,7 +572,7 @@ function applyAppIdentity(
 }
 
 function logHelp() {
-  execp('yarn exec lincd help');
+  execp(execBinCommand(detectPackageManager(), 'linked help'));
 }
 
 function log(...messages) {
@@ -1152,10 +1157,13 @@ export function buildAll(options) {
         }
         //unless told otherwise, build the package
         if (!command) {
-          // Invoke the package's own `yarn build` script. This lets each package
+          // Invoke the package's own `build` script. This lets each package
           // own its build pipeline — e.g. @_linked/core uses direct tsc, pure-CSS
           // packages may have no-op builds, and linkedPackage: true packages
-          // typically call `yarn linked build` internally.
+          // typically call `linked build` internally.
+          //
+          // npm is the default; the package manager is detected per package so
+          // packages inside an existing yarn workspace still build with yarn.
           const pkgDir = path.join(process.cwd(), pkg.path);
           const pkgJson = getPackageJSON(pkgDir);
           const hasBuildScript = !!(pkgJson?.scripts?.build);
@@ -1164,7 +1172,11 @@ export function buildAll(options) {
             // No build script — skip gracefully (e.g. a pure-assets package).
             command = Promise.resolve(true);
           } else {
-            command = execPromise('yarn build', false, false, {
+            const buildCmd = runScriptCommand(
+              detectPackageManager(pkgDir),
+              'build',
+            );
+            command = execPromise(buildCmd, false, false, {
               cwd: pkgDir,
             })
               .then((res) => res === '' || typeof res === 'string')
@@ -2142,7 +2154,7 @@ export const runMethod = async (
             ),
           );
           console.error(
-            `Make sure you ${chalk.magenta('run "yarn start" in a separate process')} before calling this method.`,
+            `Make sure you ${chalk.magenta('run "npm start" in a separate process')} before calling this method.`,
           );
         } else {
           console.error('Error during backend call:', error);
@@ -2372,7 +2384,7 @@ export const buildBackend = async () => {
   }).start();
 
   try {
-    await execPromise(`yarn exec tsc`);
+    await execPromise(execBinCommand(detectPackageManager(), 'tsc'));
     compileSpinner.succeed('Backend TS files compiled');
   } catch (e) {
     console.error(e);
@@ -2664,13 +2676,22 @@ export const createPackage = async (
     );
   });
 
-  let version = (await execPromise('yarn --version').catch((err) => {
-    console.log('yarn probably not working');
-    return '';
-  })) as string;
+  // npm is the default for a new package. yarn is only consulted when the new
+  // package lands inside an existing yarn project (an mrgit/yarn-3 monorepo),
+  // where adding an npm lockfile would break the workspace.
+  const insideYarnProject =
+    detectPackageManager(path.dirname(path.resolve(targetFolder))) === 'yarn';
+  let version = insideYarnProject
+    ? ((await execPromise('yarn --version').catch(() => {
+        console.log('yarn probably not working');
+        return '';
+      })) as string)
+    : '';
   const setup = planPackageSetup(
     version.toString(),
     path.join(getScriptDir(), 'launch.js'),
+    process.execPath,
+    insideYarnProject,
   );
   if (setup.yarnrc) {
     fs.writeFileSync(path.join(targetFolder, '.yarnrc.yml'), setup.yarnrc);
@@ -2695,9 +2716,11 @@ export const createPackage = async (
 
   log(
     `Prepared a new LINCD package in ${chalk.magenta(targetFolder)}`,
-    `Run ${chalk.blueBright('yarn build')} from this directory to build once`,
+    `Run ${chalk.blueBright(
+      runScriptCommand(setup.packageManager, 'build'),
+    )} from this directory to build once`,
     `Or ${chalk.blueBright(
-      'yarn dev',
+      runScriptCommand(setup.packageManager, 'start'),
     )} to continuously rebuild on file changes`,
   );
 };
@@ -3351,12 +3374,18 @@ export var publishPackage = async function (
   //looking for an .env.json file in our workspace, which may store our NPM AUTH key
   let envJsonPath = await getEnvJsonPath(pkg.path);
 
+  // `yarn version` / `yarn npm publish` is Yarn Berry syntax. Only use it when
+  // the package really lives in a yarn project; otherwise publish with npm.
+  const publishPm = detectPackageManager(pkg.path);
+  const versionAndPublish =
+    publishPm === 'yarn'
+      ? `yarn version ${publishVersion} && yarn npm publish`
+      : `npm version ${publishVersion} --no-git-tag-version && npm publish`;
+
   return execPromise(
     `cd ${pkg.path} && ${
       envJsonPath ? `env-cmd -f ${envJsonPath} --use-shell "` : ''
-    }yarn version ${publishVersion} && yarn npm publish${
-      envJsonPath ? `"` : ''
-    }`,
+    }${versionAndPublish}${envJsonPath ? `"` : ''}`,
     true,
     false,
     {},
@@ -3632,14 +3661,14 @@ export var addCapacitor = async function (basePath = process.cwd()) {
     'env-cmd -e _main, staging node scripts/build.js';
   pack.scripts['fix-app'] = 'node scripts/fix-namespace.js';
   pack.scripts['app'] =
-    'env-cmd -e _main,production,app-main node scripts/build.js && npx cap sync && yarn run fix-app';
+    'env-cmd -e _main,production,app-main node scripts/build.js && npx cap sync && npm run fix-app';
   pack.scripts['app-local-ios'] =
-    'env-cmd -e _main,development,app-main,app-local-ios node scripts/build.js && npx cap sync && yarn run fix-app';
+    'env-cmd -e _main,development,app-main,app-local-ios node scripts/build.js && npx cap sync && npm run fix-app';
   pack.scripts['app-local-android'] =
-    'env-cmd -e _main,development,app-main,app-local-android node scripts/build.js && npx cap sync && yarn run fix-app';
-  pack.scripts['cap:android'] = 'yarn cap open android';
-  pack.scripts['cap:ios'] = 'yarn cap open ios';
-  pack.scripts['cap:sync'] = 'yarn cap sync';
+    'env-cmd -e _main,development,app-main,app-local-android node scripts/build.js && npx cap sync && npm run fix-app';
+  pack.scripts['cap:android'] = 'npx cap open android';
+  pack.scripts['cap:ios'] = 'npx cap open ios';
+  pack.scripts['cap:sync'] = 'npx cap sync';
 
   fs.writeFile(
     path.resolve(basePath, 'package.json'),
@@ -3647,9 +3676,9 @@ export var addCapacitor = async function (basePath = process.cwd()) {
   );
   log('Added new run script to package.json');
 
-  await execPromise(`yarn add -D @capacitor/cli`, true, false, null, true);
+  await execPromise(`npm install --save-dev @capacitor/cli`, true, false, null, true);
   await execPromise(
-    `yarn add @capacitor/android @capacitor/core @capacitor/app @capacitor/ios`,
+    `npm install @capacitor/android @capacitor/core @capacitor/app @capacitor/ios`,
     false,
     false,
     null,
@@ -3671,13 +3700,13 @@ export var addCapacitor = async function (basePath = process.cwd()) {
   );
   log(
     `And then run ${chalk.magenta(
-      'yarn cap add android',
-    )} and/or ${chalk.magenta('yarn cap add ios')}')`,
+      'npx cap add android',
+    )} and/or ${chalk.magenta('npx cap add ios')}')`,
   );
   log(
-    `Last, run ${chalk.magenta('yarn app')} or ${chalk.magenta(
-      'yarn app-local-ios',
-    )} or ${chalk.magenta('yarn app-local-android')}`,
+    `Last, run ${chalk.magenta('npm run app')} or ${chalk.magenta(
+      'npm run app-local-ios',
+    )} or ${chalk.magenta('npm run app-local-android')}`,
   );
 };
 
@@ -3688,17 +3717,26 @@ export var executeCommandForPackage = function (packageName, command) {
       modDetails.packageName.indexOf(packageName) !== -1,
   );
   if (packageDetails) {
+    // npm is the default; only a package inside a yarn project is driven with
+    // yarn (`yarn linked <cmd>` resolves the bin from the yarn workspace).
+    const pm = detectPackageManager(packageDetails.path);
+    // Windows quirk: the shim is `yarn.cmd` / `npx.cmd`.
+    const isWin = process.platform === 'win32';
+    const runner =
+      pm === 'yarn' ? (isWin ? 'yarn.cmd' : 'yarn') : isWin ? 'npx.cmd' : 'npx';
+    const runnerArgs = pm === 'yarn' ? ['linked'] : ['--no-install', 'linked'];
+
     log(
       "Executing 'cd " +
         packageDetails.path +
-        ' && yarn lincd' +
+        ` && ${runner} linked` +
         (command ? ' ' + command : '') +
         "'",
     );
 
     spawnChild(
-      process.platform === 'win32' ? 'yarn.cmd' : 'yarn', // Windows quirk
-      ['lincd', command || null],
+      runner,
+      [...runnerArgs, command || null],
       {
         cwd: packageDetails.path,
         stdio: 'inherit',
