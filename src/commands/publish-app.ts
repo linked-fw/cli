@@ -1,5 +1,9 @@
 import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
-import {planReleasePublish, publishRelease} from '../app-release/publisher.js';
+import {
+  loadReleaseManifest,
+  planReleasePublish,
+  publishRelease,
+} from '../app-release/publisher.js';
 
 interface ProgressSpinner {
   text: string;
@@ -10,7 +14,15 @@ interface ProgressSpinner {
 export interface PublishAppOptions {
   appRoot?: string;
   manifestPath?: string;
-  store: IFileStore;
+  /** An already-resolved store (the `build-app --publish` path). */
+  store?: IFileStore;
+  /**
+   * Resolve the store lazily. Used instead of `store` so the release manifest
+   * is read and validated first: a Capacitor (non-publishable) manifest then
+   * fails with "only publishable web release manifests may be uploaded"
+   * instead of a confusing storage-configuration error.
+   */
+  resolveStore?: () => Promise<IFileStore>;
   yes?: boolean;
 }
 
@@ -39,6 +51,17 @@ export const redactPublishError = (error: unknown): Error => {
   return source;
 };
 
+const resolveStore = async (
+  options: PublishAppOptions,
+): Promise<IFileStore> => {
+  if (!options.resolveStore) {
+    throw new Error(
+      'publishApp needs either a store or a resolveStore function to reach one',
+    );
+  }
+  return options.resolveStore();
+};
+
 export const publishApp = async (options: PublishAppOptions) => {
   const appRoot = options.appRoot || process.cwd();
   let progressSpinner: ProgressSpinner | undefined;
@@ -46,10 +69,14 @@ export const publishApp = async (options: PublishAppOptions) => {
     // This command reuses a completed build. It validates the manifest and
     // destination before dry-run output or any confirmed upload.
     console.log('🔄 Validating release manifest and destination...');
+    // Read the manifest before touching storage config, so a manifest that can
+    // never be published says so before a store is resolved.
+    loadReleaseManifest(appRoot, options.manifestPath);
+    const store = options.store || (await resolveStore(options));
     const plan = planReleasePublish({
       appRoot,
       manifestPath: options.manifestPath,
-      store: options.store,
+      store,
     });
 
     console.log(`Release: ${plan.releaseId}`);
@@ -81,7 +108,7 @@ export const publishApp = async (options: PublishAppOptions) => {
     const result = await publishRelease({
       appRoot,
       manifestPath: options.manifestPath,
-      store: options.store,
+      store,
       yes: options.yes,
       onWarning: (message) => {
         // Printed once per run, not once per file.
@@ -115,7 +142,10 @@ export const publishApp = async (options: PublishAppOptions) => {
     }
     return result;
   } catch (error) {
-    progressSpinner?.fail('Release upload failed');
-    throw redactPublishError(error);
+    const reported = redactPublishError(error);
+    // The spinner line is the last thing on screen, so it carries the real
+    // reason rather than a bare "Release upload failed".
+    progressSpinner?.fail(reported.message);
+    throw reported;
   }
 };

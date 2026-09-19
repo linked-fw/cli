@@ -2,7 +2,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
-import {buildViteApp, hasViteConfig} from '../../src/commands/build-app';
+import {
+  assertReleaseFlagsUnused,
+  buildViteApp,
+  hasViteConfig,
+} from '../../src/commands/build-app';
 import {createReleaseManifest} from '../../src/app-release/create-release-manifest';
 
 const makeApp = () => {
@@ -48,8 +52,12 @@ const baseDependencies = {
   resolveStore: async () => store,
   loadPublishConfig: async () => ({}),
   createManifest: (options: Parameters<typeof createReleaseManifest>[0]) =>
-    createReleaseManifest({...options, sourceRevision: 'abc123def456'}),
+    createReleaseManifest(options),
 };
+
+/** The fixture app is a bare temp dir, so the revision is always supplied. */
+const REVISION = 'abc123def456';
+const baseOptions = {revision: REVISION};
 
 const originalEnvironment = {...process.env};
 
@@ -68,7 +76,7 @@ describe('buildViteApp', () => {
     const publish = jest.fn();
 
     const manifest = await buildViteApp(
-      {appRoot, environmentNames: ['cn-staging'], target: 'web'},
+      {...baseOptions, appRoot, environmentNames: ['cn-staging'], target: 'web'},
       {
         ...baseDependencies,
         loadEnvironment: async () => {
@@ -89,14 +97,72 @@ describe('buildViteApp', () => {
       },
     );
 
-    expect(calls).toEqual(['environment', 'frontend', 'backend', 'store']);
+    // The store comes first now: the client bundle is built with the release
+    // prefix as its base, so the destination has to be known before Vite runs.
+    expect(calls).toEqual(['environment', 'store', 'frontend', 'backend']);
     // Building is not publishing: the default flow must never upload.
     expect(publish).not.toHaveBeenCalled();
     expect(readManifest(appRoot).releaseId).toBe('1.2.3-abc123def456');
     expect(manifest.destination).toEqual({
       accessURL: 'https://cdn.example.test',
       releasePrefix: 'releases/1.2.3-abc123def456',
+      baseURL:
+        'https://cdn.example.test/releases/1.2.3-abc123def456/public/bundles/',
     });
+  });
+
+  it('builds the client bundle with the release prefix as Vite base', async () => {
+    const appRoot = makeApp();
+    const bases: (string | undefined)[] = [];
+    const manifest = await buildViteApp(
+      {...baseOptions, appRoot, target: 'web'},
+      {
+        ...baseDependencies,
+        buildFrontend: async (_root: string, base?: string) => {
+          bases.push(base);
+        },
+      },
+    );
+    // Root-absolute URLs the bundle emits for its own chunks resolve under the
+    // release prefix without any server rewrite.
+    expect(bases).toEqual([
+      'https://cdn.example.test/releases/1.2.3-abc123def456/public/bundles/',
+    ]);
+    expect(manifest.destination.baseURL).toBe(bases[0]);
+  });
+
+  it('builds a Capacitor bundle with no base', async () => {
+    const appRoot = makeApp();
+    const bases: (string | undefined)[] = [];
+    const manifest = await buildViteApp(
+      {...baseOptions, appRoot, target: 'capacitor'},
+      {
+        ...baseDependencies,
+        buildFrontend: async (_root: string, base?: string) => {
+          bases.push(base);
+        },
+      },
+    );
+    expect(bases).toEqual([undefined]);
+    expect(manifest.destination.baseURL).toBe('');
+  });
+
+  it('refuses to build a release from a dirty tree without --allow-dirty', async () => {
+    // No revision given, and the fixture app is not a Git checkout at all, so
+    // the revision escape hatch is what makes a build possible here.
+    await expect(
+      buildViteApp({appRoot: makeApp(), target: 'web'}, baseDependencies),
+    ).rejects.toThrow('--revision <sha>');
+  });
+
+  it('takes the revision from LINKED_RELEASE_REVISION', async () => {
+    const appRoot = makeApp();
+    process.env.LINKED_RELEASE_REVISION = 'ci-deadbeef';
+    const manifest = await buildViteApp(
+      {appRoot, target: 'web'},
+      baseDependencies,
+    );
+    expect(manifest.releaseId).toBe('1.2.3-ci-deadbeef');
   });
 
   it('publishes only when --publish is given', async () => {
@@ -110,7 +176,7 @@ describe('buildViteApp', () => {
     }));
 
     await buildViteApp(
-      {appRoot, target: 'web', publish: true},
+      {...baseOptions, appRoot, target: 'web', publish: true},
       {...baseDependencies, publish},
     );
 
@@ -125,7 +191,7 @@ describe('buildViteApp', () => {
   it('records the release prefix from the app publish config', async () => {
     const appRoot = makeApp();
     const manifest = await buildViteApp(
-      {appRoot, target: 'web'},
+      {...baseOptions, appRoot, target: 'web'},
       {
         ...baseDependencies,
         loadPublishConfig: async () => ({releasePrefix: 'cdn/fixture'}),
@@ -145,7 +211,7 @@ describe('buildViteApp', () => {
 
     await expect(
       buildViteApp(
-        {appRoot: makeApp(), target: 'web', publish: true},
+        {...baseOptions, appRoot: makeApp(), target: 'web', publish: true},
         {
           ...baseDependencies,
           buildFrontend: async () => {
@@ -165,7 +231,7 @@ describe('buildViteApp', () => {
     const publish = jest.fn();
     await expect(
       buildViteApp(
-        {appRoot, target: 'web', publish: true},
+        {...baseOptions, appRoot, target: 'web', publish: true},
         {...baseDependencies, buildBackend: async () => false, publish},
       ),
     ).rejects.toThrow('Backend build did not complete successfully');
@@ -177,12 +243,12 @@ describe('buildViteApp', () => {
 
   it('writes a local, non-publishable manifest for a Capacitor build', async () => {
     const appRoot = makeApp();
-    process.env.APP_ENV = 'true';
+    process.env.APP_ENV = 'capacitor';
     const resolveStore = jest.fn(async () => store);
     const publish = jest.fn();
 
     const manifest = await buildViteApp(
-      {appRoot, publish: true},
+      {...baseOptions, appRoot, publish: true},
       {...baseDependencies, resolveStore, publish},
     );
 
@@ -200,10 +266,26 @@ describe('buildViteApp', () => {
     const appRoot = makeApp();
     const fallback = {...store, accessURL: 'https://files.example.test'};
     const manifest = await buildViteApp(
-      {appRoot, target: 'web'},
+      {...baseOptions, appRoot, target: 'web'},
       {...baseDependencies, resolveStore: async () => fallback as IFileStore},
     );
     expect(manifest.destination.accessURL).toBe('https://files.example.test');
+  });
+});
+
+describe('assertReleaseFlagsUnused', () => {
+  it('accepts a plain webpack build', () => {
+    expect(() => assertReleaseFlagsUnused({})).not.toThrow();
+  });
+
+  it.each([
+    [{target: 'web'}, '--target'],
+    [{publish: true}, '--publish'],
+    [{revision: 'abc'}, '--revision'],
+    [{allowDirty: true}, '--allow-dirty'],
+  ])('rejects %p on the webpack path', (options, flag) => {
+    expect(() => assertReleaseFlagsUnused(options)).toThrow(flag);
+    expect(() => assertReleaseFlagsUnused(options)).toThrow('require a Vite app');
   });
 });
 

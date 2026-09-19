@@ -96,8 +96,11 @@ describe('release publisher', () => {
       publishable: true,
       builtAt: '2026-09-17T00:00:00.000Z',
       environmentNames: ['cn-staging'],
-      publicRoot: 'public',
-      destination: {accessURL: ACCESS_URL, releasePrefix: PREFIX},
+      destination: {
+        accessURL: ACCESS_URL,
+        releasePrefix: PREFIX,
+        baseURL: `${ACCESS_URL}/${PREFIX}/public/bundles/`,
+      },
       files: [
         file('public/bundles/a.12345678.js', 'aaa'),
         file('public/bundles/b.12345678.css', 'bbbb'),
@@ -163,6 +166,7 @@ describe('release publisher', () => {
       destination: {
         accessURL: ACCESS_URL,
         releasePrefix: 'releases/4.2.7-def456',
+        baseURL: `${ACCESS_URL}/releases/4.2.7-def456/public/bundles/`,
       },
       files: [
         {
@@ -246,11 +250,119 @@ describe('release publisher', () => {
   test('does not upload the release manifest after a partial failure', async () => {
     store.failKey = `${PREFIX}/public/bundles/b.12345678.css`;
     await expect(publishRelease({appRoot, store, yes: true})).rejects.toThrow(
-      'failed ',
+      'Release upload failed',
     );
     expect(store.writes.map((write) => write.key)).toEqual([
       `${PREFIX}/public/bundles/a.12345678.js`,
     ]);
+  });
+
+  test('a mid-upload failure says what failed, where, and how to recover', async () => {
+    store.failKey = `${PREFIX}/public/bundles/b.12345678.css`;
+    const failure = await publishRelease({appRoot, store, yes: true}).catch(
+      (error: Error) => error,
+    );
+    const message = failure.message;
+    // The file and the key it was going to.
+    expect(message).toContain('public/bundles/b.12345678.css');
+    expect(message).toContain(`"${PREFIX}/public/bundles/b.12345678.css"`);
+    // Where it was going, and how far the release got.
+    expect(message).toContain(ACCESS_URL);
+    expect(message).toContain('1 of 3 objects were already uploaded');
+    expect(message).toContain(`"${PREFIX}"`);
+    expect(message).toContain('the release manifest was not uploaded');
+    expect(message).toContain('Re-running publish-app resumes it');
+    // ...and the underlying store error is still in there.
+    expect(message).toContain('failed releases/');
+  });
+
+  describe('a manifest may only upload to its own release prefix', () => {
+    const hostileFile = (overrides: Record<string, unknown>) => ({
+      sourcePath: 'public/bundles/a.12345678.js',
+      objectKey: `${PREFIX}/public/bundles/a.12345678.js`,
+      sha256: sha('aaa'),
+      size: 3,
+      contentType: 'text/javascript',
+      cacheControl: 'public, max-age=31536000, immutable',
+      ...overrides,
+    });
+
+    test('rejects an object key outside the release prefix', async () => {
+      // Shape-valid, but it would overwrite a different, already-live release.
+      writeManifest({
+        files: [
+          hostileFile({
+            objectKey: 'releases/4.2.5-other/public/bundles/a.12345678.js',
+          }),
+        ],
+      });
+      await expect(publishRelease({appRoot, store, yes: true})).rejects.toThrow(
+        'not under the release prefix',
+      );
+      expect(store.writes).toHaveLength(0);
+    });
+
+    test('rejects an object key that climbs out with ..', async () => {
+      writeManifest({
+        files: [hostileFile({objectKey: `${PREFIX}/../../evil/a.js`})],
+      });
+      await expect(
+        publishRelease({appRoot, store, yes: true}),
+      ).rejects.toThrow();
+      expect(store.writes).toHaveLength(0);
+    });
+
+    test('rejects a source path that climbs out of the app root', async () => {
+      writeManifest({
+        files: [
+          hostileFile({
+            sourcePath: '../../../etc/passwd',
+            objectKey: `${PREFIX}/etc/passwd`,
+          }),
+        ],
+      });
+      await expect(publishRelease({appRoot, store, yes: true})).rejects.toThrow(
+        'must stay inside the application root',
+      );
+      expect(store.writes).toHaveLength(0);
+    });
+
+    test('rejects an absolute source path', async () => {
+      writeManifest({
+        files: [
+          hostileFile({
+            sourcePath: '/etc/passwd',
+            objectKey: `${PREFIX}/etc/passwd`,
+          }),
+        ],
+      });
+      await expect(publishRelease({appRoot, store, yes: true})).rejects.toThrow(
+        'must be relative',
+      );
+      expect(store.writes).toHaveLength(0);
+    });
+
+    test('rejects a source path that leaves the app root through a symlink', async () => {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-outside-'));
+      fs.writeFileSync(path.join(outside, 'secret.txt'), 'aaa');
+      fs.symlinkSync(outside, path.join(appRoot, 'public/escape'));
+      writeManifest({
+        files: [
+          hostileFile({
+            sourcePath: 'public/escape/secret.txt',
+            objectKey: `${PREFIX}/public/escape/secret.txt`,
+          }),
+        ],
+      });
+      try {
+        await expect(
+          publishRelease({appRoot, store, yes: true}),
+        ).rejects.toThrow('escapes the application root');
+        expect(store.writes).toHaveLength(0);
+      } finally {
+        fs.rmSync(outside, {recursive: true, force: true});
+      }
+    });
   });
 
   test('fails when the uploaded hash does not match', async () => {
@@ -316,6 +428,36 @@ describe('release publisher', () => {
     expect(result.unverified).toHaveLength(3);
   });
 
+  test('publish-app reads the manifest before it resolves a store', async () => {
+    // A Capacitor app has no appAssets store; resolving one first turned an
+    // unpublishable manifest into a confusing storage-configuration error.
+    writeManifest({target: 'capacitor', publishable: false});
+    const resolveStore = jest.fn(async () => {
+      throw new Error('No file store configured for purpose appAssets');
+    });
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await expect(publishApp({appRoot, resolveStore, yes: true})).rejects.toThrow(
+        'Only publishable web release manifests',
+      );
+      expect(resolveStore).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  test('publish-app resolves the store lazily for a valid manifest', async () => {
+    const resolveStore = jest.fn(async () => store as IFileStore);
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const result = await publishApp({appRoot, resolveStore, yes: true});
+      expect(result.dryRun).toBe(false);
+      expect(resolveStore).toHaveBeenCalledTimes(1);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   test('redacts configured credentials from upload errors', async () => {
     const secret = 'super-secret-value';
     process.env.STATIC_AWS_SECRET_ACCESS_KEY = secret;
@@ -328,7 +470,8 @@ describe('release publisher', () => {
       const failure = await publishApp({appRoot, store, yes: true}).catch(
         (error: Error) => error,
       );
-      expect(failure.message).toBe('provider rejected [REDACTED]');
+      expect(failure.message).toContain('provider rejected [REDACTED]');
+      expect(failure.message).not.toContain(secret);
       expect(failure.stack).toContain('publisher.test.ts');
       expect(failure.stack).not.toContain(secret);
     } finally {

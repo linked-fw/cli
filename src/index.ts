@@ -25,16 +25,25 @@ export {
   buildReleasePrefix,
   createReleaseManifest,
   getCacheControl,
+  releaseBaseURL,
   releaseObjectKey,
+  releaseStaticAccessURL,
+  resolveReleaseIdentity,
+  resolveSourceRevision,
   serializeReleaseManifest,
   writeReleaseManifest,
   DEFAULT_RELEASE_PREFIX,
   ENTRY_CACHE_CONTROL,
   IMMUTABLE_CACHE_CONTROL,
   MANIFEST_SOURCE_PATH,
+  VITE_OUTPUT_DIR,
 } from './app-release/create-release-manifest';
 export {resolveDeclaredStaticAssets} from './app-release/static-assets';
-export {planReleasePublish, publishRelease} from './app-release/publisher';
+export {
+  loadReleaseManifest,
+  planReleasePublish,
+  publishRelease,
+} from './app-release/publisher';
 export {
   normalizeAccessURL,
   resolveAppAssetsStore,
@@ -61,4 +70,8 @@ export type {
   PublishPlan,
   PublishResult,
 } from './app-release/types';
-export type {CreateReleaseManifestOptions} from './app-release/create-release-manifest';
+export type {
+  CreateReleaseManifestOptions,
+  ReleaseFileOrigin,
+  ReleaseIdentity,
+} from './app-release/create-release-manifest';

@@ -5,18 +5,20 @@ export interface ResolveBuildTargetOptions {
   appEnv?: string;
 }
 
-const isTruthyEnvironmentValue = (value: string | undefined): boolean => {
-  if (value === undefined) {
-    return false;
-  }
-
-  return !['', '0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
-};
+/** The only `APP_ENV` value that selects a native build. */
+const CAPACITOR_APP_ENV = 'capacitor';
 
 /**
- * Resolve the app build target while preserving the legacy APP_ENV contract.
- * An explicit web target cannot override APP_ENV because doing so could make a
- * native build publishable by mistake.
+ * Resolve the app build target.
+ *
+ * `APP_ENV` selects the Capacitor target only when it literally says
+ * `capacitor`. It used to be read as a boolean — any non-empty value meant
+ * "native" — which quietly hijacked the far more common `APP_ENV=production`
+ * into a near-empty, non-publishable manifest, and then made `--target web`
+ * fail outright. Nothing else in this monorepo reads `APP_ENV`, so there is no
+ * boolean contract left to preserve; an unrelated value is ignored and the
+ * build defaults to web, exactly as it does with `APP_ENV` unset. Pass
+ * `--target` to be explicit.
  */
 export const resolveBuildTarget = ({
   target,
@@ -27,11 +29,14 @@ export const resolveBuildTarget = ({
       `Unknown app build target "${String(target)}". Expected "web" or "capacitor".`,
     );
   }
-  const isCapacitorEnvironment = isTruthyEnvironmentValue(appEnv);
+  const isCapacitorEnvironment =
+    (appEnv || '').trim().toLowerCase() === CAPACITOR_APP_ENV;
 
+  // An explicit web target cannot silently override an explicit
+  // `APP_ENV=capacitor`, because that would make a native build publishable.
   if (target === 'web' && isCapacitorEnvironment) {
     throw new Error(
-      'Cannot build target "web" while APP_ENV is enabled. Remove APP_ENV or use --target capacitor.',
+      'Cannot build target "web" while APP_ENV=capacitor. Unset APP_ENV or use --target capacitor.',
     );
   }
 

@@ -25,6 +25,13 @@ export interface LinkedAppReleaseDestination {
   accessURL: string;
   /** Key prefix every object of this release lives under. */
   releasePrefix: string;
+  /**
+   * Public URL the release's client bundle is served from — `accessURL`,
+   * the release prefix and the Vite output directory joined. The build passes
+   * it to Vite as `base`, so the bundle's own asset URLs resolve under the
+   * release prefix with no server rewrite. Empty for a Capacitor build.
+   */
+  baseURL: string;
 }
 
 export interface LinkedAppReleaseFile {
@@ -47,7 +54,6 @@ export interface LinkedAppReleaseManifest {
   publishable: boolean;
   builtAt: string;
   environmentNames: string[];
-  publicRoot: string;
   destination: LinkedAppReleaseDestination;
   files: LinkedAppReleaseFile[];
 }

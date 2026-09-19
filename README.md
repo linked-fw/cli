@@ -50,16 +50,39 @@ exits 0.
 ```bash
 linked build-app                  # build and write the release manifest (never uploads)
 linked build-app --publish        # ...and upload it in the same run
+linked build-app --revision <sha> # identify the release without asking git
+linked build-app --allow-dirty    # allow uncommitted changes; revision gets a "-dirty" suffix
 linked publish-app                # dry-run the release manifest upload (pass --yes to write)
 linked publish-app --yes          # upload the release described by the manifest
+linked publish-app --manifest <p> # publish a manifest other than the default path
 linked serve-app                  # run the compiled backend without Vite/HMR (production runtime)
 ```
+
+**Required Vite config.** The release flow reads `vite build` output directly, and the paths are
+hardcoded: the client bundle must land in `public/bundles` and Vite must write its manifest.
+`createViteConfig()` from `@_linked/cli/vite` already sets both; a hand-written `vite.config.ts`
+needs them explicitly:
+
+```ts
+export default defineConfig({
+  build: {
+    outDir: 'public/bundles',  // release object keys are <prefix>/public/bundles/...
+    manifest: true,            // build-app reads public/bundles/.vite/manifest.json
+  },
+});
+```
+
+Without `manifest: true` the build fails with a missing `public/bundles/.vite/manifest.json`; with a
+different `outDir` nothing is found to publish. Do not set `base` yourself — `build-app` passes it
+(see "How a release is served").
 
 **Building is not publishing.** `build-app` compiles the app and writes
 `public/bundles/linked-release.json`, a manifest listing every file of the release with its sha256,
 size, content type and cache policy. `publish-app` uploads exactly the files in that manifest —
 nothing else in `public/` is touched. Pass `--publish` to `build-app` only when you want the two
-chained in one command.
+chained in one command. `publish-app` is a dry run unless `--yes` is given, and `--manifest <path>`
+publishes a manifest from somewhere other than `public/bundles/linked-release.json` (the path is
+relative to the app root and must stay inside it).
 
 **Where it publishes.** Uploads go to the store returned by
 `LinkedFileStorage.getStore(FileStorePurposes.appAssets)`. Configure a dedicated bundle store with
@@ -68,16 +91,51 @@ chained in one command.
 configuration.
 
 **Every release gets its own prefix.** Object keys are
-`releases/<appVersion>-<gitRevision>/<path>`, so publishing a new release cannot overwrite the
+`releases/<appVersion>-<revision>/<path>`, so publishing a new release cannot overwrite the
 previous one and a rollback means pointing at an older prefix. Set `publish.releasePrefix` in
-`linked.config.js` to change the `releases` base.
+`linked.config.js` to change the `releases` base. A manifest may only upload to its own prefix: every
+`objectKey` is recomputed from the prefix and the source path before anything is written, so an
+edited or foreign manifest cannot reach into another release.
+
+**How a release is served.** Because every release has its own key prefix, the bundle's own URLs have
+to carry that prefix — nothing rewrites them at request time. `build-app` therefore resolves the
+store and the release prefix *before* running Vite and passes
+
+```
+base = <store accessURL>/<releasePrefix>/public/bundles/
+```
+
+so the chunk and asset URLs the bundle emits are absolute URLs into the release prefix. This works on
+a plain static store or CDN with no rewrite rules, and two releases can be served side by side. The
+value is recorded as `destination.baseURL` in the release manifest.
+
+The HTML entry tags are not part of the bundle — `@_linked/server` renders them as
+`${STATIC_ACCESS_URL}/public/bundles/<file>`. So serving a particular release is one deployment
+variable, which `build-app` prints when it finishes:
+
+```
+STATIC_ACCESS_URL=<store accessURL>/releases/<appVersion>-<revision>
+```
+
+Set that on the app server (or roll back by setting it to an older release prefix) and the entry
+tags and everything the bundle loads resolve to the same release. Note the consequence of baking the
+base in: a release is built for one store, and pointing it at another means rebuilding.
+
+**Which revision identifies a release.** By default the short `git rev-parse HEAD` of a **clean**
+tree. A dirty tree is refused, because two builds of the same uncommitted work would share a release
+ID and prefix and silently overwrite each other while removed files linger; pass `--allow-dirty` to
+build anyway as `<sha>-dirty`. Outside a Git checkout (an exported tarball, some CI images) pass
+`--revision <sha>`, or set `LINKED_RELEASE_REVISION` or `GITHUB_SHA`; those win over Git and skip
+the clean-tree check.
 
 **Verification.** Files are re-hashed from disk and compared against the manifest immediately before
 upload, so a build that changed since the manifest was written is refused. After upload the store is
 asked for `statFile`; that method is optional and may report no `sha256`, in which case the remote
 check is skipped with a single warning rather than a failure. An `etag` is never used as a content
 hash. The manifest also records the store's `accessURL`, and publishing refuses to run against a
-store that now writes somewhere else.
+store that now writes somewhere else. A failure partway through names the file, the object key, the
+store and how many objects were already uploaded; the manifest is uploaded last, so an incomplete
+release is never marked complete, and re-running `publish-app` resumes it.
 
 **The store must keep keys verbatim.** A release object has to be stored under exactly the key it
 was given, or the URLs baked into the bundle point at nothing, so publishing passes
@@ -85,13 +143,21 @@ was given, or the URLs baked into the bundle point at nothing, so publishing pas
 `@_linked/server`'s `LocalFileStore` lowercases the keys it is handed, so an app publishing to it
 needs lowercase asset filenames (`rollupOptions.output.hashCharacters: 'hex'` in `vite.config`).
 
-**Cache policy.** A filename carrying a content hash gets
-`public, max-age=31536000, immutable`; everything else, including `index.html` and the release
-manifest, gets `public, max-age=60, must-revalidate`.
+**Cache policy follows the origin, not the filename.** Files listed in the Vite manifest are
+content-hashed by construction and get `public, max-age=31536000, immutable`. Everything else —
+declared `publish.staticAssets` and the release manifest — gets
+`public, max-age=60, must-revalidate`. (Guessing from the filename was tried and dropped:
+`og-image-1200x630.png` and `sw-v20260101.js` read as hashed, and a year of immutable caching on
+those cannot be undone without renaming the file.)
 
-**Capacitor.** `--target capacitor` (or `APP_ENV`) writes a local, non-publishable manifest for
-inspection. Its assets ship inside the native app, so no file store is resolved and nothing is
-uploaded, even with `--publish`.
+**Extra static assets.** `publish.staticAssets` in `linked.config.js` lists globs of files under
+`public/` to ship besides the bundle. Both the pattern and every match must resolve inside
+`public/`, so brace expansion and symlinks cannot pull in files from elsewhere in the repo.
+
+**Capacitor.** `--target capacitor` (or `APP_ENV=capacitor`, matched literally) writes a local,
+non-publishable manifest for inspection. Its assets ship inside the native app, so no file store is
+resolved, no `base` is set and nothing is uploaded, even with `--publish`. Any other `APP_ENV` value
+(`production`, `staging`, …) is ignored by the target choice and builds web.
 
 Use `linked start` for development; use `linked serve-app` after `linked build-app` for
 staging/production.

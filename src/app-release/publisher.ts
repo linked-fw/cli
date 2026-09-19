@@ -22,6 +22,11 @@ export interface PlanReleasePublishOptions {
   store: IFileStore;
 }
 
+export interface LoadedReleaseManifest {
+  absolutePath: string;
+  manifest: LinkedAppReleaseManifest;
+}
+
 export interface PublishReleaseOptions extends PlanReleasePublishOptions {
   yes?: boolean;
   onProgress?: (progress: PublishProgress) => void;
@@ -34,10 +39,42 @@ export interface PublishProgress {
   objectKey: string;
 }
 
-const readManifest = (
+/**
+ * Every object of a release must land under that release's own prefix.
+ *
+ * The manifest is a plain file on disk: a hand-edited or foreign one can name
+ * any `objectKey` it likes, and nothing else catches it — the `accessURL` check
+ * only proves the store is the right store, and the stored-location check only
+ * proves the store kept the key it was handed. So the key is not merely checked
+ * for shape, it is recomputed: it has to be exactly what this release prefix and
+ * this source path produce, or a release could overwrite a *different* release.
+ */
+const validateObjectKey = (
+  releasePrefix: string,
+  file: LinkedAppReleaseFile,
+): void => {
+  const sourcePath = normalizeReleasePath(
+    String(file.sourcePath ?? ''),
+    'source path',
+  );
+  const objectKey = normalizeReleasePath(
+    String(file.objectKey ?? ''),
+    'object key',
+  );
+  const expected = releaseObjectKey(releasePrefix, sourcePath);
+  if (objectKey !== expected) {
+    throw new Error(
+      `Release manifest object key is not under the release prefix: ` +
+        `"${file.objectKey}" (expected "${expected}"). Rebuild the release; ` +
+        'a manifest may only upload to its own prefix.',
+    );
+  }
+};
+
+export const loadReleaseManifest = (
   appRoot: string,
   manifestPath = MANIFEST_SOURCE_PATH,
-): {absolutePath: string; manifest: LinkedAppReleaseManifest} => {
+): LoadedReleaseManifest => {
   const absolutePath = resolveExistingPathWithinRoot(appRoot, manifestPath);
   const manifest = JSON.parse(
     fs.readFileSync(absolutePath, 'utf8'),
@@ -56,6 +93,13 @@ const readManifest = (
   }
   if (!manifest.destination?.releasePrefix) {
     throw new Error('Release manifest has no release prefix');
+  }
+  const releasePrefix = normalizeReleasePath(
+    manifest.destination.releasePrefix,
+    'release prefix',
+  );
+  for (const file of manifest.files) {
+    validateObjectKey(releasePrefix, file);
   }
 
   return {absolutePath, manifest};
@@ -92,7 +136,8 @@ const validateLocalFile = (
   appRoot: string,
   file: LinkedAppReleaseFile,
 ): string => {
-  normalizeReleasePath(file.objectKey, 'object key');
+  // `resolveExistingPathWithinRoot` resolves symlinks, so a source path that
+  // points out of the app root through one is refused here too.
   const absolutePath = resolveExistingPathWithinRoot(appRoot, file.sourcePath);
   const content = fs.readFileSync(absolutePath);
   if (content.byteLength !== file.size || hashBuffer(content) !== file.sha256) {
@@ -104,7 +149,7 @@ const validateLocalFile = (
 export const planReleasePublish = (
   options: PlanReleasePublishOptions,
 ): PublishPlan => {
-  const {absolutePath, manifest} = readManifest(
+  const {absolutePath, manifest} = loadReleaseManifest(
     options.appRoot,
     options.manifestPath,
   );
@@ -225,18 +270,50 @@ export const publishRelease = async (
 
   const totalUploads = plan.files.length + 1;
   let completedUploads = 0;
+
+  /**
+   * A failure halfway through leaves a partial prefix behind, so the message
+   * has to say which object failed, where it was going and how much is already
+   * there — and that a re-run finishes the job, since keys are deterministic
+   * and every object is overwritten with identical bytes.
+   */
+  const describeFailure = (
+    error: unknown,
+    what: string,
+    objectKey: string,
+  ): Error => {
+    const cause = error instanceof Error ? error : new Error(String(error));
+    const failure = new Error(
+      `Release upload failed while uploading ${what} to "${objectKey}" ` +
+        `(store ${options.store.accessURL || '(no accessURL)'}): ${cause.message}. ` +
+        `${completedUploads} of ${totalUploads} objects were already uploaded under ` +
+        `"${plan.destination.releasePrefix}"; the release manifest was not uploaded, so the ` +
+        'release is incomplete. Re-running publish-app resumes it — object keys are ' +
+        'deterministic and already-uploaded objects are rewritten with identical bytes.',
+    );
+    (failure as Error & {cause?: unknown}).cause = cause;
+    failure.stack = cause.stack
+      ? `${failure.message}\nCaused by: ${cause.stack}`
+      : failure.stack;
+    return failure;
+  };
+
   for (const file of plan.files) {
     const absolutePath = resolveExistingPathWithinRoot(
       options.appRoot,
       file.sourcePath,
     );
-    await upload(
-      file.objectKey,
-      fs.readFileSync(absolutePath),
-      file.contentType,
-      file.cacheControl,
-      file.sha256,
-    );
+    try {
+      await upload(
+        file.objectKey,
+        fs.readFileSync(absolutePath),
+        file.contentType,
+        file.cacheControl,
+        file.sha256,
+      );
+    } catch (error) {
+      throw describeFailure(error, file.sourcePath, file.objectKey);
+    }
     completedUploads += 1;
     options.onProgress?.({
       completed: completedUploads,
@@ -248,13 +325,17 @@ export const publishRelease = async (
   // The manifest goes last: its presence under the release prefix is what marks
   // the release as complete.
   const manifestBody = fs.readFileSync(plan.manifestPath);
-  await upload(
-    plan.manifestObjectKey,
-    manifestBody,
-    MANIFEST_CONTENT_TYPE,
-    ENTRY_CACHE_CONTROL,
-    hashBuffer(manifestBody),
-  );
+  try {
+    await upload(
+      plan.manifestObjectKey,
+      manifestBody,
+      MANIFEST_CONTENT_TYPE,
+      ENTRY_CACHE_CONTROL,
+      hashBuffer(manifestBody),
+    );
+  } catch (error) {
+    throw describeFailure(error, 'the release manifest', plan.manifestObjectKey);
+  }
   completedUploads += 1;
   options.onProgress?.({
     completed: completedUploads,

@@ -33,6 +33,9 @@ describe('createReleaseManifest', () => {
       ...overrides,
     });
 
+  const writeViteManifest = (entries: Record<string, unknown>) =>
+    write('public/bundles/.vite/manifest.json', JSON.stringify(entries));
+
   beforeEach(() => {
     appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-manifest-'));
     write('package.json', JSON.stringify({name: 'peacegame', version: '4.2.6'}));
@@ -40,18 +43,15 @@ describe('createReleaseManifest', () => {
     write('public/bundles/assets/main.12345678.css', 'css');
     write('public/bundles/assets/lazy.abcdef12.js', 'lazy');
     write('public/bundles/assets/logo.87654321.png', 'png');
-    write(
-      'public/bundles/.vite/manifest.json',
-      JSON.stringify({
-        'src/index.tsx': {
-          file: 'assets/main.12345678.js',
-          css: ['assets/main.12345678.css'],
-          assets: ['assets/logo.87654321.png'],
-          dynamicImports: ['src/lazy.tsx'],
-        },
-        'src/lazy.tsx': {file: 'assets/lazy.abcdef12.js'},
-      }),
-    );
+    writeViteManifest({
+      'src/index.tsx': {
+        file: 'assets/main.12345678.js',
+        css: ['assets/main.12345678.css'],
+        assets: ['assets/logo.87654321.png'],
+        dynamicImports: ['src/lazy.tsx'],
+      },
+      'src/lazy.tsx': {file: 'assets/lazy.abcdef12.js'},
+    });
   });
 
   afterEach(() => {
@@ -97,6 +97,18 @@ describe('createReleaseManifest', () => {
 
   test('records the store accessURL as the destination', () => {
     expect(create().destination.accessURL).toBe('https://cdn.example.test');
+  });
+
+  test('records the public base URL the bundle is served from', () => {
+    expect(create().destination.baseURL).toBe(
+      `https://cdn.example.test/${PREFIX}/public/bundles/`,
+    );
+  });
+
+  test('a Capacitor manifest has no base URL', () => {
+    expect(create({target: 'capacitor', accessURL: null}).destination.baseURL).toBe(
+      '',
+    );
   });
 
   test('includes only declared extra static assets', () => {
@@ -149,18 +161,46 @@ describe('createReleaseManifest', () => {
     expect(entry.cacheControl).toBe(ENTRY_CACHE_CONTROL);
   });
 
+  test('cache policy follows the origin, not the filename', () => {
+    expect(getCacheControl('vite-bundle')).toBe(IMMUTABLE_CACHE_CONTROL);
+    expect(getCacheControl('static-asset')).toBe(ENTRY_CACHE_CONTROL);
+  });
+
   test.each([
-    // Vite's default names are base64url, not hex.
-    ['main-hwqwrAvA.css', IMMUTABLE_CACHE_CONTROL],
-    ['main-BZAFw2tv.js', IMMUTABLE_CACHE_CONTROL],
-    ['main.12345678.js', IMMUTABLE_CACHE_CONTROL],
-    ['logo.87654321.png', IMMUTABLE_CACHE_CONTROL],
-    ['index.html', ENTRY_CACHE_CONTROL],
-    ['linked-release.json', ENTRY_CACHE_CONTROL],
-    ['service-worker.js', ENTRY_CACHE_CONTROL],
-    ['main.js', ENTRY_CACHE_CONTROL],
-  ])('cache policy for %s', (fileName, expected) => {
-    expect(getCacheControl(`public/bundles/${fileName}`)).toBe(expected);
+    // Vite's default names are base64url, not hex — and it no longer matters
+    // what they look like: being in the Vite manifest is what makes them
+    // immutable.
+    'main-hwqwrAvA.css',
+    'main-BZAFw2tv.js',
+    'main.12345678.js',
+    'logo.87654321.png',
+  ])('a Vite bundle file is immutable: %s', (fileName) => {
+    write(`public/bundles/assets/${fileName}`, fileName);
+    writeViteManifest({
+      'src/index.tsx': {file: `assets/${fileName}`},
+    });
+    const file = create().files.find((entry) =>
+      entry.objectKey.endsWith(fileName),
+    )!;
+    expect(file.cacheControl).toBe(IMMUTABLE_CACHE_CONTROL);
+  });
+
+  test.each([
+    // Hand-written names that the old filename heuristic read as hashed. A year
+    // of immutable caching on these could not be undone without renaming them.
+    'logo.svg',
+    'og-image-1200x630.png',
+    'sw-v20260101.js',
+    'icon-FacebookRound.svg',
+    'index.html',
+    'service-worker.js',
+  ])('a declared static asset is short-lived: %s', (fileName) => {
+    write(`public/${fileName}`, fileName);
+    const manifest = create({staticAssets: [`public/${fileName}`]});
+    const file = manifest.files.find((entry) =>
+      entry.objectKey.endsWith(fileName),
+    )!;
+    expect(file.cacheControl).toBe(ENTRY_CACHE_CONTROL);
   });
 
   test('deduplicates files referenced by multiple entries', () => {
