@@ -6,8 +6,6 @@ Command-line tools for the `@_linked/*` packages and apps.
 
 ```bash
 npm install --save-dev @_linked/cli
-# or
-yarn add -D @_linked/cli
 ```
 
 ## Binaries
@@ -129,7 +127,8 @@ API-only mode is never inferred: a web app without a `vite.config.*` and without
 
 ```bash
 cd packages/cli
-yarn build
+npm install
+npm run build
 ```
 
 Dual ESM + CJS build via `tsconfig-to-dual-package`. Sources in `src/`, output in `lib/esm/` and `lib/cjs/`.
@@ -208,7 +207,7 @@ cd apps/mobile && npx expo export --platform ios --output-dir /tmp/export
 
 To run it: `npm run fuseki:up`, `npm run api`, then `cd apps/mobile && npx expo run:ios`.
 
-Tests for this template in this repo: `yarn test:unit` covers the scaffold offline, using the fixture in
+Tests for this template in this repo: `npm run test:unit` covers the scaffold offline, using the fixture in
 `tests/fixtures/app-react-native-min` and the real template. `npm run test:template` runs the built CLI with
 install, then checks the generated files, `check:react`, lint, typecheck, `npm test`, the shapes build and a
 Metro iOS bundle. It builds nothing itself, needs network and takes several minutes.

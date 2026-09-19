@@ -1,6 +1,7 @@
 {
   "name": "@_linked/cli",
   "version": "1.16.0",
+  "packageManager": "npm@11.19.1",
   "description": "Command line tools for the @_linked/* packages and apps",
   "main": "lib/esm/index.js",
   "types": "./lib/esm/index.d.ts",
@@ -28,17 +29,17 @@
     }
   },
   "scripts": {
-    "build": "rimraf ./lib && yarn build-esm && yarn copy-to-lib",
-    "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && yarn tsc -p tsconfig-esm.json",
-    "copy-to-lib": "echo '💫 Copying CSS assets to lib folder' && yarn copyfiles -u 1 'src/**/*.css' lib/esm",
-    "dev": "yarn tsc -p tsconfig-esm.json -w",
-    "test": "yarn test:unit && yarn test:e2e",
+    "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib",
+    "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && tsc -p tsconfig-esm.json",
+    "copy-to-lib": "echo '💫 Copying CSS assets to lib folder' && copyfiles -u 1 'src/**/*.css' lib/esm",
+    "dev": "tsc -p tsconfig-esm.json -w",
+    "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "jest --config jest.config.cjs",
     "test:e2e": "playwright test --config playwright.config.ts",
     "test:template": "RUN_TEMPLATE_FULL=1 jest --config jest.template.config.cjs",
     "prettier": "prettier \"src/**/*.{js,jsx,ts,tsx,css,scss}\" --check",
-    "prettier:fix": "yarn prettier --write",
-    "format": "yarn prettier:fix && yarn lint:fix"
+    "prettier:fix": "npm run prettier -- --write",
+    "format": "npm run prettier:fix && npm run lint:fix"
   },
   "lint-staged": {
     "*.{js,ts,tsx}": [

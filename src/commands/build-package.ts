@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import {execp} from '../utils.js';
+import {detectPackageManager} from '../utils/packageManager.js';
 
 /**
  * Given any file or directory path, walk up to find the nearest package.json
@@ -23,8 +24,7 @@ export async function buildPackageByPath(filePath: string): Promise<void> {
     const pkgJsonPath = path.join(currentPath, 'package.json');
     if (fs.existsSync(pkgJsonPath)) {
       const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-      const isLinked =
-        pkgJson.linkedPackage === true || pkgJson.lincd === true;
+      const isLinked = pkgJson.linkedPackage === true || pkgJson.lincd === true;
 
       if (!isLinked) {
         console.log(
@@ -37,27 +37,32 @@ export async function buildPackageByPath(filePath: string): Promise<void> {
 
       console.log(chalk.cyan(`Rebuilding ${pkgJson.name}`));
 
-      // Prefer workspace-local yarn if available, else fall back to PATH `yarn`
-      let yarnBin = 'yarn';
-      const yarnReleasesDir = path.join(process.cwd(), '.yarn', 'releases');
-      if (fs.existsSync(yarnReleasesDir)) {
-        const releases = fs.readdirSync(yarnReleasesDir);
-        if (releases.length > 0) {
-          yarnBin = path.join(yarnReleasesDir, releases[0]);
+      // npm is the default. Only a package that actually lives in a yarn
+      // project is built through yarn — that keeps existing yarn monorepos
+      // (which may vendor their own yarn release) working.
+      //
+      // Either way we invoke the `linked` BINARY rather than a script: inner
+      // packages don't have a "linked" script in package.json.
+      let runner = 'npx --no-install';
+      if (detectPackageManager(currentPath) === 'yarn') {
+        let yarnBin = 'yarn';
+        const yarnReleasesDir = path.join(process.cwd(), '.yarn', 'releases');
+        if (fs.existsSync(yarnReleasesDir)) {
+          const releases = fs.readdirSync(yarnReleasesDir);
+          if (releases.length > 0) {
+            yarnBin = path.join(yarnReleasesDir, releases[0]);
+          }
         }
+        runner = `${yarnBin} exec`;
       }
 
-      // Use `yarn exec` so we invoke the `linked` binary rather than a script.
-      // Inner packages don't have a "linked" script in package.json.
-      const command = `cd ${currentPath} && ${yarnBin} exec linked build`;
+      const command = `cd ${currentPath} && ${runner} linked build`;
       await execp(command, true, false);
       return;
     }
     currentPath = path.dirname(currentPath);
   }
 
-  console.error(
-    chalk.red(`No package.json found walking up from ${filePath}`),
-  );
+  console.error(chalk.red(`No package.json found walking up from ${filePath}`));
   process.exit(1);
 }

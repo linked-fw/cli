@@ -17,12 +17,12 @@
   "types": "lib/esm/index.d.ts",
   "license": "ISC",
   "scripts": {
-    "start": "yarn linked dev",
-    "build": "rimraf ./lib && yarn build-esm && yarn build-cjs && yarn copy-to-lib && yarn dual-package",
-    "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && yarn tsc -p tsconfig-esm.json",
-    "build-cjs": "echo \"compiling CJS\" && rimraf ./lib/cjs && yarn tsc -p tsconfig-cjs.json",
-    "copy-to-lib": "echo 'copying CSS + JSON assets to lib folder' && yarn copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/esm && yarn copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/cjs",
-    "dual-package": "echo 'adding package.json to each lib folder for dual output support' && yarn tsconfig-to-dual-package ./tsconfig-cjs.json ./tsconfig-esm.json"
+    "start": "linked dev",
+    "build": "rimraf ./lib && npm run build-esm && npm run build-cjs && npm run copy-to-lib && npm run dual-package",
+    "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && tsc -p tsconfig-esm.json",
+    "build-cjs": "echo \"compiling CJS\" && rimraf ./lib/cjs && tsc -p tsconfig-cjs.json",
+    "copy-to-lib": "echo 'copying CSS + JSON assets to lib folder' && copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/esm && copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/cjs",
+    "dual-package": "echo 'adding package.json to each lib folder for dual output support' && tsconfig-to-dual-package ./tsconfig-cjs.json ./tsconfig-esm.json"
   },
   "keywords": [
     "linked",
