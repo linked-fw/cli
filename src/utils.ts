@@ -187,7 +187,7 @@ export var getPackageJSON = function (root = process.cwd(), error = true) {
   } else if (root === process.cwd()) {
     if (error) {
       console.warn(
-        'Could not find package.json. Make sure you run this command from the root of a lincd module or a lincd yarn workspace',
+        'Could not find package.json. Make sure you run this command from the root of a linked package or a linked workspace',
       );
       process.exit();
     }

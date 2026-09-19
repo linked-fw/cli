@@ -100,7 +100,7 @@ export function generateWebpackConfig(
     //   },
     // }),
 
-    //NOTE: grunt comes with a copy task, which is ran during `yarn lincd build` but cannot run during `yarn lincd dev`
+    //NOTE: grunt comes with a copy task, which is ran during `linked build` but cannot run during `linked dev`
     //so here we ALSO copy the same files to cover dev flow
     new CopyPlugin({
       patterns: [
@@ -319,7 +319,7 @@ export function generateWebpackConfig(
     //which eventually results in an import of @dacore/core being bundled as 'const =', which trips up old browsers
     //so we fix that here by just referring directly to the typescript source instead of the transpiled js for internalised modules
     //however this means that for internalised modules THE SOURCE CODE NEEDS TO BE AVAILABLE. This is currently NOT the case with how we publish modules to yarn
-    //so that means internalised modules need to be LOCALLY AVAILABLE with yarn workspaces
+    //so that means internalised modules need to be LOCALLY AVAILABLE as workspace packages
     plugins.push(
       new webpack.NormalModuleReplacementPlugin(/lincd\/lib\//, (resource) => {
         let moduleName = resource.request.match(/lincd\/lib\//)[1];
