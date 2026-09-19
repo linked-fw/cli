@@ -1,6 +1,6 @@
 # Linked React Native monorepo
 
-An npm-workspaces monorepo for a [Linked](https://github.com/linked-cm) app on Expo SDK 57 / React Native 0.86 /
+An npm-workspaces monorepo for a [Linked](https://github.com/linked-fw) app on Expo SDK 57 / React Native 0.86 /
 React 19.2, with an API-only Linked backend on Fuseki.
 
 ```

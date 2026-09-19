@@ -1,0 +1,21 @@
+name: PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  checks:
+    uses: linked-fw/.github/.github/workflows/pr.yml@v1
+    # The changeset reminder posts a PR comment. A reusable workflow only holds what its
+    # caller granted, and the org default is read-only.
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      require-tests: true
+      # `test` chains test:unit && test:e2e; the e2e half starts containers and times out in
+      # CI, which is why the previous workflow ran it only when RUN_E2E was set.
+      test-script: test:unit
+      run-e2e: false

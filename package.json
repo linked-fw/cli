@@ -54,7 +54,7 @@
     "build",
     "tools"
   ],
-  "repository": "https://github.com/linked-cm/cli",
+  "repository": "https://github.com/linked-fw/cli",
   "author": {
     "name": "René Verheij",
     "url": "https://github.com/flyon",

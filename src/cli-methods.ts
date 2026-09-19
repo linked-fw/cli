@@ -175,7 +175,7 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
   // Scaffold from the canonical template repo (single source of truth; CN's
   // server-side createProject clones the same repo). Shallow clone, then drop
   // .git so the new app starts with clean history.
-  await execPromise(`git clone --depth 1 https://github.com/linked-cm/app-template.git "${targetFolder}"`, false, false);
+  await execPromise(`git clone --depth 1 https://github.com/linked-fw/app-template.git "${targetFolder}"`, false, false);
   fs.removeSync(path.join(targetFolder, '.git'));
   //make sure the data folder exists (even though its empty).. copying empty folders does not work with fs.copySync
   fs.mkdirSync(path.join(targetFolder, 'data'), {recursive: true});
