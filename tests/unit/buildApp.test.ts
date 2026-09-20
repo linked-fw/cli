@@ -149,14 +149,29 @@ describe('buildViteApp', () => {
 
   it('refuses to build a release from a dirty tree without --allow-dirty', async () => {
     // No revision given, and the fixture app is not a Git checkout at all, so
-    // the revision escape hatch is what makes a build possible here.
+    // the build can only fall back to the revision escape hatches. CI sets
+    // GITHUB_SHA on every runner, so clear both or this passes locally and
+    // silently resolves on CI.
+    delete process.env.LINKED_RELEASE_REVISION;
+    delete process.env.GITHUB_SHA;
     await expect(
       buildViteApp({appRoot: makeApp(), target: 'web'}, baseDependencies),
     ).rejects.toThrow('--revision <sha>');
   });
 
+  it('falls back to GITHUB_SHA when no revision is given', async () => {
+    delete process.env.LINKED_RELEASE_REVISION;
+    process.env.GITHUB_SHA = 'gha-feedface';
+    const manifest = await buildViteApp(
+      {appRoot: makeApp(), target: 'web'},
+      baseDependencies,
+    );
+    expect(manifest.releaseId).toBe('1.2.3-gha-feedface');
+  });
+
   it('takes the revision from LINKED_RELEASE_REVISION', async () => {
     const appRoot = makeApp();
+    delete process.env.GITHUB_SHA;
     process.env.LINKED_RELEASE_REVISION = 'ci-deadbeef';
     const manifest = await buildViteApp(
       {appRoot, target: 'web'},
