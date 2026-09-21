@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.19.1
+
+### Patch Changes
+
+- [#102](https://github.com/linked-fw/cli/pull/102) [`f3f2ea9`](https://github.com/linked-fw/cli/commit/f3f2ea918a357b683b1f9005d533776471d1d7ab) Thanks [@flyon](https://github.com/flyon)! - Keep `react-router` and `@remix-run/router` in the `react-vendor` chunk.
+
+  `react-router-dom` was grouped with React but `react-router`, which it
+  re-exports, was left in the catch-all `vendor` chunk. That made the two chunks
+  import each other — `vendor` also runs `React.createContext(...)` at module
+  scope — and Rollup resolved the cycle by running `vendor` first, so every
+  production build threw `Cannot read properties of undefined (reading
+'createContext')` before the app rendered a single frame.
+
+  The chunk routing is now exported as `chunkForModuleId` and covered by unit
+  tests, since getting it wrong produces a bundle that builds cleanly and only
+  fails in the browser.
+
 ## 1.19.0
 
 ### Minor Changes
