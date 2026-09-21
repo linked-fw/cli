@@ -29,7 +29,8 @@
     }
   },
   "scripts": {
-    "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib",
+    "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib && npm run chmod-bin",
+    "chmod-bin": "chmod +x lib/esm/launch.js",
     "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && tsc -p tsconfig-esm.json",
     "copy-to-lib": "echo '💫 Copying CSS assets to lib folder' && copyfiles -u 1 'src/**/*.css' lib/esm",
     "dev": "tsc -p tsconfig-esm.json -w",
