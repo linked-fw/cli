@@ -17,9 +17,11 @@ import type {PackageDetails} from './interfaces.js';
  * shell env so it always wins on conflict. Idempotent — runs at most once.
  *
  * Two sources, tried in this order:
- *   1. `.env-cmdrc.json` (legacy, via `env-cmd`) — profile-based; honours
- *      `--env a,b` and merges `_main` + the named profiles. CN and existing
- *      apps rely on this (e.g. `--env development,local`).
+ *   1. `.env-cmdrc.json` (DEPRECATED, via `env-cmd`) — profile-based; honours
+ *      `--env a,b` and merges `_main` + the named profiles. Still honoured
+ *      first so existing apps keep working, but it now warns once per run:
+ *      `--env` and the profile model are going away, and a flat `.env` plus
+ *      the ambient environment replaces both.
  *   2. `.env` (Node-native `process.loadEnvFile`, no dependency) — a flat file.
  *      This is what the app template ships. `--env` is not consulted here: a
  *      flat `.env` has no profiles, so NODE_ENV comes from the file or the shell.
@@ -41,6 +43,12 @@ export const ensureEnvironmentLoaded = async (
   const shellEnv = {...process.env};
 
   if (fs.existsSync(envCmdrcPath)) {
+    for (const notice of envDeprecationNotices({
+      hasEnvCmdrc: true,
+      hasDotEnv: fs.existsSync(dotEnvPath),
+    })) {
+      console.warn(chalk.yellow(notice));
+    }
     await loadEnvCmdrc(envCmdrcPath, environmentNames);
   } else if (fs.existsSync(dotEnvPath)) {
     // Native flat-file loader (Node 20.12+). Populates process.env from `.env`.
@@ -54,6 +62,35 @@ export const ensureEnvironmentLoaded = async (
   // Re-apply shell env so it always wins over file values.
   process.env = {...process.env, ...shellEnv};
   process.env.ENV_VARS_LOADED = 'true';
+};
+
+/**
+ * What to tell an app about where its environment came from.
+ *
+ * `.env-cmdrc.json` is still read first, so nothing breaks today. But it is the
+ * only reason `--env` exists, and both are going away. A profile file that
+ * shadows a flat `.env` sitting right next to it is the case worth shouting
+ * about: the `.env` is ignored in full, with nothing said, which is invisible
+ * from the outside and easy to lose an hour to.
+ *
+ * Pure and exported so the messages can be asserted without a chdir.
+ */
+export const envDeprecationNotices = (sources: {
+  hasEnvCmdrc: boolean;
+  hasDotEnv: boolean;
+}): string[] => {
+  if (!sources.hasEnvCmdrc) return [];
+  const notices = [
+    '.env-cmdrc.json is deprecated and will be removed in a future major release.',
+    '  Move its values into a flat `.env`, and supply anything that differs per ' +
+      'deployment from the environment itself. `--env` goes away with it.',
+  ];
+  if (sources.hasDotEnv) {
+    notices.push(
+      '  This app has BOTH files. `.env-cmdrc.json` wins, so `.env` is being ignored entirely.',
+    );
+  }
+  return notices;
 };
 
 /**
