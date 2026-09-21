@@ -17,14 +17,16 @@ import type {PackageDetails} from './interfaces.js';
  * shell env so it always wins on conflict. Idempotent — runs at most once.
  *
  * Two sources, tried in this order:
- *   1. `.env-cmdrc.json` (DEPRECATED, via `env-cmd`) — profile-based; honours
- *      `--env a,b` and merges `_main` + the named profiles. Still honoured
- *      first so existing apps keep working, but it now warns once per run:
- *      `--env` and the profile model are going away, and a flat `.env` plus
- *      the ambient environment replaces both.
- *   2. `.env` (Node-native `process.loadEnvFile`, no dependency) — a flat file.
- *      This is what the app template ships. `--env` is not consulted here: a
- *      flat `.env` has no profiles, so NODE_ENV comes from the file or the shell.
+ *   1. `.env` (Node-native `process.loadEnvFile`, no dependency) — a flat file.
+ *      This is what the app template ships and the only form that will survive.
+ *      `--env` is not consulted here: a flat `.env` has no profiles, so
+ *      NODE_ENV comes from the file or the shell.
+ *   2. `.env-cmdrc.json` (DEPRECATED, via `env-cmd`) — profile-based; honours
+ *      `--env a,b` and merges `_main` + the named profiles. Still read when it
+ *      is the only file present, so no existing app breaks, but it warns.
+ *
+ * `.env` going first is what makes migrating a one-step job: add the flat file
+ * and it takes over. The profile file can then be deleted whenever convenient.
  *
  * If neither file exists we skip silently — CN-hosted apps have their env
  * injected into the child process at spawn time, so there's nothing to read
@@ -42,17 +44,18 @@ export const ensureEnvironmentLoaded = async (
   // whatever a file sets (so injected/production env wins over dev defaults).
   const shellEnv = {...process.env};
 
-  if (fs.existsSync(envCmdrcPath)) {
-    for (const notice of envDeprecationNotices({
-      hasEnvCmdrc: true,
-      hasDotEnv: fs.existsSync(dotEnvPath),
-    })) {
-      console.warn(chalk.yellow(notice));
-    }
-    await loadEnvCmdrc(envCmdrcPath, environmentNames);
-  } else if (fs.existsSync(dotEnvPath)) {
+  const hasDotEnv = fs.existsSync(dotEnvPath);
+  const hasEnvCmdrc = fs.existsSync(envCmdrcPath);
+
+  for (const notice of envDeprecationNotices({hasEnvCmdrc, hasDotEnv})) {
+    console.warn(chalk.yellow(notice));
+  }
+
+  if (hasDotEnv) {
     // Native flat-file loader (Node 20.12+). Populates process.env from `.env`.
     process.loadEnvFile(dotEnvPath);
+  } else if (hasEnvCmdrc) {
+    await loadEnvCmdrc(envCmdrcPath, environmentNames);
   } else {
     console.warn(
       'No .env or .env-cmdrc.json found in this folder — relying on the ambient environment.',
@@ -67,11 +70,14 @@ export const ensureEnvironmentLoaded = async (
 /**
  * What to tell an app about where its environment came from.
  *
- * `.env-cmdrc.json` is still read first, so nothing breaks today. But it is the
- * only reason `--env` exists, and both are going away. A profile file that
- * shadows a flat `.env` sitting right next to it is the case worth shouting
- * about: the `.env` is ignored in full, with nothing said, which is invisible
- * from the outside and easy to lose an hour to.
+ * `.env-cmdrc.json` is still read when it is the only file present, so no app
+ * breaks today. But it is the only reason `--env` exists, and both are going
+ * away.
+ *
+ * The case worth shouting about is an app holding both files: `.env` wins, so
+ * the profile file and every `--env` name passed with it do nothing. That is
+ * the intended migration path, but it is invisible from the outside — values
+ * an app still believes it is getting from a profile are simply absent.
  *
  * Pure and exported so the messages can be asserted without a chdir.
  */
@@ -87,7 +93,9 @@ export const envDeprecationNotices = (sources: {
   ];
   if (sources.hasDotEnv) {
     notices.push(
-      '  This app has BOTH files. `.env-cmdrc.json` wins, so `.env` is being ignored entirely.',
+      '  This app has BOTH files. `.env` wins, so `.env-cmdrc.json` — and any ' +
+        '`--env` profile named with it — is being ignored entirely. Delete it once ' +
+        'the flat file is complete.',
     );
   }
   return notices;

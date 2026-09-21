@@ -2,13 +2,15 @@
 '@_linked/cli': minor
 ---
 
-Warn that `.env-cmdrc.json` is deprecated.
+Read `.env` before `.env-cmdrc.json`, and warn that the profile file is deprecated.
 
-It is still read, and still read *first*, so nothing changes for an app that
-uses it. But it is the only reason `--env` exists, and both are going away: a
-flat `.env` plus whatever the deployment injects into the environment replaces
-the profile model entirely.
+The order was the other way round, which made migrating awkward: an app that
+added a flat `.env` next to its existing profile file saw none of it, silently.
+Now `.env` wins, so adding it *is* the migration — the profile file can be
+deleted whenever convenient.
 
-The warning also calls out the case that costs the most time to diagnose — an
-app with both files, where `.env-cmdrc.json` wins and the `.env` sitting next
-to it is ignored in full, silently.
+`.env-cmdrc.json` is still read when it is the only file present, so no app
+breaks. It now warns that it, and the `--env` flag that exists only to serve
+it, are going away: a flat `.env` plus whatever the deployment injects into the
+environment replaces both. An app holding both files is told explicitly that
+the profile file and any `--env` name passed with it are being ignored.
