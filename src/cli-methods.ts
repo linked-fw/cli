@@ -2305,9 +2305,9 @@ export const buildFrontend = async () => {
     // load the storage config
     const storageConfig = await loadBackendStorageConfig();
 
-    // check if LincdFileStorage has a default FileStore
-    // if yes: copy all the files in the build folder over with LincdFileStorage
-    if (LinkedFileStorage.getDefaultDataset()) {
+    // check if LinkedFileStorage has a default FileStore
+    // if yes: copy all the files in the build folder over with LinkedFileStorage
+    if (LinkedFileStorage.getDefaultStore()) {
       // get public directory
       const rootDirectory = 'public';
       const pathDir = path.join(process.cwd(), rootDirectory);
@@ -2339,8 +2339,16 @@ export const buildFrontend = async () => {
         // example: /Users/username/project/www/index.html -> /project/www/index.html
         const pathname = filePath.replace(pathDir, `/${rootDirectory}`);
 
-        // upload file to storage
-        await LinkedFileStorage.saveFile(pathname, fileContent)
+        // upload file to storage.
+        //
+        // preventDuplicates: false because this publishes a public/ folder to a
+        // CDN, where the key is the address: `main-hwqwrAvA.css` has to land as
+        // `main-hwqwrAvA.css` or the name baked into the HTML does not resolve,
+        // and republishing an unchanged build has to overwrite in place rather
+        // than accumulate a second copy under a new key.
+        await LinkedFileStorage.saveFile(pathname, fileContent, {
+          preventDuplicates: false,
+        })
           .then(() => {
             clearSpinner.text = `${counter++}/${files.length}: - Published ${pathname} `;
           })
