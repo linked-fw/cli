@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.22.1
+
+### Patch Changes
+
+- [#123](https://github.com/linked-fw/cli/pull/123) [`fe88c7d`](https://github.com/linked-fw/cli/commit/fe88c7d52d8aeb1c2d742b0fdf8f0dcc028ee6ba) Thanks [@flyon](https://github.com/flyon)! - The TypeScript loader resolves a relative `./x.js` onto `./x.ts`.
+
+  This is the NodeNext convention — TypeScript requires the `.js` spelling in
+  source that emits ESM and rewrites nothing — so a module written that way could
+  previously only be loaded from a built `lib/`, never from source. The loader
+  now falls back to the TypeScript file when the `.js` does not exist on disk,
+  matching what `tsc` itself does.
+
+  It matters most for a self-referential ontology namespace import
+  (`import * as _this from './vocab.js'`), which is exactly the shape the
+  framework's own ontology files use.
+
 ## 1.22.0
 
 ### Minor Changes
