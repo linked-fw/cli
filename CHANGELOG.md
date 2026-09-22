@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.22.2
+
+### Patch Changes
+
+- [#125](https://github.com/linked-fw/cli/pull/125) [`14f215f`](https://github.com/linked-fw/cli/commit/14f215f0c9d88ae03f29a3f169e8e0e731baa065) Thanks [@flyon](https://github.com/flyon)! - Document both `manualChunks` cycles and the invariant behind them — see
+  `docs/reports/003-manual-chunk-cycles.md`.
+
 ## 1.22.1
 
 ### Patch Changes
