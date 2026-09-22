@@ -84,6 +84,16 @@ describe('findInlinedWorkspaceImports', () => {
     expect(findInlinedWorkspaceImports(source)).toEqual([]);
   });
 
+  test('spots one pulled in by a lazily imported page', () => {
+    // A lazy page appears as a dynamic import in the output, not a static one.
+    const source =
+      'const Page = () => import("./packages/documents/lib/esm/index.js");';
+
+    expect(findInlinedWorkspaceImports(source)).toEqual([
+      './packages/documents/lib/esm/index.js',
+    ]);
+  });
+
   test('does not confuse an app directory that happens to be named packages', () => {
     // `@_linked/foo/packages/…` is a bare specifier, not a relative one.
     const source = 'import x from "@_linked/foo/packages/bar.js";';

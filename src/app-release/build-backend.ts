@@ -92,25 +92,37 @@ export const workspacePackagesToExternalize = async (
  * boot with a message about storage routing that points nowhere near here.
  */
 export const findInlinedWorkspaceImports = (source: string): string[] => {
+  // Both static `from "…"` and dynamic `import("…")`: a lazily imported page
+  // can drag a workspace package in on its own, and only the second form
+  // appears in the output for it.
   const matches = source.matchAll(
-    /from\s*["'](\.[^"']*\/packages\/[^"']+)["']/g
+    /(?:from|import)\s*\(?\s*["'](\.[^"']*\/packages\/[^"']+)["']/g
   );
-  return [...new Set([...matches].map((m) => m[1]))];
+  return [...new Set([...matches].map((m) => m[1]))].sort();
 };
 
 export const assertNoInlinedWorkspaces = async (
   appRoot: string,
   readFile: (p: string) => Promise<string> = (p) => fs.readFile(p, 'utf8')
 ): Promise<void> => {
-  const entryPath = path.join(appRoot, 'lib', 'backend.js');
-  if (!fs.existsSync(entryPath)) return;
-  const inlined = findInlinedWorkspaceImports(await readFile(entryPath));
-  if (inlined.length === 0) return;
+  // Every entry, not just the backend: `App.js` and `routes.js` reach code the
+  // backend never imports, so a package can be inlined through either of them.
+  const inlined = new Set<string>();
+  for (const name of Object.keys(BACKEND_ENTRIES)) {
+    const entryPath = path.join(appRoot, 'lib', `${name}.js`);
+    if (!fs.existsSync(entryPath)) continue;
+    for (const found of findInlinedWorkspaceImports(await readFile(entryPath))) {
+      inlined.add(found);
+    }
+  }
+  if (inlined.size === 0) return;
+
+  const named = [...inlined].sort();
   throw new Error(
     'The compiled backend inlined workspace packages instead of importing ' +
       'them: ' +
-      inlined.slice(0, 3).join(', ') +
-      (inlined.length > 3 ? `, and ${inlined.length - 3} more` : '') +
+      named.slice(0, 3).join(', ') +
+      (named.length > 3 ? `, and ${named.length - 3} more` : '') +
       '. Each one is a second copy of that package, and a second copy of ' +
       '@_linked/core splits LinkedStorage\'s routing state from the one the ' +
       'storage config configures. Check that the package is discoverable as a ' +
