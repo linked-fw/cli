@@ -2352,70 +2352,59 @@ export const buildFrontend = async () => {
     }
   });
 };
+/**
+ * Compile the app's backend into `lib/`.
+ *
+ * Vite, in SSR mode, against the app's own `vite.config` — the same transform
+ * `linked start` applies through `vite.ssrLoadModule`. It used to be a bare
+ * `tsc`, which meant dev and production resolved the same source two different
+ * ways: `tsc` could not follow the workspace resolver or an extensionless
+ * relative import, it inferred `rootDir` from whatever happened to be in the
+ * program (so `lib/backend.js` could land in `lib/src/`), and being a
+ * typechecker first it failed the build on any type error anywhere in the app,
+ * including in files the backend never loads. Typechecking is a separate
+ * concern from emitting, and belongs in its own command.
+ */
 export const buildBackend = async () => {
   console.log(chalk.magenta(`🛠 Preparing ${process.env.NODE_ENV} backend`));
-  //run tsc in the backend folder
   await ensureEnvironmentLoaded();
 
-  const sourceFolder = path.join(process.cwd(), 'src');
-  const targetFolder = path.join(process.cwd(), 'lib');
+  const appRoot = process.cwd();
+  const {buildBackendWithVite, copyBackendStylesheets} = await import(
+    './app-release/build-backend.js'
+  );
 
-  // Step 1: Clear lib folder
-  const clearSpinner = ora({
-    discardStdin: true,
-    text: 'Clearing lib folder',
-  }).start();
-
-  try {
-    if (fs.existsSync(targetFolder)) {
-      await fs.remove(targetFolder);
-    }
-    clearSpinner.succeed('Lib folder cleared');
-  } catch (e) {
-    console.error(e);
-    clearSpinner.fail('Failed to clear lib folder');
-    return;
-  }
-
-  // Step 2: Compile TS files
+  // Step 1: Compile with Vite (it empties lib/ itself)
   const compileSpinner = ora({
     discardStdin: true,
-    text: 'Compiling backend TS files',
+    text: 'Compiling backend with Vite',
   }).start();
 
   try {
-    await execPromise(execBinCommand(detectPackageManager(), 'tsc'));
-    compileSpinner.succeed('Backend TS files compiled');
+    await buildBackendWithVite({appRoot});
+    compileSpinner.succeed('Backend compiled');
   } catch (e) {
     console.error(e);
-    compileSpinner.fail('Failed to compile backend TS files');
+    compileSpinner.fail('Failed to compile the backend');
     return;
   }
 
-  // Step 3: Copy CSS files
+  // Step 2: Copy CSS files the server reads off disk by path
   const copySpinner = ora({
     discardStdin: true,
     text: 'Copying CSS files',
   }).start();
 
   try {
-    const cssFiles = await getFiles(sourceFolder, '.css');
-    await Promise.all(
-      cssFiles.map((file) => {
-        const targetFile = file.replace(sourceFolder, targetFolder);
-        //ensure the target folder exists
-        const targetDir = path.dirname(targetFile);
-        if (!fs.existsSync(targetDir)) {
-          fs.mkdirSync(targetDir, {recursive: true});
-        }
-        return fs.copyFile(file, targetFile);
-      }),
+    const copied = await copyBackendStylesheets(appRoot, (dir) =>
+      getFiles(dir, '.css'),
     );
-    copySpinner.succeed(`${cssFiles.length} CSS files copied`);
+    copySpinner.succeed(`${copied} CSS files copied`);
   } catch (e) {
     console.error(e);
     copySpinner.fail('Failed to copy CSS files');
   }
+
   return true;
 };
 
