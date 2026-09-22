@@ -30,6 +30,8 @@ const tsconfigRaw = JSON.stringify(userTsconfigRaw);
 
 const TS_EXT = /\.(tsx?|mts|cts)$/;
 const TS_RESOLUTION_EXTS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs'];
+/** Just the TypeScript ones, for mapping a `.js` specifier onto its source. */
+const TS_EXTS_ONLY = ['.ts', '.tsx', '.mts', '.cts'];
 
 // Node's default ESM resolver requires explicit extensions on relative
 // specifiers. App code (and the cli's user-app imports) routinely omits
@@ -65,6 +67,35 @@ export async function resolve(
           shortCircuit: true,
           format: 'module',
         };
+      }
+    }
+  }
+
+  // A relative `./x.js` that has no `./x.js` on disk, written by TypeScript
+  // source that means `./x.ts`. This is the NodeNext convention — TS requires
+  // the `.js` spelling in emitted-ESM code and rewrites nothing — and it is also
+  // what a self-referential ontology namespace import looks like
+  // (`import * as _this from './vocab.js'`). Without this, such a module can
+  // only be loaded from a built `lib/`, never from source.
+  if (
+    (specifier.startsWith('./') || specifier.startsWith('../')) &&
+    /\.(js|mjs|cjs)$/.test(specifier)
+  ) {
+    const parentUrl = context.parentURL;
+    if (parentUrl) {
+      const parentPath = fileURLToPath(parentUrl);
+      const asWritten = path.resolve(path.dirname(parentPath), specifier);
+      if (!existsSync(asWritten)) {
+        const withoutExt = asWritten.replace(/\.(js|mjs|cjs)$/, '');
+        for (const candidate of TS_EXTS_ONLY.map((e) => withoutExt + e)) {
+          if (existsSync(candidate) && statSync(candidate).isFile()) {
+            return {
+              url: pathToFileURL(candidate).href,
+              shortCircuit: true,
+              format: 'module',
+            };
+          }
+        }
       }
     }
   }
