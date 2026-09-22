@@ -621,6 +621,15 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
           },
         },
         jsx: 'automatic',
+        // A shape's IRI is built from its class name —
+        // `getNodeShapeUri(packageName, constructor.name)` — so a minifier that
+        // renames the class changes the shape's identity. In a production build
+        // the client would ask the server for
+        // `https://linked.cm/shape/server/za` while the server had registered
+        // `.../BackendAPIStore`, and every Server.call on that shape 501'd.
+        // The same mangling made registration report `Shape undefined does not
+        // extend base class`.
+        keepNames: true,
       },
       // STANDALONE resolve conditions.
       //
