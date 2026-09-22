@@ -39,6 +39,7 @@ import webpack from 'webpack';
 
 import ora, {Ora} from 'ora';
 import stagedGitFiles from 'staged-git-files';
+import {packagePublishesCjs} from './package-manifest.js';
 
 let dirname__ =
   typeof __dirname !== 'undefined'
@@ -3005,6 +3006,14 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
     name: 'Copying files to lib folder',
     apply: async () => {
       const files = await glob(packagePath + '/src/**/*.{json,d.ts,css,scss}');
+      let cjsPublished = false;
+      try {
+        cjsPublished = packagePublishesCjs(
+          JSON.parse(
+            fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
+          ),
+        );
+      } catch {}
       return Promise.all(
         files.map(async (file) => {
           try {
@@ -3014,12 +3023,15 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
                 '/lib/esm/' +
                 file.replace(packagePath + '/src/', ''),
             );
-            await fs.copy(
-              file,
-              packagePath +
-                '/lib/cjs/' +
-                file.replace(packagePath + '/src/', ''),
-            );
+            // Only mirror into lib/cjs when there is a CJS build to mirror.
+            if (cjsPublished) {
+              await fs.copy(
+                file,
+                packagePath +
+                  '/lib/cjs/' +
+                  file.replace(packagePath + '/src/', ''),
+              );
+            }
             return true;
           } catch (err) {
             console.warn(err);
@@ -3041,6 +3053,19 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
       ) {
         return Promise.resolve(true);
       }
+      // Nothing to make dual when only one format is published — otherwise this
+      // leaves a lib/cjs holding a lone `{"type":"commonjs"}` marker and no code.
+      try {
+        if (
+          !packagePublishesCjs(
+            JSON.parse(
+              fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
+            ),
+          )
+        ) {
+          return Promise.resolve(true);
+        }
+      } catch {}
       // Resolve the binary from the nearest node_modules (supports both
       // per-package and workspace-root installs of tsconfig-to-dual-package).
       return execPromise(
@@ -3135,6 +3160,16 @@ export const compilePackageESM = async (packagePath = process.cwd()) => {
   );
 };
 export const compilePackageCJS = async (packagePath = process.cwd()) => {
+  // Skip packages that do not publish a CJS build at all.
+  let packageJson: any = null;
+  try {
+    packageJson = JSON.parse(
+      fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
+    );
+  } catch {}
+  if (!packagePublishesCjs(packageJson)) {
+    return true;
+  }
   // Skip packages without a tsconfig-cjs.json.
   if (!fs.existsSync(path.join(packagePath, 'tsconfig-cjs.json'))) {
     return true;
