@@ -25,6 +25,15 @@ describe('chunkForModuleId', () => {
     }
   });
 
+  test('framework code installed from the registry joins the workspace copies', () => {
+    // An app can hold a published @_linked package next to a workspace one.
+    // Split across two chunks they import each other, and the cycle leaves a
+    // binding in its temporal dead zone at load.
+    expect(chunkForModuleId(nm('@_linked/server'))).toBe('linked');
+    expect(chunkForModuleId(nm('lincd-xsd'))).toBe('linked');
+    expect(chunkForModuleId('/app/packages/core/src/index.ts')).toBe('linked');
+  });
+
   test('an unrelated dependency still lands in the catch-all vendor chunk', () => {
     expect(chunkForModuleId(nm('zod'))).toBe('vendor');
     expect(chunkForModuleId(nm('js-cookie'))).toBe('vendor');

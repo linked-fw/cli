@@ -80,6 +80,16 @@ export const chunkForModuleId = (id: string): string | undefined => {
     }
     return undefined;
   }
+  // Framework code installed from the registry rather than resolved to a
+  // workspace. An app can hold both at once — a published `@_linked/server`
+  // in node_modules next to workspace `@_linked/core` — and the two import
+  // each other. Split across `linked` and `vendor` that is a cycle, and
+  // Rollup's chosen order left a binding in its temporal dead zone:
+  // `Cannot access 'Wo' before initialization` before the app rendered.
+  // Same chunk, no cycle.
+  if (/[\\/]node_modules[\\/](@_linked[\\/]|lincd-)/.test(id)) {
+    return 'linked';
+  }
   // React + React-DOM in their own chunk — every route uses them.
   //
   // react-router and @remix-run/router belong here too. Left in `vendor` they
