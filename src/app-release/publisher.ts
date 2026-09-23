@@ -245,6 +245,7 @@ export const publishRelease = async (
       mimeType: contentType,
       cacheControl,
       preventDuplicates: false,
+      preservePath: true,
     });
     // A release key has to survive the round trip verbatim, or the published
     // URLs in the bundle point at nothing. Some stores sanitise or suffix the

@@ -189,12 +189,13 @@ describe('release publisher', () => {
     );
   });
 
-  test('passes mime type, cache control and an explicit no-rename flag', async () => {
+  test('passes mime type, cache control, no-rename, and preservePath for release keys', async () => {
     await publishRelease({appRoot, store, yes: true});
     expect(store.writes[0].options).toEqual({
       mimeType: 'text/javascript',
       cacheControl: 'public, max-age=31536000, immutable',
       preventDuplicates: false,
+      preservePath: true,
     });
   });
 
