@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.22.3
+
+### Patch Changes
+
+- [#127](https://github.com/linked-fw/cli/pull/127) [`179f954`](https://github.com/linked-fw/cli/commit/179f9548e299b9a0ac42f7f17e5a695af2b49669) Thanks [@flyon](https://github.com/flyon)! - Keep class names through minification.
+
+  A shape's IRI is built from its class name —
+  `getNodeShapeUri(packageName, constructor.name)` — so a minifier that renames
+  the class changes the shape's identity. In a production build the client asked
+  the server for `https://linked.cm/shape/server/za` while the server had
+  registered `.../BackendAPIStore`, so every `Server.call` on that shape 501'd,
+  and registration reported `Shape undefined does not extend base class`.
+
+  `esbuild.keepNames` fixes the mangling. Note it does not fix a _collision_: a
+  shape class and its `targetClass` ontology term deliberately share a name, and
+  when both land in one chunk the class still gets a numeric suffix. Identity not
+  derived from `constructor.name` is the durable answer.
+
 ## 1.22.2
 
 ### Patch Changes
