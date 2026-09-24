@@ -200,7 +200,7 @@ describe('release publisher', () => {
   });
 
   test('fails clearly when the store renames the object it was given', async () => {
-    // LocalFileStore, for one, lowercases and suffixes the path it is handed.
+    // Simulate a store that does not honour the exact-key contract.
     store.saveFile = async (filePath: string) =>
       `${ACCESS_URL}/${String(filePath).replace(/\.js$/, '_a1b2c3.js')}`;
     await expect(publishRelease({appRoot, store, yes: true})).rejects.toThrow(
