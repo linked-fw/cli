@@ -1459,6 +1459,7 @@ export const createOntology = async (
   //copy ontology accessor file
   log("Creating files for ontology '" + prefix + "'");
   let targetFile = path.join(targetFolder, hyphenName + '.ts');
+  let targetRegisterFile = path.join(targetFolder, hyphenName + '.register.ts');
   fs.copySync(
     path.join(
       dirname__,
@@ -1471,6 +1472,23 @@ export const createOntology = async (
       'example-ontology.ts',
     ),
     targetFile,
+  );
+
+  // The registration sibling. It has to be a separate module: registration needs the
+  // ontology module's whole export namespace, and a module cannot import itself once a
+  // bundler is involved -- Rollup elides the self-reference and the app dies at boot.
+  fs.copySync(
+    path.join(
+      dirname__,
+      '..',
+      '..',
+      'defaults',
+      'package',
+      'src',
+      'ontologies',
+      'example-ontology.register.ts',
+    ),
+    targetRegisterFile,
   );
 
   //copy data files
@@ -1513,7 +1531,12 @@ export const createOntology = async (
     targetDataFile2,
   );
 
-  await replaceVariablesInFiles(targetFile, targetDataFile, targetDataFile2);
+  await replaceVariablesInFiles(
+    targetFile,
+    targetRegisterFile,
+    targetDataFile,
+    targetDataFile2,
+  );
   log(
     `Prepared a new ontology data files in ${chalk.magenta(
       targetDataFile.replace(basePath, ''),
