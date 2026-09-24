@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.22.4
+
+### Patch Changes
+
+- [#129](https://github.com/linked-fw/cli/pull/129) [`3edcf6a`](https://github.com/linked-fw/cli/commit/3edcf6acf15f12913e3ab4aaf2a97417070f3356) Thanks [@flyon](https://github.com/flyon)! - Drop ten declared-but-unreferenced dependencies.
+
+  None of them appears anywhere in `src/`, `tests/`, `defaults/`, any config file, or
+  any npm script — only in their own `dependencies` entry:
+
+  `@babel/cli`, `chokidar`, `cssnano`, `license-info-webpack-plugin`, `node-hook`,
+  `postcss-font-magician`, `postcss-modules`, `postcss-reporter`, `terminal-kit`,
+  `webpack-typings-for-css`.
+
+  **`webpack-typings-for-css` is the notable one.** It was the only thing in the tree
+  depending on `path` — the _browser shim_ for Node's `path` module, which has no
+  business in a CLI and shadows the builtin for anything that resolves it by bare
+  specifier. That entry is gone from the lockfile with it.
+
+  The webpack dependencies that are still _used_ are untouched. The webpack build path
+  is live — `cli-methods.ts` dynamically imports `config-webpack-app.js`, `index.ts`
+  imports `generateWebpackConfig`, and `build-app` still reports "this app still builds
+  with webpack" — so `webpack` itself and its loaders/plugins stay.
+
+  `copyfiles` also looked unreferenced by source but is used by the `copy-to-lib`
+  script, so it stays too. (It is arguably a devDependency rather than a dependency,
+  but that is a separate question.)
+
+## 1.22.3
+
+### Patch Changes
+
+- [#127](https://github.com/linked-fw/cli/pull/127) [`179f954`](https://github.com/linked-fw/cli/commit/179f9548e299b9a0ac42f7f17e5a695af2b49669) Thanks [@flyon](https://github.com/flyon)! - Keep class names through minification.
+
+  A shape's IRI is built from its class name —
+  `getNodeShapeUri(packageName, constructor.name)` — so a minifier that renames
+  the class changes the shape's identity. In a production build the client asked
+  the server for `https://linked.cm/shape/server/za` while the server had
+  registered `.../BackendAPIStore`, so every `Server.call` on that shape 501'd,
+  and registration reported `Shape undefined does not extend base class`.
+
+  `esbuild.keepNames` fixes the mangling. Note it does not fix a _collision_: a
+  shape class and its `targetClass` ontology term deliberately share a name, and
+  when both land in one chunk the class still gets a numeric suffix. Identity not
+  derived from `constructor.name` is the durable answer.
+
 ## 1.22.2
 
 ### Patch Changes
