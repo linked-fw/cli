@@ -139,3 +139,49 @@ consumers for it.
 
 Step 4's breaking-change caveat still stands: `generateWebpackConfig` is re-exported as public API,
 so an external consumer could be relying on it even though nothing in this workspace is.
+
+## Correction, same day — "every new app starts on webpack" was WRONG
+
+I checked `packages/cli/defaults/*` and concluded that newly scaffolded apps land on webpack. That
+was the wrong directory. **`create-app` does not scaffold from `defaults/`** — it shallow-clones a
+GitHub repo (`cli-methods.ts:184`):
+
+```
+git clone --depth 1 https://github.com/linked-fw/app-template.git
+```
+
+**That repo already ships `vite.config.ts`.** So every app created by `create-app` is a Vite app,
+and has been. No new webpack consumers are being created. The revised order in the section above —
+"make scaffolding emit a vite.config first" — **is not needed and should not be done.**
+
+What the `defaults/` templates actually are, none of which is a standalone app:
+
+| template | what it is | needs a `vite.config`? |
+|---|---|---|
+| `app-static` | files copied **into an existing app** by `addCapacitor` | no — the host app has one |
+| `app-react-native` | a React Native monorepo | no — RN builds with **Metro**, neither webpack nor Vite |
+| `package` | a library scaffold | no — not an app |
+| `setup-publish` | CI/release scaffolding | no — not an app |
+
+### So the real consumer list is two, and shrinking
+
+- **PeaceGame's `origin/main`** — its Vite migration is another developer's active work.
+- **`packages/my-app`** — a **stale copy of the app-template**, predating the Vite migration: it
+  still carries `yarn.lock`, and lacks both `vite.config.ts` and the template's `scripts/`. Note it
+  cannot even run `linked start` today, which errors out without a Vite config
+  (`start.ts:87`). It is not a live consumer so much as an abandoned one.
+
+### Revised conclusion
+
+**The webpack path can be deleted once PeaceGame's migration lands.** Nothing is creating new
+consumers, CN is on Vite, and no webpack fallback is wanted. That is a much shorter runway than the
+first pass suggested.
+
+The one caveat that survives: `generateWebpackConfig` is re-exported from `src/index.ts`, so its
+removal is a **breaking** change for any external consumer, even though nothing in this workspace
+imports it. And `linked build-frontend` can go immediately whenever the rest does — it has no
+callers at all.
+
+Worth deciding separately: whether `packages/my-app` should be refreshed from the current template
+or deleted. It is tracked (55 files) and not gitignored, so it is not scratch space, but it is
+stale enough that it no longer runs.
