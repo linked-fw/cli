@@ -139,9 +139,10 @@ release is never marked complete, and re-running `publish-app` resumes it.
 
 **The store must keep keys verbatim.** A release object has to be stored under exactly the key it
 was given, or the URLs baked into the bundle point at nothing, so publishing passes
-`preventDuplicates: false` and fails with a clear message if the store reports a different location.
-`@_linked/server`'s `LocalFileStore` lowercases the keys it is handed, so an app publishing to it
-needs lowercase asset filenames (`rollupOptions.output.hashCharacters: 'hex'` in `vite.config`).
+`preventDuplicates: false` and `preservePath: true`. A compatible store preserves the safe relative
+key exactly and rejects absolute or traversal paths. Publishing fails with a clear message if the
+store reports a different location. `@_linked/server`'s `LocalFileStore` supports this contract;
+stores that do not support exact keys cannot publish a linked release.
 
 **Cache policy follows the origin, not the filename.** Files listed in the Vite manifest are
 content-hashed by construction and get `public, max-age=31536000, immutable`. Everything else —

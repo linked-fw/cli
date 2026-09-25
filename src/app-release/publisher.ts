@@ -238,13 +238,14 @@ export const publishRelease = async (
     cacheControl: string,
     sha256: string,
   ) => {
-    // `preventDuplicates: false` is explicit: a release key must be exactly the
-    // key in the manifest. `LocalFileStore` otherwise appends a random suffix,
-    // which would both break the URL and make verification meaningless.
+    // A release key must be exactly the key in the manifest. Disable duplicate
+    // renaming and ask the store to preserve the validated relative path; any
+    // suffix or sanitisation would break the URL and make verification useless.
     const storedURL = await options.store.saveFile(objectKey, content, {
       mimeType: contentType,
       cacheControl,
       preventDuplicates: false,
+      preservePath: true,
     });
     // A release key has to survive the round trip verbatim, or the published
     // URLs in the bundle point at nothing. Some stores sanitise or suffix the
