@@ -439,4 +439,4 @@ Metro iOS bundle. It builds nothing itself, needs network and takes several minu
 
 ## Repository
 
-`linked-cm/cli` on GitHub. License: MPL-2.0.
+`linked-fw/cli` on GitHub. License: MPL-2.0.
