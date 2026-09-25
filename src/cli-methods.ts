@@ -2096,9 +2096,7 @@ export const runMethod = async (
         await import(path.join(process.cwd(), 'src', 'routes.tsx'));
     }
 
-    //@ts-ignore
-    const ServerClass = (await import('@_linked/server/shapes/LinkedServer'))
-      .LinkedServer;
+    const ServerClass = await loadServerClass();
     await loadBackendStorageConfig();
     let server = new ServerClass(linkedConfig);
     //init the server
@@ -2208,8 +2206,7 @@ export const startServer = async (
   // hook.hook('.module.css', scssLoadcall);
 
   if (!ServerClass) {
-    //@ts-ignore
-    ServerClass = (await import('@_linked/server/shapes/LinkedServer')).LinkedServer;
+    ServerClass = await loadServerClass();
   }
   await loadBackendStorageConfig();
 
@@ -3008,6 +3005,35 @@ type BuildStep = {
 // extensionless relative imports: once `lib/esm` holds everything it will ship,
 // every package gets `.js` added to the relative specifiers in it (JS and
 // declarations). For a package that already writes `.js` this is a no-op.
+/**
+ * Load `LinkedServer` from the app's `@_linked/server`.
+ *
+ * `@_linked/server` is deliberately NOT a dependency of this package: the CLI runs apps that may
+ * have no backend at all, and `@_linked/server` already depends on `@_linked/cli`, so declaring it
+ * here would make the two packages circular.
+ *
+ * The specifier is held in a variable so that TypeScript does not resolve it. When it was a string
+ * literal, building this package in the workspace pulled in `@_linked/server`'s emitted `.d.ts`,
+ * which imports `@_linked/cli/interfaces` — resolving, through the workspace symlink, to THIS
+ * package's own `lib/esm/interfaces.d.ts`. tsc then refused to emit over its own input:
+ *
+ *   error TS5055: Cannot write file '…/lib/esm/interfaces.d.ts' because it would overwrite input file.
+ *
+ * Only the workspace hit this; from a registry install the two packages are separate copies. The
+ * variable also keeps the CLI's dependency checker honest, since the import really is optional.
+ */
+const loadServerClass = async (): Promise<any> => {
+  const specifier = '@_linked/server/shapes/LinkedServer';
+  try {
+    return (await import(specifier)).LinkedServer;
+  } catch (err) {
+    throw new Error(
+      `This app needs @_linked/server to run a backend, but it could not be loaded from ${process.cwd()}. ` +
+        `Install it, or run the frontend only.\nCause: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+};
+
 export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
   {
     name: 'Checking imports',
