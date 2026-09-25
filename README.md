@@ -265,7 +265,7 @@ Templates live in `defaults/`:
 
 `linked create-app <name>` copies `defaults/app-with-backend/` to the new app's folder, substitutes `${name}` / `${hyphen_name}` / `${app_prefix}` / `${app_domain}` placeholders in selected files, and copies `linked.backend.datasets.example.json` → `linked.backend.datasets.json` so first boot works zero-config. Dependencies are installed with `npm install`, and the next-steps message tells you to run `npm start`.
 
-Storage configuration follows the two-layer pattern from [backlog 016](https://github.com/c### `linked create-app --template react-native`
+### `linked create-app --template react-native`
 
 `linked create-app <name> --template react-native` (with the usual `--app-name`, `--app-prefix`, `--app-domain`,
 `--skip-install`) copies `defaults/app-react-native/` instead of cloning the web template. The result is an npm

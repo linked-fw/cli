@@ -40,15 +40,7 @@
     "test:template": "RUN_TEMPLATE_FULL=1 jest --config jest.template.config.cjs",
     "prettier": "prettier \"src/**/*.{js,jsx,ts,tsx,css,scss}\" --check",
     "prettier:fix": "npm run prettier -- --write",
-    "format": "npm run prettier:fix && npm run lint:fix"
-  },
-  "lint-staged": {
-    "*.{js,ts,tsx}": [
-      "prettier --write"
-    ],
-    "*.{scss,css}": [
-      "prettier --write"
-    ]
+    "format": "npm run prettier:fix"
   },
   "keywords": [
     "linked",
@@ -148,6 +140,5 @@
     "prettier": "^3.2.5",
     "testcontainers": "^10.13.2"
   },
-  "peerDepencencies": {},
   "type": "module"
 }
