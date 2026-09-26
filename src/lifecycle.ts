@@ -10,6 +10,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
+import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import type {PackageDetails} from './interfaces.js';
 
 /**
@@ -211,22 +212,28 @@ export function getLincdPackages(
 }
 
 function checkWorkspaces(rootPath: string, workspaces: any, res: PackageDetails[]) {
-  if (workspaces.packages) {
-    workspaces = workspaces.packages;
-  }
-  workspaces.forEach((workspace: string) => {
+  // Negated entries ("!packages/core") are excluded the way npm excludes them
+  // — including from the exact-path branch below, which npm also subjects to
+  // them. See ./workspace-globs.js.
+  const {patterns, negatedPatterns} = parseWorkspacePatterns(workspaces);
+  const checkUnlessNegated = (packagePath: string) => {
+    const rel = path.relative(rootPath, packagePath).split(path.sep).join('/');
+    if (isWorkspacePathNegated(rel, negatedPatterns)) return;
+    checkPackagePath(rootPath, packagePath, res);
+  };
+  patterns.forEach((workspace: string) => {
     const workspacePath = path.join(rootPath, workspace.replace('/*', ''));
     if (workspace.indexOf('/*') !== -1) {
       if (fs.existsSync(workspacePath)) {
         const folders = fs.readdirSync(workspacePath);
         folders.forEach((folder: string) => {
           if (folder !== './' && folder !== '../') {
-            checkPackagePath(rootPath, path.join(workspacePath, folder), res);
+            checkUnlessNegated(path.join(workspacePath, folder));
           }
         });
       }
     } else {
-      checkPackagePath(rootPath, workspacePath, res);
+      checkUnlessNegated(workspacePath);
     }
   });
 }

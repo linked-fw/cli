@@ -14,6 +14,7 @@ import react from '@vitejs/plugin-react';
 import fsExtra from 'fs-extra';
 import path from 'node:path';
 import {generateScopedName} from './utils.js';
+import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import type {Plugin, UserConfig} from 'vite';
 
 /**
@@ -300,7 +301,12 @@ export async function workspaceDependents(
  * Walk the app's package.json `workspaces` field to build a lookup table
  * from npm name → absolute src/ directory. Used by the resolver plugin
  * to map bare specifiers like `@_linked/foo/bar` directly to source.
- * No glob library: workspaces only support trailing `/*` patterns.
+ *
+ * Positive patterns are expanded by directory listing, so only a trailing `/*`
+ * is honoured. NEGATED patterns (`"!packages/core"`) are honoured in full, with
+ * npm's semantics — see ./workspace-globs.js. Skipping them would resolve a
+ * package to an excluded directory that the package manager never installed
+ * dependencies for.
  */
 export async function discoverWorkspaces(
   extraGlobs: string[] = [],
@@ -330,13 +336,19 @@ export async function discoverWorkspaces(
   const pkgPath = path.join(cwd, 'package.json');
   if (await fsExtra.pathExists(pkgPath)) {
     const pkg = await fsExtra.readJson(pkgPath);
-    const ownPatterns: string[] = Array.isArray(pkg.workspaces)
-      ? pkg.workspaces
-      : pkg.workspaces?.packages ?? [];
     // Merge the app's own `workspaces` globs with any caller-supplied
     // `workspaceGlobs` (e.g. `../lincd.org/modules/*`). Non-existent parents
     // are skipped below, so passing both nested + standalone layouts is safe.
-    const patterns = [...ownPatterns, ...extraGlobs];
+    // Either list may carry negations, so they are parsed together.
+    const {patterns, negatedPatterns} = parseWorkspacePatterns([
+      ...(Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces?.packages ?? []),
+      ...extraGlobs,
+    ]);
+    const addUnlessNegated = async (root: string): Promise<void> => {
+      const rel = path.relative(cwd, root).split(path.sep).join('/');
+      if (isWorkspacePathNegated(rel, negatedPatterns)) return;
+      await addFromRoot(root);
+    };
     for (const pattern of patterns) {
       const m = pattern.match(/^(.+?)\/\*$/);
       if (m) {
@@ -344,12 +356,12 @@ export async function discoverWorkspaces(
         if (await fsExtra.pathExists(parent)) {
           for (const ent of await fs.readdir(parent, {withFileTypes: true})) {
             if (ent.isDirectory() || ent.isSymbolicLink()) {
-              await addFromRoot(path.join(parent, ent.name));
+              await addUnlessNegated(path.join(parent, ent.name));
             }
           }
         }
       } else {
-        await addFromRoot(path.join(cwd, pattern));
+        await addUnlessNegated(path.join(cwd, pattern));
       }
     }
   }
