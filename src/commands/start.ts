@@ -16,6 +16,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import fsExtra from 'fs-extra';
+import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
 
@@ -175,13 +176,11 @@ interface WorkspacePackage {
  * Returns each package's npm `name` (so we can call `onSourceChange(name)`),
  * its absolute root, and its `src/` directory for fast prefix matching.
  */
-async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[]> {
+export async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[]> {
   const pkgJsonPath = path.join(cwd, 'package.json');
   if (!(await fsExtra.pathExists(pkgJsonPath))) return [];
   const pkgJson = await fsExtra.readJson(pkgJsonPath);
-  const workspaces: string[] = Array.isArray(pkgJson.workspaces)
-    ? pkgJson.workspaces
-    : pkgJson.workspaces?.packages ?? [];
+  const {patterns, negatedPatterns} = parseWorkspacePatterns(pkgJson.workspaces);
   const out: WorkspacePackage[] = [];
 
   // Include the root app itself so edits to <cwd>/src/* trigger HMR for
@@ -190,9 +189,11 @@ async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[
   if (pkgJson.name && (await fsExtra.pathExists(path.join(cwd, 'src')))) {
     out.push({name: pkgJson.name, root: cwd, srcDir: path.join(cwd, 'src')});
   }
-  for (const glob of workspaces) {
-    // Workspaces only support trailing /* globs in npm/yarn/pnpm — we
-    // expand by directory listing rather than a full glob library.
+  for (const glob of patterns) {
+    // Positive patterns are expanded by directory listing rather than with a
+    // full glob library, so only a trailing /* is honoured. Negated entries
+    // ("!packages/core") are honoured in full — watching an excluded directory
+    // would trigger HMR for a package the app does not actually resolve.
     const m = glob.match(/^(.+?)\/\*$/);
     const candidates: string[] = [];
     if (m) {
@@ -209,6 +210,8 @@ async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[
       candidates.push(path.join(cwd, glob));
     }
     for (const root of candidates) {
+      const rel = path.relative(cwd, root).split(path.sep).join('/');
+      if (isWorkspacePathNegated(rel, negatedPatterns)) continue;
       const pkgPath = path.join(root, 'package.json');
       if (!(await fsExtra.pathExists(pkgPath))) continue;
       try {

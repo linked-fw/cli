@@ -101,6 +101,7 @@
     "fs-extra": "^11.2.0",
     "glob": "^10.3.12",
     "mini-css-extract-plugin": "^2.8.1",
+    "minimatch": "^9.0.4",
     "open": "^8.4.0",
     "ora": "^8.0.1",
     "postcss": "^8.5.3",
