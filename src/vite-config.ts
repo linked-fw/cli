@@ -298,6 +298,92 @@ export async function workspaceDependents(
 }
 
 /**
+ * Read a package root as a SOURCE install: `{name, srcDir}` iff it has a
+ * package.json with a name and ships a `src/` dir. Published packages have only
+ * `lib/` and are skipped — they resolve via their exports.
+ */
+async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
+  const pkgPath = path.join(root, 'package.json');
+  if (!(await fsExtra.pathExists(pkgPath))) return null;
+  const srcDir = path.join(root, 'src');
+  if (!(await fsExtra.pathExists(srcDir))) return null;
+  try {
+    const json = await fsExtra.readJson(pkgPath);
+    return json.name ? {name: json.name, srcDir} : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Linked packages installed as SOURCE, found by walking the app's
+ * `dependencies` + `devDependencies` (and recursing through the `dependencies`
+ * of each linked package found), keeping those marked `"linkedPackage": true`
+ * — the same marker the CLI keys on (see cli-methods.ts) — and registering the
+ * ones that ship `src/`.
+ *
+ * A dep ships `src/` when it is a symlinked workspace clone, a `link:`/`portal:`
+ * dev install, or a LOCALIZED checkout (`packages-local/<pkg>`, in no workspace
+ * glob). That's what lets a STANDALONE app (not itself a workspace root — e.g. a
+ * per-branch clone under /apps) resolve a linked package's `.tsx` sources with
+ * extension probing, instead of falling through to the package's
+ * `development → ./src/*.ts` export (which misses `.tsx` like LinkedServer). A
+ * prod/ejected app installs PUBLISHED packages (no `src/`) → not registered,
+ * resolved via each package's `lib`.
+ *
+ * The marker — NOT the npm scope — drives discovery, so a user's own
+ * custom-scope published linked package (e.g. `@acme/foo` with
+ * `linkedPackage:true`) is picked up too, and linked packages present in
+ * node_modules but not depended upon are ignored.
+ *
+ * Every root is REALPATHED before it is registered: `readInstalledPkg` returns
+ * the `node_modules/<name>` symlink spelling, and Vite's resolver realpaths
+ * every id it produces, so registering the symlink would give one file two
+ * module ids — two instances of the same module.
+ *
+ * Shared by the Vite resolver table (`discoverWorkspaces`) and the `linked start`
+ * HMR watch set, so the two cannot disagree about what is source.
+ */
+export async function discoverLinkedSourceDependencies(
+  cwd: string = process.cwd(),
+): Promise<WorkspaceEntry[]> {
+  const pkgPath = path.join(cwd, 'package.json');
+  if (!(await fsExtra.pathExists(pkgPath))) return [];
+  const fs = await import('node:fs/promises');
+  const out: WorkspaceEntry[] = [];
+  const seen = new Set<string>();
+  const visited = new Set<string>();
+  const walk = async (
+    deps: Record<string, string> | undefined,
+    fromDir: string,
+  ): Promise<void> => {
+    for (const name of Object.keys(deps ?? {})) {
+      if (visited.has(name)) continue;
+      visited.add(name);
+      const resolved = await readInstalledPkg(name, fromDir);
+      if (!resolved) continue;
+      if (resolved.json.linkedPackage !== true) continue;
+      let realRoot = resolved.root;
+      try {
+        realRoot = await fs.realpath(resolved.root);
+      } catch {}
+      const entry = await readSourcePackage(realRoot);
+      if (entry && !seen.has(entry.name)) {
+        seen.add(entry.name);
+        out.push(entry);
+      }
+      // Recurse from the real location, so a symlinked clone resolves its own
+      // dependencies from its source dir.
+      await walk(resolved.json.dependencies, realRoot);
+    }
+  };
+  const appPkg = await fsExtra.readJson(pkgPath);
+  await walk(appPkg.dependencies, cwd);
+  await walk(appPkg.devDependencies, cwd);
+  return out;
+}
+
+/**
  * Walk the app's package.json `workspaces` field to build a lookup table
  * from npm name → absolute src/ directory. Used by the resolver plugin
  * to map bare specifiers like `@_linked/foo/bar` directly to source.
@@ -315,20 +401,12 @@ export async function discoverWorkspaces(
   const fs = await import('node:fs/promises');
   const out: WorkspaceEntry[] = [];
   const seen = new Set<string>();
-  // Register a package root iff it ships a `src/` dir (source install). Published
-  // packages have only `lib/` and are skipped — they resolve via their exports.
+  // Register a package root iff it ships a `src/` dir (source install).
   const addFromRoot = async (root: string): Promise<void> => {
-    const subPkgPath = path.join(root, 'package.json');
-    if (!(await fsExtra.pathExists(subPkgPath))) return;
-    const srcDir = path.join(root, 'src');
-    if (!(await fsExtra.pathExists(srcDir))) return;
-    try {
-      const sub = await fsExtra.readJson(subPkgPath);
-      if (sub.name && !seen.has(sub.name)) {
-        seen.add(sub.name);
-        out.push({name: sub.name, srcDir});
-      }
-    } catch {}
+    const entry = await readSourcePackage(root);
+    if (!entry || seen.has(entry.name)) return;
+    seen.add(entry.name);
+    out.push(entry);
   };
 
   // 1. The app's own `workspaces` globs — the monorepo-root case (CN, or any app
@@ -366,58 +444,13 @@ export async function discoverWorkspaces(
     }
   }
 
-  // 2. Dependency-graph traversal from the app's package.json. Starting from the
-  //    app's own `dependencies` (+ `devDependencies`), keep the deps whose
-  //    resolved package.json is marked `"linkedPackage": true` — the same marker
-  //    the CLI keys on (see cli-methods.ts) — and recurse into THOSE packages'
-  //    `dependencies`, with a visited-set to avoid cycles/rework.
-  //
-  //    A dep is REGISTERED only if it ships `src/` (a symlinked workspace clone,
-  //    or a `link:`/`portal:` dev install) — that's what lets a STANDALONE app
-  //    (not itself a workspace root — e.g. a per-branch clone under /apps) resolve
-  //    a linked package's `.tsx` sources with extension probing, instead of
-  //    falling through to the package's `development → ./src/*.ts` export (which
-  //    misses `.tsx` like LinkedServer). A prod/ejected app installs PUBLISHED
-  //    packages (no `src/`) → not registered, resolved via each package's `lib`.
-  //
-  //    The marker — NOT the npm scope — drives discovery, so a user's own
-  //    custom-scope published linked package (e.g. `@acme/foo` with
-  //    `linkedPackage:true`) is picked up too, and linked packages present in
-  //    node_modules but not depended upon are ignored.
-  const visited = new Set<string>();
-  const walk = async (
-    deps: Record<string, string> | undefined,
-    fromDir: string,
-  ): Promise<void> => {
-    for (const name of Object.keys(deps ?? {})) {
-      if (visited.has(name)) continue;
-      visited.add(name);
-      const resolved = await readInstalledPkg(name, fromDir);
-      if (!resolved) continue;
-      if (resolved.json.linkedPackage !== true) continue;
-      // Resolve the symlink BEFORE registering, not just before recursing.
-      // `readInstalledPkg` returns the `node_modules/<name>` spelling, while
-      // Vite's own resolver realpaths every id it produces. Registering the
-      // symlink path therefore gives one file two module ids (e.g. a localized
-      // checkout served as both `/node_modules/@_linked/auth/src/…` and
-      // `/packages-local/auth/src/…`) — two instances of the same module, so
-      // two React contexts and two Linked registries.
-      let realRoot = resolved.root;
-      try {
-        realRoot = await fs.realpath(resolved.root);
-      } catch {}
-      // Register if it ships source (addFromRoot gates on src/ existing).
-      await addFromRoot(realRoot);
-      // Recurse into this linked package's own dependencies, resolved from its
-      // real location (a symlinked workspace clone resolves from its source dir).
-      await walk(resolved.json.dependencies, realRoot);
-    }
-  };
-
-  if (await fsExtra.pathExists(pkgPath)) {
-    const appPkg = await fsExtra.readJson(pkgPath);
-    await walk(appPkg.dependencies, cwd);
-    await walk(appPkg.devDependencies, cwd);
+  // 2. Linked deps installed as source — including a localized checkout that is
+  //    in no workspace glob. Shared with the `linked start` watch set; see
+  //    discoverLinkedSourceDependencies above. Glob entries win on a name clash.
+  for (const entry of await discoverLinkedSourceDependencies(cwd)) {
+    if (seen.has(entry.name)) continue;
+    seen.add(entry.name);
+    out.push(entry);
   }
 
   return out;

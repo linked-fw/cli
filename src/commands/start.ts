@@ -169,12 +169,23 @@ interface WorkspacePackage {
 }
 
 /**
- * Discover workspace packages from the app's
- * `package.json` `workspaces` field. No hand-maintained list anywhere;
- * adding a new linked package = appearing in the right glob.
+ * Discover the packages whose sources `linked start` watches for HMR, from two
+ * sources. No hand-maintained list anywhere.
  *
- * Returns each package's npm `name` (so we can call `onSourceChange(name)`),
- * its absolute root, and its `src/` directory for fast prefix matching.
+ * 1. The app's `package.json` `workspaces` field — adding a new linked package
+ *    = appearing in the right glob.
+ * 2. The app's linked dependencies that are installed as SOURCE — the same rule
+ *    the Vite resolver table uses (`discoverLinkedSourceDependencies`), so the
+ *    two lists cannot disagree about what is source. This covers a LOCALIZED
+ *    checkout (`packages-local/<pkg>`), which is deliberately in no workspace
+ *    glob and reachable only through its `node_modules` symlink. Without it
+ *    `workspacePackageForPath` returns null for the checkout, so a saved backend
+ *    edit is reloaded by Vite and then never re-indexed: the registered provider
+ *    instance is never replaced.
+ *
+ * Returns each package's npm `name` (so we can call `onSourceChange(name)`), its
+ * absolute root, and its `src/` directory for fast prefix matching. Dependency
+ * roots are realpathed by the shared discovery, matching the ids Vite reports.
  */
 export async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[]> {
   const pkgJsonPath = path.join(cwd, 'package.json');
@@ -224,7 +235,28 @@ export async function discoverWorkspacePackages(cwd: string): Promise<WorkspaceP
       }
     }
   }
+
+  // Linked deps installed as source, realpathed — a localized checkout is here
+  // and nowhere else. Imported lazily because vite-config pulls in Vite itself.
+  const {discoverLinkedSourceDependencies} = await import('../vite-config.js');
+  const names = new Set(out.map((p) => p.name));
+  for (const entry of await discoverLinkedSourceDependencies(cwd)) {
+    if (names.has(entry.name)) continue;
+    // Only working copies. Some PUBLISHED packages ship `src/` in their tarball,
+    // so the resolver registers them (it serves that source) — but they stay
+    // inside `node_modules`, which Vite's watcher ignores, so no change event
+    // can ever match them. Listing them would inflate the count printed at boot
+    // with packages nothing watches. A localized checkout, a workspace clone and
+    // an `npm link` all realpath to a directory outside `node_modules`.
+    if (isInsideNodeModules(entry.srcDir)) continue;
+    names.add(entry.name);
+    out.push({name: entry.name, root: path.dirname(entry.srcDir), srcDir: entry.srcDir});
+  }
   return out;
+}
+
+function isInsideNodeModules(p: string): boolean {
+  return p.split(path.sep).includes('node_modules');
 }
 
 function workspacePackageForPath(
