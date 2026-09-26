@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.25.1
+
+### Patch Changes
+
+- [#147](https://github.com/linked-fw/cli/pull/147) [`b131099`](https://github.com/linked-fw/cli/commit/b131099cb509a53b1e04bb2a2ae1dc8b7bd6dbd2) Thanks [@flyon](https://github.com/flyon)! - `discoverWorkspaces` now realpaths a linked dependency's root before registering it, not only
+  before recursing into its own dependencies. The root came from the `node_modules/<name>` symlink
+  while Vite's resolver realpaths every id it produces, so a package installed as a symlink to a
+  checkout outside the workspace (a `packages-local/<pkg>` localized checkout) was served under two
+  ids — `/node_modules/<name>/src/…` and `/<real path>/src/…`. Two module ids mean two module
+  instances: React context and Linked registration state split, surfacing as errors like
+  `useAuth must be used within a ProvideAuth component`.
+
+- [#147](https://github.com/linked-fw/cli/pull/147) [`ebb7ed1`](https://github.com/linked-fw/cli/commit/ebb7ed164c74fa9aa43a4d84c676689ee9c9b19f) Thanks [@flyon](https://github.com/flyon)! - `linked start` now watches linked dependencies that are installed as source, not only packages
+  matched by the app's `workspaces` globs. The HMR watch set feeds `onSourceChange`, the
+  dispose-and-re-index cycle that replaces a package's registered backend providers; built from
+  `workspaces` alone it could not contain a checkout outside the workspace (a `packages-local/<pkg>`
+  localized checkout, in no glob), so a saved backend edit there was reloaded by Vite and then had no
+  effect — the provider instance registered at boot was never replaced.
+
+  The watch set and the Vite resolver table now share one discovery rule
+  (`discoverLinkedSourceDependencies`), so they cannot disagree about what is source. Only working
+  copies are watched: a published package that ships `src/` in its tarball stays inside
+  `node_modules`, which Vite's watcher ignores, so it is resolved from source as before but not
+  counted at boot.
+
 ## 1.25.0
 
 ### Minor Changes
