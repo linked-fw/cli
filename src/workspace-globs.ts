@@ -1,3 +1,9 @@
+// `minimatch` rather than a hand-rolled matcher: a `workspaces` negation may
+// legally use brace expansion, `?` or a character class (`!packages/{a,b}`), and
+// re-deriving that by hand would mis-handle it SILENTLY — which is how the bug
+// this module fixes survived in four separate copies. The declared range tracks
+// glob@10's own `minimatch` range so the two resolve to one copy; widening it
+// past major 9 installs a second copy at the root instead of deduping.
 import {minimatch} from 'minimatch';
 
 /**
