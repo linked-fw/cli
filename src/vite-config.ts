@@ -395,14 +395,21 @@ export async function discoverWorkspaces(
       const resolved = await readInstalledPkg(name, fromDir);
       if (!resolved) continue;
       if (resolved.json.linkedPackage !== true) continue;
-      // Register if it ships source (addFromRoot gates on src/ existing).
-      await addFromRoot(resolved.root);
-      // Recurse into this linked package's own dependencies, resolved from its
-      // real location (a symlinked workspace clone resolves from its source dir).
+      // Resolve the symlink BEFORE registering, not just before recursing.
+      // `readInstalledPkg` returns the `node_modules/<name>` spelling, while
+      // Vite's own resolver realpaths every id it produces. Registering the
+      // symlink path therefore gives one file two module ids (e.g. a localized
+      // checkout served as both `/node_modules/@_linked/auth/src/…` and
+      // `/packages-local/auth/src/…`) — two instances of the same module, so
+      // two React contexts and two Linked registries.
       let realRoot = resolved.root;
       try {
         realRoot = await fs.realpath(resolved.root);
       } catch {}
+      // Register if it ships source (addFromRoot gates on src/ existing).
+      await addFromRoot(realRoot);
+      // Recurse into this linked package's own dependencies, resolved from its
+      // real location (a symlinked workspace clone resolves from its source dir).
       await walk(resolved.json.dependencies, realRoot);
     }
   };
