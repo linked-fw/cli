@@ -14,7 +14,7 @@ import {minimatch} from 'minimatch';
  * hand-roll it, and all three ignored NEGATED patterns — so a monorepo that
  * excludes a directory (`"!packages/core"`) still had that directory treated
  * as a workspace member. For CN that meant dev resolving `@_linked/primitives`
- * to an untracked mrgit checkout under `packages/` whose dependencies npm had
+ * to an untracked sibling checkout under `packages/` whose dependencies npm had
  * never installed, and the app not booting. Hence one shared helper.
  *
  * The semantics below are a direct port of npm's own implementation

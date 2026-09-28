@@ -2659,7 +2659,7 @@ export const createPackage = async (
   });
 
   // npm is the default for a new package. yarn is only consulted when the new
-  // package lands inside an existing yarn project (an mrgit/yarn-3 monorepo),
+  // package lands inside an existing yarn project (a yarn-3 monorepo),
   // where adding an npm lockfile would break the workspace.
   const insideYarnProject =
     detectPackageManager(path.dirname(path.resolve(targetFolder))) === 'yarn';
