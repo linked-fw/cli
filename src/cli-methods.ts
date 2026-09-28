@@ -627,46 +627,10 @@ export function developPackage(target, mode) {
   }
 }
 
-function checkWorkspaces(rootPath, workspaces, res) {
-  // console.log('checking workspaces at '+rootPath+": "+workspaces.toString());
-  if (workspaces.packages) {
-    workspaces = workspaces.packages;
-  }
-
-  workspaces.forEach((workspace) => {
-    let workspacePath = path.join(rootPath, workspace.replace('/*', ''));
-    if (workspace.indexOf('/*') !== -1) {
-      // console.log(workspacePath);
-      if (fs.existsSync(workspacePath)) {
-        let folders = fs.readdirSync(workspacePath);
-        folders.forEach((folder) => {
-          if (folder !== './' && folder !== '../') {
-            checkPackagePath(rootPath, path.join(workspacePath, folder), res);
-          }
-        });
-      }
-    } else {
-      checkPackagePath(rootPath, workspacePath, res);
-    }
-  });
-}
-
-function checkPackagePath(rootPath, packagePath, res) {
-  let packageJsonPath = path.join(packagePath, 'package.json');
-  // console.log('checking '+packagePath);
-  if (fs.existsSync(packageJsonPath)) {
-    var pack = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-    //some packages are not true lincd packages, but we still want them to be re-built automatically. This is what lincd_util is for
-    if (pack && pack.workspaces) {
-      checkWorkspaces(packagePath, pack.workspaces, res);
-    } else if (pack && pack.linkedPackage === true) {
-      res.push({
-        path: packagePath,
-        packageName: pack.name,
-      });
-    }
-  }
-}
+// checkWorkspaces/checkPackagePath used to live here as a second, unreferenced
+// copy of the workspaces walk in lifecycle.ts. Both copies ignored negated
+// `workspaces` entries; the live one now shares ./workspace-globs.js, and this
+// dead duplicate is gone rather than left to be revived with the old bug.
 
 export function runOnPackagesGroupedByDependencies(
   lincdPackages,
@@ -1459,6 +1423,7 @@ export const createOntology = async (
   //copy ontology accessor file
   log("Creating files for ontology '" + prefix + "'");
   let targetFile = path.join(targetFolder, hyphenName + '.ts');
+  let targetRegisterFile = path.join(targetFolder, hyphenName + '.register.ts');
   fs.copySync(
     path.join(
       dirname__,
@@ -1471,6 +1436,23 @@ export const createOntology = async (
       'example-ontology.ts',
     ),
     targetFile,
+  );
+
+  // The registration sibling. It has to be a separate module: registration needs the
+  // ontology module's whole export namespace, and a module cannot import itself once a
+  // bundler is involved -- Rollup elides the self-reference and the app dies at boot.
+  fs.copySync(
+    path.join(
+      dirname__,
+      '..',
+      '..',
+      'defaults',
+      'package',
+      'src',
+      'ontologies',
+      'example-ontology.register.ts',
+    ),
+    targetRegisterFile,
   );
 
   //copy data files
@@ -1513,7 +1495,12 @@ export const createOntology = async (
     targetDataFile2,
   );
 
-  await replaceVariablesInFiles(targetFile, targetDataFile, targetDataFile2);
+  await replaceVariablesInFiles(
+    targetFile,
+    targetRegisterFile,
+    targetDataFile,
+    targetDataFile2,
+  );
   log(
     `Prepared a new ontology data files in ${chalk.magenta(
       targetDataFile.replace(basePath, ''),
@@ -2073,9 +2060,7 @@ export const runMethod = async (
         await import(path.join(process.cwd(), 'src', 'routes.tsx'));
     }
 
-    //@ts-ignore
-    const ServerClass = (await import('@_linked/server/shapes/LinkedServer'))
-      .LinkedServer;
+    const ServerClass = await loadServerClass();
     await loadBackendStorageConfig();
     let server = new ServerClass(linkedConfig);
     //init the server
@@ -2185,8 +2170,7 @@ export const startServer = async (
   // hook.hook('.module.css', scssLoadcall);
 
   if (!ServerClass) {
-    //@ts-ignore
-    ServerClass = (await import('@_linked/server/shapes/LinkedServer')).LinkedServer;
+    ServerClass = await loadServerClass();
   }
   await loadBackendStorageConfig();
 
@@ -2985,6 +2969,35 @@ type BuildStep = {
 // extensionless relative imports: once `lib/esm` holds everything it will ship,
 // every package gets `.js` added to the relative specifiers in it (JS and
 // declarations). For a package that already writes `.js` this is a no-op.
+/**
+ * Load `LinkedServer` from the app's `@_linked/server`.
+ *
+ * `@_linked/server` is deliberately NOT a dependency of this package: the CLI runs apps that may
+ * have no backend at all, and `@_linked/server` already depends on `@_linked/cli`, so declaring it
+ * here would make the two packages circular.
+ *
+ * The specifier is held in a variable so that TypeScript does not resolve it. When it was a string
+ * literal, building this package in the workspace pulled in `@_linked/server`'s emitted `.d.ts`,
+ * which imports `@_linked/cli/interfaces` — resolving, through the workspace symlink, to THIS
+ * package's own `lib/esm/interfaces.d.ts`. tsc then refused to emit over its own input:
+ *
+ *   error TS5055: Cannot write file '…/lib/esm/interfaces.d.ts' because it would overwrite input file.
+ *
+ * Only the workspace hit this; from a registry install the two packages are separate copies. The
+ * variable also keeps the CLI's dependency checker honest, since the import really is optional.
+ */
+const loadServerClass = async (): Promise<any> => {
+  const specifier = '@_linked/server/shapes/LinkedServer';
+  try {
+    return (await import(specifier)).LinkedServer;
+  } catch (err) {
+    throw new Error(
+      `This app needs @_linked/server to run a backend, but it could not be loaded from ${process.cwd()}. ` +
+        `Install it, or run the frontend only.\nCause: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+};
+
 export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
   {
     name: 'Checking imports',

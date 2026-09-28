@@ -1,5 +1,164 @@
 # Changelog
 
+## 1.25.1
+
+### Patch Changes
+
+- [#147](https://github.com/linked-fw/cli/pull/147) [`b131099`](https://github.com/linked-fw/cli/commit/b131099cb509a53b1e04bb2a2ae1dc8b7bd6dbd2) Thanks [@flyon](https://github.com/flyon)! - `discoverWorkspaces` now realpaths a linked dependency's root before registering it, not only
+  before recursing into its own dependencies. The root came from the `node_modules/<name>` symlink
+  while Vite's resolver realpaths every id it produces, so a package installed as a symlink to a
+  checkout outside the workspace (a `packages-local/<pkg>` localized checkout) was served under two
+  ids — `/node_modules/<name>/src/…` and `/<real path>/src/…`. Two module ids mean two module
+  instances: React context and Linked registration state split, surfacing as errors like
+  `useAuth must be used within a ProvideAuth component`.
+
+- [#147](https://github.com/linked-fw/cli/pull/147) [`ebb7ed1`](https://github.com/linked-fw/cli/commit/ebb7ed164c74fa9aa43a4d84c676689ee9c9b19f) Thanks [@flyon](https://github.com/flyon)! - `linked start` now watches linked dependencies that are installed as source, not only packages
+  matched by the app's `workspaces` globs. The HMR watch set feeds `onSourceChange`, the
+  dispose-and-re-index cycle that replaces a package's registered backend providers; built from
+  `workspaces` alone it could not contain a checkout outside the workspace (a `packages-local/<pkg>`
+  localized checkout, in no glob), so a saved backend edit there was reloaded by Vite and then had no
+  effect — the provider instance registered at boot was never replaced.
+
+  The watch set and the Vite resolver table now share one discovery rule
+  (`discoverLinkedSourceDependencies`), so they cannot disagree about what is source. Only working
+  copies are watched: a published package that ships `src/` in its tarball stays inside
+  `node_modules`, which Vite's watcher ignores, so it is resolved from source as before but not
+  counted at boot.
+
+## 1.25.0
+
+### Minor Changes
+
+- [#144](https://github.com/linked-fw/cli/pull/144) [`82e2052`](https://github.com/linked-fw/cli/commit/82e2052c394b2c5b9abf47270f7211e6c907bb11) Thanks [@flyon](https://github.com/flyon)! - Honour negated `workspaces` patterns, the way npm does
+
+  `package.json` `workspaces` entries may be negated (`"!packages/core"`) to
+  exclude a directory from the workspace. npm honours those; three walkers in this
+  CLI did not, and each hand-rolled the same walk:
+
+  - `discoverWorkspaces` (the Vite source resolver, `vite-config.ts`)
+  - `getLincdPackages` / `checkWorkspaces` (`lifecycle.ts`)
+  - `discoverWorkspacePackages` (the dev HMR watcher, `commands/start.ts`)
+
+  A negation was simply inert, so `packages/*` still matched every directory. In a
+  monorepo whose `packages/` holds untracked sibling checkouts — excluded from the
+  workspace precisely so the package manager ignores them — dev resolved those
+  packages to `packages/<name>/src` instead of the installed copy. Those checkouts
+  have no dependencies installed, so the dev server failed to boot on a missing
+  transitive dependency, and unit tests failed to resolve imports.
+
+  All three now share one helper, `src/workspace-globs.ts`, which reproduces npm's
+  semantics (a direct port of `@npmcli/map-workspaces`): `!` prefixes (an even
+  number is not a negation), a leading `./` or `/` stripped, a later exact pattern
+  re-including what an earlier negation excluded, and a `/**` negation covering the
+  directory itself. Exact, non-glob entries are subject to negations too. Positive
+  patterns are still expanded by directory listing, so only a trailing `/*` is
+  honoured there — unchanged.
+
+  Discovery results change for any app whose `workspaces` field contains
+  negations; apps without them are unaffected.
+
+## 1.24.0
+
+### Minor Changes
+
+- [#142](https://github.com/linked-fw/cli/pull/142) [`8a3734e`](https://github.com/linked-fw/cli/commit/8a3734e00eb8dcc0bea6ec502e7acaddbef927bd) Thanks [@flyon](https://github.com/flyon)! - Require `@_linked/core@^2.22.8` (was `^2.21.0`), and pin it in the lockfile.
+
+  The declared range was wide enough that the resolved core depended on whatever the
+  consumer — or this repo's own CI, via `package-lock.json` — happened to install. Core
+  decides how a shape's IRI is minted, so a stale core made this package emit legacy
+  `data.lincd.org` IRIs instead of the arch-02 `linked.cm` scheme. Which IRIs a published
+  package produces should not be a function of the installer's dependency tree.
+
+  Minor rather than patch: this raises the minimum core a consumer must resolve, so it
+  changes what gets installed rather than only what this package does internally.
+
+## 1.23.0
+
+### Minor Changes
+
+- [#138](https://github.com/linked-fw/cli/pull/138) [`c196a37`](https://github.com/linked-fw/cli/commit/c196a3703fa75a44a09c692657530c4ebd9a1d56) Thanks [@flyon](https://github.com/flyon)! - `setup-publish` now points each caller stub at the shared workflows in **the repo's own org**
+  (`<owner>/.github/.github/workflows/*.yml@v1`) instead of always `linked-fw/.github`. Each org
+  keeps its own copy of the reusable workflows, so community repos in `linked-cm` no longer reach
+  cross-org for their CI — and their gates can diverge from the first-party ones without affecting
+  `@_linked` packages.
+
+  The npm secret is now always `NPM_AUTH_TOKEN`. The `NPM_AUTH_TOKEN_CM` name dated from before
+  first-party and community repos were split into two GitHub orgs, when one org had to hold both
+  scopes' tokens at once; now each org holds its own token under the same name. `--scope` is
+  deprecated and ignored, accepted only so stale scripts still set a repo up rather than aborting on
+  an unknown option.
+
+## 1.22.7
+
+### Patch Changes
+
+- [#137](https://github.com/linked-fw/cli/pull/137) [`f5b1886`](https://github.com/linked-fw/cli/commit/f5b18861531cc7803f0522778b174037e3059854) Thanks [@flyon](https://github.com/flyon)! - Fix `linked build` failing in the workspace with `TS5055: Cannot write file
+'lib/esm/interfaces.d.ts' because it would overwrite input file`.
+
+  `cli-methods.ts` loaded `LinkedServer` through a string-literal dynamic import, so TypeScript
+  resolved it and pulled `@_linked/server`'s emitted `.d.ts` into this package's own program. That
+  file imports `@_linked/cli/interfaces`, which — through the workspace symlink — resolves back to
+  this package's `lib/esm/interfaces.d.ts`, an output of the build in progress. Only the workspace
+  hit this; from a registry install the two packages are separate copies, so CI never saw it.
+
+  The specifier now lives in a variable, which stops TypeScript resolving it and reflects what the
+  import actually is: an optional runtime load. `@_linked/server` cannot become a dependency here —
+  the CLI runs apps with no backend, and `@_linked/server` already depends on `@_linked/cli`. A
+  failure to load now reports what is missing instead of an unhandled module error.
+
+## 1.22.6
+
+### Patch Changes
+
+- [#134](https://github.com/linked-fw/cli/pull/134) [`b51d0b5`](https://github.com/linked-fw/cli/commit/b51d0b5b8efe3e4103ffa93e9e1e60c5fc68d29c) Thanks [@flyon](https://github.com/flyon)! - `create-ontology` no longer scaffolds a module that imports itself.
+
+  The generated ontology carried `import * as _this from './<prefix>.js'` and passed it
+  to `linkedOntology()`. That works under `tsc`, which preserves the self-reference, and
+  breaks under a bundler: Rollup treats it as a circular import and elides it, so the
+  binding is `undefined` at runtime and the consuming app dies at boot with
+  `_this is not defined` — a message pointing at neither the ontology nor the package.
+
+  Registration now lands in a sibling module, `<prefix>.register.ts`, where the same
+  import is ordinary:
+
+  ```ts
+  import * as terms from './my-vocab.js';
+  import {linkedOntology} from '../package.js';
+  import {loadData, ns} from './my-vocab.js';
+
+  linkedOntology(terms, ns, 'my-vocab', loadData, '../data/my-vocab.json');
+  ```
+
+  Existing ontologies keep working under `tsc` and should be migrated the same way before
+  they are bundled.
+
+## 1.22.5
+
+### Patch Changes
+
+- [#131](https://github.com/linked-fw/cli/pull/131) [`cb4c479`](https://github.com/linked-fw/cli/commit/cb4c4792f83fee581f5588e926255764d2baaaf3) Thanks [@flyon](https://github.com/flyon)! - Drop ten declared-but-unreferenced dependencies.
+
+  None of them appears anywhere in `src/`, `tests/`, `defaults/`, any config file, or
+  any npm script — only in their own `dependencies` entry:
+
+  `@babel/cli`, `chokidar`, `cssnano`, `license-info-webpack-plugin`, `node-hook`,
+  `postcss-font-magician`, `postcss-modules`, `postcss-reporter`, `terminal-kit`,
+  `webpack-typings-for-css`.
+
+  **`webpack-typings-for-css` is the notable one.** It was the only thing in the tree
+  depending on `path` — the _browser shim_ for Node's `path` module, which has no
+  business in a CLI and shadows the builtin for anything that resolves it by bare
+  specifier. That entry is gone from the lockfile with it.
+
+  The webpack dependencies that are still _used_ are untouched. The webpack build path
+  is live — `cli-methods.ts` dynamically imports `config-webpack-app.js`, `index.ts`
+  imports `generateWebpackConfig`, and `build-app` still reports "this app still builds
+  with webpack" — so `webpack` itself and its loaders/plugins stay.
+
+  `copyfiles` also looked unreferenced by source but is used by the `copy-to-lib`
+  script, so it stays too. (It is arguably a devDependency rather than a dependency,
+  but that is a separate question.)
+
 ## 1.22.4
 
 ### Patch Changes

@@ -8,6 +8,46 @@
 //
 // E2E specs live in tests/e2e/ and run under Playwright (see
 // playwright.config.ts), not Jest.
+const fs = require('fs');
+const path = require('path');
+
+// `@_linked/core` cannot be found with require.resolve(): it is ESM-only, so its
+// export map has no `require` condition and not even `./package.json` is
+// exported. And it is not necessarily in ./node_modules — when this repo is
+// checked out inside the create_now yarn workspace, the dependency is hoisted to
+// the workspace root. So walk the node_modules chain the way node does, and
+// derive the on-disk layout from the package's own export map rather than
+// assuming `lib/esm`.
+function resolveLinkedCore() {
+  let dir = __dirname;
+  for (;;) {
+    const candidate = path.join(dir, 'node_modules', '@_linked', 'core');
+    const manifest = path.join(candidate, 'package.json');
+    if (fs.existsSync(manifest)) {
+      const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+      const wildcard = pkg.exports && pkg.exports['./*'] && pkg.exports['./*'].import;
+      const index = pkg.exports && pkg.exports['.'] && pkg.exports['.'].import;
+      return {
+        dir: candidate,
+        // e.g. './lib/esm/*.js' -> '<dir>/lib/esm/$1.js' for moduleNameMapper
+        subpath: path.join(candidate, (wildcard || './lib/esm/*.js').replace('*', '$1')),
+        index: path.join(candidate, index || './lib/esm/index.js'),
+      };
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      throw new Error(
+        '[@_linked/cli jest] cannot find @_linked/core in any node_modules directory above ' +
+          __dirname +
+          ' — run an install first.',
+      );
+    }
+    dir = parent;
+  }
+}
+
+const core = resolveLinkedCore();
+
 module.exports = {
   testEnvironment: 'node',
   rootDir: '.',
@@ -34,8 +74,8 @@ module.exports = {
   },
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
-    '^@_linked/core/(.*)$': '<rootDir>/node_modules/@_linked/core/lib/esm/$1.js',
-    '^@_linked/core$': '<rootDir>/node_modules/@_linked/core/lib/esm/index.js',
+    '^@_linked/core/(.*)$': core.subpath,
+    '^@_linked/core$': core.index,
   },
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
 };

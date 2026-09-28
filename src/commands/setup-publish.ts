@@ -48,7 +48,14 @@ export function buildBranchProtectionPayload() {
 
 export type SetupPublishOptions = {
   configureGithub?: boolean;
-  scope?: 'core' | 'community'; // which NPM secret name to use
+  /**
+   * @deprecated The npm secret is `NPM_AUTH_TOKEN` in every org, holding a token for that
+   * org's own npm scope — there is no longer a second name to select between. Kept as an
+   * accepted no-op for the same reason as `dualBranch`: commander aborts the whole command
+   * on an unknown option, so a stale script would fail to set the repo up at all rather
+   * than setting it up correctly.
+   */
+  scope?: string;
   /**
    * @deprecated The dual-branch (`main` + `dev`) flow and its `@next` prereleases are retired —
    * every package repo is `main`-only. Kept as an accepted no-op rather than removed because
@@ -62,9 +69,11 @@ export type SetupPublishOptions = {
 /**
  * Set up the changesets publish pipeline in the current package repo.
  *
- * The workflows are thin callers of the shared reusable workflows in `linked-fw/.github`
- * (pinned `@v1`, a deliberately moving tag) — one edit there changes every package's pipeline,
- * which is why nothing about the build or publish steps is scaffolded per repo any more.
+ * The workflows are thin callers of the shared reusable workflows in the repo's OWN org
+ * `.github` repo (pinned `@v1`, a deliberately moving tag) — one edit there changes every
+ * package's pipeline in that org, which is why nothing about the build or publish steps is
+ * scaffolded per repo any more. Each org keeps its own copy so that community gates can be
+ * stricter than first-party ones without a cross-org `workflow_call`.
  *
  * Installs:
  * - .github/workflows/{pr,publish}.yml — caller stubs, nothing else
@@ -80,10 +89,21 @@ export type SetupPublishOptions = {
  */
 export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void> {
   const cwd = process.cwd();
-  const scope = opts.scope || 'core';
-  const npmSecretName = scope === 'community' ? 'NPM_AUTH_TOKEN_CM' : 'NPM_AUTH_TOKEN';
+  // One secret NAME across every org. The orgs are separate, so each holds its own value —
+  // a token scoped to that org's npm scope. (There used to be an `NPM_AUTH_TOKEN_CM` for
+  // `@linked.cm`; that dates from before first-party and community repos were split into two
+  // orgs and one org therefore had to hold both tokens at once.)
+  const npmSecretName = 'NPM_AUTH_TOKEN';
 
   console.log(chalk.magenta('Setting up the publish pipeline (main only)...'));
+  if (opts.scope) {
+    console.log(
+      chalk.yellow(
+        '  ⚠ --scope is deprecated and ignored: every org uses NPM_AUTH_TOKEN, holding that\n' +
+          "    org's own token. The NPM_AUTH_TOKEN_CM name is retired.",
+      ),
+    );
+  }
   if (opts.dualBranch) {
     console.log(
       chalk.yellow(
@@ -92,7 +112,7 @@ export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void
     );
   }
   console.log(`  target: ${cwd}`);
-  console.log(`  npm secret: ${npmSecretName} (${scope})`);
+  console.log(`  npm secret: ${npmSecretName}`);
 
   const pkgJsonPath = path.join(cwd, 'package.json');
   if (!fs.existsSync(pkgJsonPath)) {
@@ -106,8 +126,19 @@ export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void
   console.log(`  repo: ${repoSlug}`);
   console.log('');
 
-  // 1. Workflow files (with {{NPM_SECRET_NAME}} substitution in publish.yml)
-  await copyWorkflows(cwd, npmSecretName);
+  // 1. Workflow files. The caller stubs point at the shared workflows in this repo's own org,
+  //    so a repo in linked-cm never reaches into linked-fw for its CI.
+  const workflowOrg = repoSlug.split('/')[0];
+  if (workflowOrg === 'OWNER') {
+    console.warn(
+      chalk.yellow(
+        '  ⚠ The repo slug is unknown, so the workflow stubs will call OWNER/.github — which does\n' +
+          '    not exist. Set the git remote (or package.json repository) and rerun, or fix the\n' +
+          '    `uses:` line in .github/workflows/{pr,publish}.yml by hand.',
+      ),
+    );
+  }
+  await copyWorkflows(cwd, workflowOrg);
 
   // 2. Changesets config + README
   await copyChangesetConfig(cwd, repoSlug);
@@ -160,14 +191,14 @@ async function resolveRepoSlug(cwd: string, pkgJson: any): Promise<string> {
   return 'OWNER/REPO';
 }
 
-async function copyWorkflows(cwd: string, npmSecretName: string): Promise<void> {
+async function copyWorkflows(cwd: string, workflowOrg: string): Promise<void> {
   const srcDir = path.join(TEMPLATE_ROOT, 'github', 'workflows');
   const dstDir = path.join(cwd, '.github', 'workflows');
   fs.mkdirpSync(dstDir);
 
   for (const file of WORKFLOW_FILES) {
     let content = fs.readFileSync(path.join(srcDir, file), 'utf8');
-    content = content.replace(/\{\{NPM_SECRET_NAME\}\}/g, npmSecretName);
+    content = content.replace(/\{\{WORKFLOW_ORG\}\}/g, workflowOrg);
     fs.writeFileSync(path.join(dstDir, file), content);
     console.log(chalk.green('  ✓') + ` .github/workflows/${file}`);
   }
@@ -466,7 +497,7 @@ function printNextSteps(
   // No per-repo secret grant step: NPM_AUTH_TOKEN, RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY are
   // "All repositories" org secrets, which is the whole reason first-party and community packages
   // live in separate orgs. Only mention what is genuinely still one-time-per-org.
-  console.log(chalk.bold('One-time org-level setup (already done on linked-fw):'));
+  console.log(chalk.bold(`One-time org-level setup (already done on linked-fw and linked-cm):`));
   console.log('');
   console.log(`  a. Org secrets ${chalk.cyan(npmSecretName)}, ${chalk.cyan('RELEASE_APP_ID')} and ${chalk.cyan('RELEASE_APP_PRIVATE_KEY')},`);
   console.log(`     visible to ${chalk.cyan('All repositories')} — there is no per-repo grant step.`);

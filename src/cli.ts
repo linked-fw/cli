@@ -470,7 +470,7 @@ program
 program
   .command('setup-publish')
   .description(
-    'Set up the changesets publish pipeline in the current package repo. Writes the pr.yml/publish.yml callers of the shared workflows in linked-fw/.github, changesets config, .gitignore entries, and patches package.json.',
+    "Set up the changesets publish pipeline in the current package repo. Writes the pr.yml/publish.yml callers of the shared workflows in the repo's own org .github repo, changesets config, .gitignore entries, and patches package.json.",
   )
   .option(
     '--configure-github',
@@ -482,8 +482,7 @@ program
   )
   .option(
     '--scope <scope>',
-    'Which NPM secret to reference in the publish workflow: "core" uses NPM_AUTH_TOKEN, "community" uses NPM_AUTH_TOKEN_CM. Defaults to "core".',
-    'core',
+    'Deprecated and ignored: the npm secret is NPM_AUTH_TOKEN in every org, holding that org\'s own token. Accepted only so stale scripts still set the repo up.',
   )
   .option(
     '--grant-team <slug>',
@@ -494,7 +493,7 @@ program
     await setupPublish({
       configureGithub: !!options.configureGithub,
       dualBranch: !!options.dualBranch,
-      scope: options.scope === 'community' ? 'community' : 'core',
+      scope: options.scope,
       grantTeam: options.grantTeam,
     });
   });

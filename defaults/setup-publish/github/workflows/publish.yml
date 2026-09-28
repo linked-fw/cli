@@ -1,5 +1,6 @@
-# Calls the shared workflow in linked-fw/.github. That repo is public, so community repos in
-# linked-cm call the same workflow — only the npm secret differs.
+# Calls the shared workflow in this repo's OWN org `.github` repo. Each org keeps its own copy
+# so community gates can diverge from first-party ones; the secret NAME is the same in every
+# org, and only its value differs (a token for that org's npm scope).
 #
 # This FILENAME is what npm's trusted-publisher check validates — not the shared workflow's.
 # Renaming this file invalidates this package's trusted publisher, and the only symptom is
@@ -15,7 +16,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
-    uses: linked-fw/.github/.github/workflows/publish.yml@v1
+    uses: {{WORKFLOW_ORG}}/.github/.github/workflows/publish.yml@v1
     permissions:
       contents: write
       pull-requests: write
@@ -26,6 +27,6 @@ jobs:
     # Named rather than `inherit`: `inherit` forwards everything this repo can see, which is
     # how a community repo would end up forwarding a first-party token.
     secrets:
-      NPM_TOKEN: ${{ secrets.{{NPM_SECRET_NAME}} }}
+      NPM_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -16,6 +16,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import fsExtra from 'fs-extra';
+import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
 
@@ -168,20 +169,29 @@ interface WorkspacePackage {
 }
 
 /**
- * Discover workspace packages from the app's
- * `package.json` `workspaces` field. No hand-maintained list anywhere;
- * adding a new linked package = appearing in the right glob.
+ * Discover the packages whose sources `linked start` watches for HMR, from two
+ * sources. No hand-maintained list anywhere.
  *
- * Returns each package's npm `name` (so we can call `onSourceChange(name)`),
- * its absolute root, and its `src/` directory for fast prefix matching.
+ * 1. The app's `package.json` `workspaces` field — adding a new linked package
+ *    = appearing in the right glob.
+ * 2. The app's linked dependencies that are installed as SOURCE — the same rule
+ *    the Vite resolver table uses (`discoverLinkedSourceDependencies`), so the
+ *    two lists cannot disagree about what is source. This covers a LOCALIZED
+ *    checkout (`packages-local/<pkg>`), which is deliberately in no workspace
+ *    glob and reachable only through its `node_modules` symlink. Without it
+ *    `workspacePackageForPath` returns null for the checkout, so a saved backend
+ *    edit is reloaded by Vite and then never re-indexed: the registered provider
+ *    instance is never replaced.
+ *
+ * Returns each package's npm `name` (so we can call `onSourceChange(name)`), its
+ * absolute root, and its `src/` directory for fast prefix matching. Dependency
+ * roots are realpathed by the shared discovery, matching the ids Vite reports.
  */
-async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[]> {
+export async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[]> {
   const pkgJsonPath = path.join(cwd, 'package.json');
   if (!(await fsExtra.pathExists(pkgJsonPath))) return [];
   const pkgJson = await fsExtra.readJson(pkgJsonPath);
-  const workspaces: string[] = Array.isArray(pkgJson.workspaces)
-    ? pkgJson.workspaces
-    : pkgJson.workspaces?.packages ?? [];
+  const {patterns, negatedPatterns} = parseWorkspacePatterns(pkgJson.workspaces);
   const out: WorkspacePackage[] = [];
 
   // Include the root app itself so edits to <cwd>/src/* trigger HMR for
@@ -190,9 +200,11 @@ async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[
   if (pkgJson.name && (await fsExtra.pathExists(path.join(cwd, 'src')))) {
     out.push({name: pkgJson.name, root: cwd, srcDir: path.join(cwd, 'src')});
   }
-  for (const glob of workspaces) {
-    // Workspaces only support trailing /* globs in npm/yarn/pnpm — we
-    // expand by directory listing rather than a full glob library.
+  for (const glob of patterns) {
+    // Positive patterns are expanded by directory listing rather than with a
+    // full glob library, so only a trailing /* is honoured. Negated entries
+    // ("!packages/core") are honoured in full — watching an excluded directory
+    // would trigger HMR for a package the app does not actually resolve.
     const m = glob.match(/^(.+?)\/\*$/);
     const candidates: string[] = [];
     if (m) {
@@ -209,6 +221,8 @@ async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[
       candidates.push(path.join(cwd, glob));
     }
     for (const root of candidates) {
+      const rel = path.relative(cwd, root).split(path.sep).join('/');
+      if (isWorkspacePathNegated(rel, negatedPatterns)) continue;
       const pkgPath = path.join(root, 'package.json');
       if (!(await fsExtra.pathExists(pkgPath))) continue;
       try {
@@ -221,7 +235,28 @@ async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[
       }
     }
   }
+
+  // Linked deps installed as source, realpathed — a localized checkout is here
+  // and nowhere else. Imported lazily because vite-config pulls in Vite itself.
+  const {discoverLinkedSourceDependencies} = await import('../vite-config.js');
+  const names = new Set(out.map((p) => p.name));
+  for (const entry of await discoverLinkedSourceDependencies(cwd)) {
+    if (names.has(entry.name)) continue;
+    // Only working copies. Some PUBLISHED packages ship `src/` in their tarball,
+    // so the resolver registers them (it serves that source) — but they stay
+    // inside `node_modules`, which Vite's watcher ignores, so no change event
+    // can ever match them. Listing them would inflate the count printed at boot
+    // with packages nothing watches. A localized checkout, a workspace clone and
+    // an `npm link` all realpath to a directory outside `node_modules`.
+    if (isInsideNodeModules(entry.srcDir)) continue;
+    names.add(entry.name);
+    out.push({name: entry.name, root: path.dirname(entry.srcDir), srcDir: entry.srcDir});
+  }
   return out;
+}
+
+function isInsideNodeModules(p: string): boolean {
+  return p.split(path.sep).includes('node_modules');
 }
 
 function workspacePackageForPath(

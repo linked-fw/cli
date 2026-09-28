@@ -14,10 +14,16 @@ describe('setup-publish workflow templates', () => {
   test('exactly two workflows are scaffolded, both callers of the shared workflows', () => {
     expect(fs.readdirSync(workflowDir).sort()).toEqual(['pr.yml', 'publish.yml']);
     expect([...WORKFLOW_FILES].sort()).toEqual(['pr.yml', 'publish.yml']);
+    // The org is substituted per repo (see `copyWorkflows`), so the template carries the
+    // placeholder rather than a hardcoded org — a repo in linked-cm must not call linked-fw's
+    // workflows.
     for (const file of WORKFLOW_FILES) {
       expect(read(file)).toMatch(
-        new RegExp(`uses: linked-fw/\\.github/\\.github/workflows/${file.replace('.', '\\.')}@v1`),
+        new RegExp(
+          `uses: \\{\\{WORKFLOW_ORG\\}\\}/\\.github/\\.github/workflows/${file.replace('.', '\\.')}@v1`,
+        ),
       );
+      expect(read(file)).not.toContain('uses: linked-fw/');
     }
   });
 
@@ -37,8 +43,11 @@ describe('setup-publish workflow templates', () => {
     const yml = read('publish.yml');
     expect(yml).toContain('id-token: write');
     expect(yml).not.toContain('secrets: inherit');
-    // Substituted with NPM_AUTH_TOKEN / NPM_AUTH_TOKEN_CM depending on --scope.
-    expect(yml).toContain('NPM_TOKEN: ${{ secrets.{{NPM_SECRET_NAME}} }}');
+    // One secret NAME in every org; the orgs hold different values. The old NPM_AUTH_TOKEN_CM
+    // is retired, so there is nothing left to substitute here.
+    expect(yml).toContain('NPM_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}');
+    expect(yml).not.toContain('NPM_AUTH_TOKEN_CM');
+    expect(yml).not.toContain('{{NPM_SECRET_NAME}}');
     expect(yml).toContain('RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}');
     expect(yml).toContain('RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}');
   });
