@@ -60,8 +60,17 @@ import {
   ensureEnvironmentLoaded,
   loadBackendStorageConfig,
   getLincdPackages,
+  discoverLocalPackages,
+  planBuildAll,
 } from './lifecycle.js';
-export {ensureEnvironmentLoaded, loadBackendStorageConfig, getLincdPackages};
+import type {BuildAllPlan} from './lifecycle.js';
+export {
+  ensureEnvironmentLoaded,
+  loadBackendStorageConfig,
+  getLincdPackages,
+  discoverLocalPackages,
+  planBuildAll,
+};
 
 var variables = {};
 /**
@@ -939,109 +948,41 @@ function findAppRoot(startPath = process.cwd()): string | null {
 }
 
 /**
- * Filters packages to only include those in the dependency tree of the app root
+ * Print the discovery result in full: what will be built, and every package
+ * that was found and will not be. Nothing is discovered silently.
  */
-function filterPackagesByDependencyTree(
-  allPackages: Map<string, PackageDetails>,
-  appRootPath: string,
-): Map<string, PackageDetails> {
-  const appPackageJson = getPackageJSON(appRootPath);
-  if (!appPackageJson) {
-    return allPackages;
+function printBuildAllPlan(plan: BuildAllPlan) {
+  console.log(
+    chalk.magenta(
+      `Found ${plan.build.size} linked package${plan.build.size === 1 ? '' : 's'} to build: ` +
+        Array.from(plan.build.keys()).join(', '),
+    ),
+  );
+  if (plan.skipped.length === 0) return;
+  console.log(
+    chalk.yellow(
+      `Skipping ${plan.skipped.length} package${plan.skipped.length === 1 ? '' : 's'} found but not built:`,
+    ),
+  );
+  for (const skip of [...plan.skipped].sort((a, b) =>
+    a.packageName.localeCompare(b.packageName),
+  )) {
+    console.log(chalk.yellow(`  - ${skip.packageName}: ${skip.reason}`));
   }
-
-  const relevantPackages = new Map<string, PackageDetails>();
-  const packagesToCheck = new Set<string>();
-
-  // Start with direct dependencies from app root
-  if (appPackageJson.dependencies) {
-    Object.keys(appPackageJson.dependencies).forEach((dep) => {
-      if (allPackages.has(dep)) {
-        packagesToCheck.add(dep);
-      }
-    });
-  }
-
-  // Recursively add dependencies
-  const processedPackages = new Set<string>();
-
-  while (packagesToCheck.size > 0) {
-    const packageName = Array.from(packagesToCheck)[0];
-    packagesToCheck.delete(packageName);
-
-    if (processedPackages.has(packageName)) {
-      continue;
-    }
-
-    processedPackages.add(packageName);
-    const packageDetails = allPackages.get(packageName);
-
-    if (packageDetails) {
-      relevantPackages.set(packageName, packageDetails);
-
-      // Get this package's dependencies
-      const packageJson = getPackageJSON(packageDetails.path);
-      if (packageJson && packageJson.dependencies) {
-        Object.keys(packageJson.dependencies).forEach((dep) => {
-          if (allPackages.has(dep) && !processedPackages.has(dep)) {
-            packagesToCheck.add(dep);
-          }
-        });
-      }
-    }
-  }
-
-  return relevantPackages;
 }
 
 export function buildAll(options) {
   console.log(
-    'Building all LINCD packages of this repository in order of dependencies',
+    'Building all linked packages of this repository in order of dependencies',
   );
-  let lincdPackages = getLocalLincdPackageMap();
-  const originalPackageCount = lincdPackages.size;
 
-  // Check if we're in an app context and filter packages accordingly
-  const appRoot = findAppRoot();
+  const plan = planBuildAll('./', findAppRoot() || undefined);
+  printBuildAllPlan(plan);
+  let lincdPackages = plan.build;
 
-  if (appRoot) {
-    const appPackageJson = getPackageJSON(appRoot);
-    // Check if this is an app (not a lincd package itself) with lincd dependencies
-    const isAppWithLincdDeps =
-      appPackageJson &&
-      appPackageJson.lincd !== true &&
-      appPackageJson.dependencies &&
-      Object.keys(appPackageJson.dependencies).some((dep) =>
-        lincdPackages.has(dep),
-      );
-
-    if (isAppWithLincdDeps) {
-      debugInfo(chalk.blue(`Found app root at: ${appRoot}`));
-      const filteredPackages = filterPackagesByDependencyTree(
-        lincdPackages,
-        appRoot,
-      );
-
-      console.log(
-        chalk.magenta(
-          `Found ${filteredPackages.size} total LINCD packages in use by this app`,
-        ),
-      );
-
-      lincdPackages = filteredPackages;
-    } else {
-      debugInfo(
-        chalk.blue(
-          `Building all ${originalPackageCount} packages from workspace`,
-        ),
-      );
-    }
-  } else {
-    debugInfo(
-      chalk.blue(
-        `No workspace root found, building all ${originalPackageCount} packages`,
-      ),
-    );
+  if (lincdPackages.size === 0) {
+    console.log(chalk.yellow('Nothing to build.'));
+    return;
   }
 
   let startFrom: string;
@@ -1173,7 +1114,7 @@ export function buildAll(options) {
                 log(
                   'Run ' +
                     chalk.greenBright(
-                      `lincd build-all --from=${pkg.packageName}`,
+                      `linked build-all --from=${pkg.packageName}`,
                     ) +
                     ' to build only the remaining packages',
                 ); //"+dependentModules.map(d => d.packageName).join(", ")));
@@ -1228,7 +1169,7 @@ export function buildAll(options) {
             ); //"+dependentModules.map(d => d.packageName).join(", ")));
             log(
               'Run ' +
-              chalk.greenBright(`lincd build-all --from=${pkg.packageName}`) +
+              chalk.greenBright(`linked build-all --from=${pkg.packageName}`) +
               ' to build only the remaining packages',
             ); //"+dependentModules.map(d => d.packageName).join(", ")));
             process.exit(1);
@@ -1973,7 +1914,7 @@ export const depCheck = async (packagePath: string = process.cwd()) => {
           reject(
             chalk.red(
               packagePath.split('/').pop() +
-                '\n[ERROR] These LINCD packages are imported but they are not listed in package.json:\n- ' +
+                '\n[ERROR] These linked packages are imported but they are not listed in package.json:\n- ' +
                 missingLincdPackages
                   .map((missedKey) => {
                     const files = results.missing[missedKey];
@@ -2480,7 +2421,7 @@ export const createPackage = async (
   let {hyphenName, camelCaseName, underscoreName} =
     setNameVariables(cleanPackageName);
 
-  log("Creating new LINCD package '" + name + "'");
+  log("Creating new linked package '" + name + "'");
   fs.copySync(
     path.join(getScriptDir(), '..', '..', 'defaults', 'package'),
     targetFolder,
@@ -2563,7 +2504,7 @@ export const createPackage = async (
   }
 
   log(
-    `Prepared a new LINCD package in ${chalk.magenta(targetFolder)}`,
+    `Prepared a new linked package in ${chalk.magenta(targetFolder)}`,
     `Run ${chalk.blueBright(
       runScriptCommand(setup.packageManager, 'build'),
     )} from this directory to build once`,
