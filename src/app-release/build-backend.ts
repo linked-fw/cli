@@ -85,7 +85,10 @@ export const workspacePackagesToExternalize = async (
 
 /**
  * A relative import from `lib/` into `packages/` means a workspace package was
- * compiled in after all.
+ * compiled in after all. One into `node_modules/@_linked/` means an installed
+ * framework package was: `lib/node_modules/@_linked/server-utils` is a second
+ * `ShapeProvider` class, so the server's `instanceof` check rejects every
+ * provider the app exports.
  *
  * Worth failing the build over rather than leaving to be discovered: the
  * output is perfectly valid JavaScript, and the symptom is the app refusing to
@@ -96,7 +99,7 @@ export const findInlinedWorkspaceImports = (source: string): string[] => {
   // can drag a workspace package in on its own, and only the second form
   // appears in the output for it.
   const matches = source.matchAll(
-    /(?:from|import)\s*\(?\s*["'](\.[^"']*\/packages\/[^"']+)["']/g
+    /(?:from|import)\s*\(?\s*["'](\.[^"']*\/(?:packages|node_modules\/@_linked)\/[^"']+)["']/g
   );
   return [...new Set([...matches].map((m) => m[1]))].sort();
 };
