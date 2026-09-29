@@ -15,6 +15,7 @@ import fsExtra from 'fs-extra';
 import path from 'node:path';
 import {generateScopedName} from './utils.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
+import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
 import type {Plugin, UserConfig} from 'vite';
 
 /**
@@ -659,6 +660,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
               },
             } as Plugin)
           : null,
+        // Published lib JS: keep decorated shape classes named `Foo`, not the
+        // `Foo2` Vite's esbuild re-prints would give them — see the plugin.
+        pinCompiledClassNames(),
         react({
           babel: {
             parserOpts: {
@@ -706,6 +710,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // `.../BackendAPIStore`, and every Server.call on that shape 501'd.
         // The same mangling made registration report `Shape undefined does not
         // extend base class`.
+        //
+        // Vite honours this in the minifier only: its per-file TypeScript
+        // transform and its define pass both run esbuild with keepNames off.
+        // `pinCompiledClassNames` above covers what those passes rename.
         keepNames: true,
       },
       // STANDALONE resolve conditions.

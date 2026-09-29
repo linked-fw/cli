@@ -26,10 +26,13 @@ export interface ExposedShape {
  * renamed their class.
  *
  * A shape's IRI is built from its class name unless `@linkedShape({name})`
- * gives one. `keepNames` in Vite's own TypeScript transform protects source
- * files, but published `lib/` JavaScript never goes through that transform —
- * only through the define pass above. So a compiled shape is exposed exactly
- * when it has no explicit name and its module contains a trigger. This is how
+ * gives one. Source files are safe: esbuild lowers their decorators to an
+ * anonymous `let Foo = class {`, which takes its name from the binding. Only
+ * published `lib/` JavaScript carries the self-named class expression, so a
+ * compiled shape is exposed exactly when it has no explicit name and its module
+ * contains a trigger. `createViteConfig` pins these names
+ * (`plugins/pin-compiled-class-names.ts`), but other bundlers and hand-written
+ * Vite configs do not, so the explicit name is still the fix. This is how
  * `@_linked/server`'s `LinkedServer` and `LincdAPI` came to register as
  * `LinkedServer2` / `LincdAPI2`.
  */
