@@ -407,6 +407,9 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   // created in one tree don't reach consumers in the other, causing
   // "Cannot destructure property 'isNativeApp' of useAppContext()" type
   // errors on every SSR render.
+  // Loading this entry through Vite is why `@_linked/server` is in
+  // `SSR_ENTRY_PACKAGES` (vite-config.ts): the package's bare imports must go
+  // through Vite as well, or some of its files evaluate once per loader.
   const ServerClass = (
     await vite.ssrLoadModule('@_linked/server/shapes/LinkedServer')
   ).LinkedServer;
