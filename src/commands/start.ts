@@ -4,10 +4,10 @@
 // a Vite dev server in middleware mode + overrides loadAppComponent /
 // loadRoutes to use vite.ssrLoadModule. This means LinkedServer's existing
 // initialization works unchanged; we just route module loading through
-// Vite instead of webpack/Node-direct.
+// Vite instead of loading modules through Node directly.
 //
-// What's different vs the legacy startServer():
-//   - No webpack-dev-middleware (LinkedServer skips when viteMiddleware set)
+// What's different vs the plain startServer():
+//   - LinkedServer renders through the Vite middleware when viteMiddleware is set
 //   - Vite handles the client transform + HMR
 //   - ssrLoadModule handles the server transform (decorators, jsx, ts)
 //   - Server changes still need full process restart for now (server HMR
@@ -109,7 +109,7 @@ export async function resolveViteServerConfig(
  * Inject Vite into LinkedServer's config:
  *   - vite: handle for ssrLoadModule (used to load app's backend.ts via self-reference)
  * and, unless API-only (where `apiOnly` makes LinkedServer skip page rendering):
- *   - viteMiddleware: mounted instead of webpack-dev-middleware
+ *   - viteMiddleware: mounted as the dev-server middleware
  *   - loadAppComponent / loadRoutes: route through vite.ssrLoadModule for SSR transform
  *   - viteSsrPreload: page modules to preload for SSR CSS collection
  */

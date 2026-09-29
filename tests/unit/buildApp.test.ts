@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
 import {
-  assertReleaseFlagsUnused,
+  assertViteApp,
   buildViteApp,
   hasViteConfig,
 } from '../../src/commands/build-app';
@@ -288,19 +288,19 @@ describe('buildViteApp', () => {
   });
 });
 
-describe('assertReleaseFlagsUnused', () => {
-  it('accepts a plain webpack build', () => {
-    expect(() => assertReleaseFlagsUnused({})).not.toThrow();
+describe('assertViteApp', () => {
+  it('accepts an app root holding a vite config', () => {
+    const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-vite-'));
+    fs.writeFileSync(path.join(appRoot, 'vite.config.ts'), '');
+    expect(() => assertViteApp(appRoot)).not.toThrow();
+    fs.rmSync(appRoot, {recursive: true, force: true});
   });
 
-  it.each([
-    [{target: 'web'}, '--target'],
-    [{publish: true}, '--publish'],
-    [{revision: 'abc'}, '--revision'],
-    [{allowDirty: true}, '--allow-dirty'],
-  ])('rejects %p on the webpack path', (options, flag) => {
-    expect(() => assertReleaseFlagsUnused(options)).toThrow(flag);
-    expect(() => assertReleaseFlagsUnused(options)).toThrow('require a Vite app');
+  it('rejects an app root without one, and says how to add it', () => {
+    const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-vite-'));
+    expect(() => assertViteApp(appRoot)).toThrow('no vite.config.{ts,js,mjs} found');
+    expect(() => assertViteApp(appRoot)).toThrow('createViteConfig');
+    fs.rmSync(appRoot, {recursive: true, force: true});
   });
 });
 

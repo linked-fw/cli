@@ -58,26 +58,18 @@ export const hasViteConfig = (appRoot = process.cwd()): boolean =>
   );
 
 /**
- * The release flags only mean something on the Vite path. A webpack app writes
- * no release manifest, so accepting and ignoring them would look like a release
- * was built when none was.
+ * Vite is the only app build there is. There used to be a webpack fallback for
+ * apps without a Vite config; it wrote no release manifest, so every release
+ * flag had to be refused on that path. Now the app itself is refused, by name,
+ * rather than silently building something that cannot be published.
  */
-export const assertReleaseFlagsUnused = (options: {
-  target?: string;
-  publish?: boolean;
-  revision?: string;
-  allowDirty?: boolean;
-}): void => {
-  const used = [
-    options.target !== undefined && '--target',
-    options.publish !== undefined && '--publish',
-    options.revision !== undefined && '--revision',
-    options.allowDirty !== undefined && '--allow-dirty',
-  ].filter(Boolean) as string[];
-  if (!used.length) return;
+export const assertViteApp = (appRoot = process.cwd()): void => {
+  if (hasViteConfig(appRoot)) return;
   throw new Error(
-    `${used.join(', ')} require a Vite app: no vite.config.{ts,js,mjs} was found, so ` +
-      'this app still builds with webpack and produces no release manifest.',
+    `[linked build-app] no vite.config.{ts,js,mjs} found in ${appRoot}. ` +
+      'The webpack build has been removed, so an app needs a Vite config to be built. Add one:\n\n' +
+      "  import {createViteConfig} from '@_linked/cli/vite-config';\n" +
+      "  export default createViteConfig({port: 4040, cssMode: 'tailwind'});\n",
   );
 };
 

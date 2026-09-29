@@ -1,4 +1,4 @@
-// Vite config helper for linked apps. Replaces webpack-based dev + build.
+// Vite config helper for linked apps. The one dev + build pipeline.
 //
 // Apps use this from their own vite.config.ts:
 //
@@ -7,7 +7,7 @@
 //
 // The helper preserves the dev-mode `generateScopedName` (readable
 // `_packageName_filename_className`) so CSS module class names match
-// what the previous webpack chain produced for trace/debug. Production
+// what the previous bundler chain produced for trace/debug. Production
 // uses Vite's default scoping (content-hash, equivalent uniqueness).
 import {defineConfig} from 'vite';
 import react from '@vitejs/plugin-react';
@@ -789,7 +789,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       define: {
         // The FRAMEWORK's only client-side env dependency: `@_linked/server-utils`'s
         // `Server.ts` reads `process.env.SITE_ROOT` to target the backend. The
-        // browser has no `process`, and Vite (unlike webpack's EnvironmentPlugin)
+        // browser has no `process`, and Vite (unlike a bundler's EnvironmentPlugin)
         // doesn't auto-inline `process.env.X`, so we define SITE_ROOT here — it's
         // always the app's own origin, defaulted to `http://localhost:<port>` (an
         // explicit `SITE_ROOT` env, e.g. from `.env-cmdrc`, still wins). NODE_ENV
