@@ -499,6 +499,23 @@ async function resolveWorkspaceSpecifier(
 }
 
 /**
+ * Packages whose entry `linked start` hands to `vite.ssrLoadModule` by name
+ * (`@_linked/server/shapes/LinkedServer`, see `commands/start.ts`).
+ *
+ * Vite transforms an explicitly requested entry, and every file it reaches by
+ * RELATIVE import, whether or not the package is external. The same package's
+ * bare-specifier imports from anywhere else (the app's `src`, the storage
+ * config) are externalized to Node. Left external, the package is split across
+ * two loaders, and which copy a file ends up in depends on import order: a file
+ * the module runner has already evaluated is reused, one it has not is loaded
+ * by Node, and Node then loads that file's relative imports itself. Measured in
+ * CN: `package.js` and `ontologies/lincd-server.js` evaluated once by each
+ * loader, and `LocalFileStore.js` too once the package's `backend` was loaded.
+ * Bundling the package makes Vite the only loader for it.
+ */
+export const SSR_ENTRY_PACKAGES = ['@_linked/server'];
+
+/**
  * `ssr.noExternal` for the dev SSR runner. With source workspaces, only those
  * package names are bundled by Vite; everything else in node_modules (including
  * published `@_linked/*`) is externalized to Node. Vite matches these entries
@@ -506,13 +523,16 @@ async function resolveWorkspaceSpecifier(
  * Installed packages that depend on a workspace (`dependents`, from
  * `workspaceDependents`) are bundled too, so they share the Vite-loaded workspace.
  * Standalone (no workspaces): the context-holding framework packages are bundled.
+ * In both modes, `SSR_ENTRY_PACKAGES` are bundled.
  */
 export function ssrNoExternal(
   workspaces: {name: string}[],
   dependents: string[] = [],
 ): (string | RegExp)[] {
-  if (workspaces.length === 0) return [/^@_linked\/server-utils$/, /^@_linked\/react$/];
-  return [...new Set([...workspaces.map((w) => w.name), ...dependents])];
+  if (workspaces.length === 0) {
+    return [/^@_linked\/server-utils$/, /^@_linked\/react$/, ...SSR_ENTRY_PACKAGES];
+  }
+  return [...new Set([...workspaces.map((w) => w.name), ...dependents, ...SSR_ENTRY_PACKAGES])];
 }
 
 /**
@@ -796,8 +816,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // DIFFERENT module instances → two `AppContext` objects → `useAppContext()` sees
         // no provider (null) → "Cannot destructure 'isNativeApp'" and a blank "SSR timed
         // out". Bundling makes them one instance in Vite's SSR module graph (matching how
-        // workspace mode bundles everything). Native-dep packages (`server`/`fuseki`) stay
-        // external so their prebuilt binaries load via Node.
+        // workspace mode bundles everything). `fuseki` stays external; `server` is bundled
+        // because `start` loads its entry through Vite (`SSR_ENTRY_PACKAGES`). Their native
+        // dependencies (e.g. `sharp`) are separate packages and stay external either way.
         //
         // WORKSPACE: bundle ONLY the discovered source workspaces (they resolve to `src/`
         // for HMR). Published framework packages installed under node_modules (lib-only)
@@ -807,7 +828,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // as `@_linked/fuseki/shapes/FusekiStore` through native `import()`, which pulled
         // a SECOND Node-loaded core and split the shape registry. Installed packages
         // that depend on a workspace (e.g. published fuseki when core itself is a
-        // workspace) are bundled too, so they import the Vite-loaded workspace.
+        // workspace) are bundled too, so they import the Vite-loaded workspace. The one
+        // published exception is `SSR_ENTRY_PACKAGES`, which Vite loads regardless.
         //
         // NOT DEV (a release build of the backend): nothing is force-bundled. The
         // compiled backend is loaded by Node next to the installed

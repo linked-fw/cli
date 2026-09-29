@@ -5,6 +5,7 @@ import {
   createViteConfig,
   discoverWorkspaces,
   ssrNoExternal,
+  SSR_ENTRY_PACKAGES,
   workspaceDependents,
 } from '../../src/vite-config';
 
@@ -66,9 +67,11 @@ describe('ssr.noExternal', () => {
     const config = await factory({command: 'serve', mode: 'development'});
     const noExternal = config.ssr.noExternal as (string | RegExp)[];
 
-    expect(noExternal).toEqual(['shapes']);
+    // `@_linked/server` is the one published exception: `start` loads its entry
+    // through Vite, so it is bundled rather than split across two loaders.
+    expect(noExternal).toEqual(['shapes', '@_linked/server']);
     expect(bundled(noExternal, 'shapes')).toBe(true);
-    for (const pkg of ['@_linked/core', '@_linked/fuseki', '@_linked/server', 'lincd-foo']) {
+    for (const pkg of ['@_linked/core', '@_linked/fuseki', '@_linked/server-utils', 'lincd-foo']) {
       expect(bundled(noExternal, pkg)).toBe(false);
     }
     // Workspace mode keeps Vite's default conditions (`development` → src).
@@ -111,7 +114,7 @@ describe('ssr.noExternal', () => {
     expect(workspaces.map((w) => w.name)).toEqual(['shapes']);
     const dependents = await workspaceDependents(workspaces, app);
     expect(dependents).toEqual([]);
-    expect(ssrNoExternal(workspaces, dependents)).toEqual(['shapes']);
+    expect(ssrNoExternal(workspaces, dependents)).toEqual(['shapes', '@_linked/server']);
   });
 
   it('core-as-workspace layout: fuseki and its transitive dependents go through Vite', async () => {
@@ -161,5 +164,18 @@ describe('ssr.noExternal', () => {
     expect(bundled(noExternal, '@_linked/server-utils')).toBe(true);
     expect(bundled(noExternal, '@_linked/react')).toBe(true);
     expect(bundled(noExternal, '@_linked/core')).toBe(false);
+  });
+
+  // `start` loads LinkedServer through `vite.ssrLoadModule`, so Vite evaluates the
+  // server package whatever `noExternal` says. Externalizing its bare imports as well
+  // would evaluate some of its files a second time through Node.
+  it('bundles the package start loads through Vite, in both modes', () => {
+    expect(SSR_ENTRY_PACKAGES).toEqual(['@_linked/server']);
+    const standalone = ssrNoExternal([]);
+    const workspace = ssrNoExternal([{name: 'shapes'}], ['@_linked/fuseki']);
+    for (const noExternal of [standalone, workspace]) {
+      expect(bundled(noExternal, '@_linked/server')).toBe(true);
+    }
+    expect(ssrNoExternal([{name: '@_linked/server'}])).toEqual(['@_linked/server']);
   });
 });
