@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.28.1
+
+### Patch Changes
+
+- [#161](https://github.com/linked-fw/cli/pull/161) [`a43b13a`](https://github.com/linked-fw/cli/commit/a43b13ae1d965309f1d783e8570537b4524bdbb1) Thanks [@flyon](https://github.com/flyon)! - A release backend build no longer compiles a private copy of `@_linked/server-utils` and `@_linked/react` into `lib/`. That copy made every provider the app exports fail `LinkedServer`'s `instanceof ShapeProvider` check, so all but one were dropped ("exports two generic backend providers"). `build-app` now also fails if an installed `@_linked/*` package ends up inlined.
+
 ## 1.28.0
 
 ### Minor Changes
