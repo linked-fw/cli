@@ -551,7 +551,7 @@ program
   .argument('<name>', 'the name of the package. Can be a part of the name.')
   .argument(
     '[command]',
-    'the lincd command you want to execute. Like dev or build',
+    'the linked command you want to execute. Like dev or build',
   )
   .argument('[args...]', 'the additional arguments of that command');
 
