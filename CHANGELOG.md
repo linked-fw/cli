@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.28.0
+
+### Minor Changes
+
+- [#158](https://github.com/linked-fw/cli/pull/158) [`e821daf`](https://github.com/linked-fw/cli/commit/e821dafc4865dfc4db3404eeb20619fe1ad8fcd1) Thanks [@flyon](https://github.com/flyon)! - `linked build` gains a "Checking shape names" step that warns about compiled shapes without `@linkedShape({name})` whose module also reads `process.env` or `import.meta.env` — the ones a consumer's bundler can rename.
+
+- [#158](https://github.com/linked-fw/cli/pull/158) [`ee391de`](https://github.com/linked-fw/cli/commit/ee391dea3b53ed0ae6e19d667397b1fc4433d05b) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now applies its `process.env.*` defines (`NODE_ENV`, `SITE_ROOT`, `APP_NAME`, and anything passed as its `define` option) to the **client environment only** (`environments.client.define`), no longer to the top-level `define` that the SSR environment inherits.
+
+  A top-level define reached the server in two harmful ways. Vite's define pass runs `esbuild.transform` without `keepNames` over every SSR module containing a key, which renamed tsc-emitted decorated classes — `@_linked/server`'s `LinkedServer` and `LincdAPI` registered as `LinkedServer2` / `LincdAPI2` in dev, so their shape IRIs no longer matched. And in a release backend build it inlined the build machine's `SITE_ROOT` instead of reading the deployment's.
+
+  Behaviour change: server-side code loaded through Vite now reads `process.env.SITE_ROOT`, `APP_NAME` and `NODE_ENV` at runtime in dev as well, so those must be set in the server's environment (they already had to be for any externalised package). Apps that add their own top-level `define` in `vite.config` should move it to `environments.client.define`.
+
+### Patch Changes
+
+- [#158](https://github.com/linked-fw/cli/pull/158) [`1a8fe90`](https://github.com/linked-fw/cli/commit/1a8fe90a5f4b974dbae00425f976b77f880f0efa) Thanks [@flyon](https://github.com/flyon)! - The package template's tsconfig (and the CLI's own) now sets `inlineSources`, so published source maps carry their sources instead of pointing at an unshipped `src/`.
+
 ## 1.27.0
 
 ### Minor Changes
