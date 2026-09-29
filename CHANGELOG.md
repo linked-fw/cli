@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.28.2
+
+### Patch Changes
+
+- [#162](https://github.com/linked-fw/cli/pull/162) [`e965600`](https://github.com/linked-fw/cli/commit/e9656005679f137b023d811fc057409071109d27) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now keeps compiled decorated classes named as written. Vite re-prints any published module that mentions `process.env` or `import.meta.env` (client build) or `process.env.NODE_ENV` (dev client) with esbuild, which renamed tsc's `let Foo = class Foo` to `class Foo2` — and an unnamed shape's IRI is its class name. A new `linked:pin-compiled-class-names` plugin pins each such class's name right after its declaration, before its decorators run.
+
+- [#170](https://github.com/linked-fw/cli/pull/170) [`7a9e465`](https://github.com/linked-fw/cli/commit/7a9e465d498ff01247967d586b17e81c29536e08) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now bundles `@_linked/server` in the dev SSR runner (`ssr.noExternal`), in workspace and standalone mode alike. `linked start` loads `LinkedServer` through `vite.ssrLoadModule`, so Vite already evaluated that entry and every file it reaches by relative import, while bare `@_linked/server/...` imports from the app and its storage config went to Node. The package was split across two loaders, and which one evaluated a given file depended on import order: in Create Now, `package.js` and `ontologies/lincd-server.js` evaluated once in each, and `shapes/filestores/LocalFileStore.js` too once the package's `backend` loaded. Vite is now the only loader for it. The new `SSR_ENTRY_PACKAGES` export names the packages this applies to.
+
 ## 1.28.1
 
 ### Patch Changes
