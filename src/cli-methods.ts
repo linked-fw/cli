@@ -25,6 +25,7 @@ import {
   runScriptCommand,
 } from './utils/packageManager.js';
 import {rewriteExtensionlessImports} from './utils/esmSpecifiers.js';
+import {checkShapeNames} from './utils/shapeNames.js';
 
 import {spawn as spawnChild} from 'child_process';
 import {findNearestPackageJson} from 'find-nearest-package-json';
@@ -2934,6 +2935,11 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
       }
       return changed > 0 ? {info: `rewrote ${changed} file(s)`} : true;
     },
+  },
+  {
+    // Reads the emitted lib/esm, so it runs after everything that writes it.
+    name: 'Checking shape names',
+    apply: () => checkShapeNames(packagePath),
   },
   {
     name: 'Checking dependencies',

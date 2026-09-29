@@ -147,7 +147,10 @@ export interface LinkedViteConfigOptions {
   plugins?: Plugin[];
   /** Extra PostCSS plugins (e.g. `postcss-media-to-container`). */
   postcssPlugins?: unknown[];
-  /** Extra `define` entries (used to bridge legacy `process.env.X` refs to client). */
+  /**
+   * Extra `define` entries for the CLIENT environment only (used to bridge
+   * `process.env.X` refs into the browser). Never applied server-side.
+   */
   define?: Record<string, string>;
   /**
    * Extra workspace globs (trailing `/*`, or a direct package dir) resolved
@@ -511,6 +514,28 @@ export function ssrNoExternal(
   return [...new Set([...workspaces.map((w) => w.name), ...dependents])];
 }
 
+/**
+ * The `process.env.*` values inlined into the browser bundle — and only there.
+ * See the `environments.client.define` note in `createViteConfig` for why the
+ * server environment must not receive them.
+ */
+export function clientDefine(
+  opts: Pick<LinkedViteConfigOptions, 'define' | 'port'> = {},
+): Record<string, string> {
+  return {
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
+    'process.env.SITE_ROOT': JSON.stringify(
+      process.env.SITE_ROOT ?? `http://localhost:${process.env.PORT ?? opts.port ?? 4040}`,
+    ),
+    // The app's display name, so client components (e.g. the header) can read it
+    // like the SSR <title> does (server-utils Html reads process.env.APP_NAME). The
+    // browser has no `process`, so inline it; falls back to a generic label when
+    // unset so a bare checkout never renders `undefined`.
+    'process.env.APP_NAME': JSON.stringify(process.env.APP_NAME ?? 'Linked App'),
+    ...(opts.define ?? {}),
+  };
+}
+
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
   return defineConfig(async ({mode}) => {
     const isDev = mode === 'development';
@@ -786,38 +811,49 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
           ? {resolve: {conditions: ['module', 'node']}}
           : {}),
       },
-      define: {
-        // The FRAMEWORK's only client-side env dependency: `@_linked/server-utils`'s
-        // `Server.ts` reads `process.env.SITE_ROOT` to target the backend. The
-        // browser has no `process`, and Vite (unlike a bundler's EnvironmentPlugin)
-        // doesn't auto-inline `process.env.X`, so we define SITE_ROOT here — it's
-        // always the app's own origin, defaulted to `http://localhost:<port>` (an
-        // explicit `SITE_ROOT` env, e.g. from `.env-cmdrc`, still wins). NODE_ENV
-        // is a common client guard, so define it too.
-        //
-        // We define only these SPECIFIC tokens (never a whole-object `process.env`
-        // replacement): Vite's `define` also hits the SSR transform, and the backend
-        // reads `process.env` at runtime (e.g. passes the whole object to
-        // `parseDatasetsConfig`) — clobbering bare `process.env` would strip the
-        // server's env.
-        //
-        // Apps expose their OWN frontend env vars by adding to `define` in their
-        // `vite.config.ts`, e.g.:
-        //   createViteConfig({ define: {
-        //     'process.env.MY_PUBLIC_KEY': JSON.stringify(process.env.MY_PUBLIC_KEY),
-        //   }})
-        // (only reference PUBLIC vars in client code — a defined secret would be
-        // inlined into the browser bundle).
-        'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
-        'process.env.SITE_ROOT': JSON.stringify(
-          process.env.SITE_ROOT ?? `http://localhost:${process.env.PORT ?? opts.port ?? 4040}`,
-        ),
-        // The app's display name, so client components (e.g. the header) can read it
-        // like the SSR <title> does (server-utils Html reads process.env.APP_NAME). The
-        // browser has no `process`, so inline it; falls back to a generic label when
-        // unset so a bare checkout never renders `undefined`.
-        'process.env.APP_NAME': JSON.stringify(process.env.APP_NAME ?? 'Linked App'),
-        ...(opts.define ?? {}),
+      // Client-only, deliberately: these go on the `client` environment, not the
+      // top-level `define`, because a top-level `define` is inherited by the SSR
+      // environment too.
+      //
+      // The browser needs them. `@_linked/server-utils`'s `Server.ts` reads
+      // `process.env.SITE_ROOT` to target the backend; the browser has no
+      // `process`, and Vite (unlike a bundler's EnvironmentPlugin) doesn't
+      // auto-inline `process.env.X`, so SITE_ROOT is defined here — always the
+      // app's own origin, defaulted to `http://localhost:<port>` (an explicit
+      // `SITE_ROOT` env, e.g. from `.env-cmdrc`, still wins). NODE_ENV is a
+      // common client guard, so it is defined too.
+      //
+      // The server must NOT get them, for two reasons:
+      // - it reads `process.env` at runtime, so an inlined build-time value is
+      //   wrong there (a release backend would carry the build machine's
+      //   SITE_ROOT rather than the deployment's);
+      // - worse, every `define` key is a trigger. Vite's `vite:define` plugin
+      //   runs `esbuild.transform` — without `keepNames` — over any SSR module
+      //   whose text contains a key. esbuild renames the inner binding of a
+      //   tsc-emitted decorated class (`let LinkedServer = class LinkedServer`
+      //   becomes `class LinkedServer2`), and a shape's IRI is built from its
+      //   class name, so `@_linked/server`'s `LinkedServer` and `LincdAPI`
+      //   registered as `LinkedServer2` / `LincdAPI2` in dev. Without user keys
+      //   the SSR environment has none of its own (`keepProcessEnv` is on for
+      //   it), so nothing server-side is rewritten.
+      //
+      // Only these SPECIFIC tokens, never a whole-object `process.env`
+      // replacement: in a client build Vite already maps any other
+      // `process.env.X` to `{}.X` (undefined), which is what client code expects.
+      //
+      // Apps expose their OWN frontend env vars through the `define` option,
+      // which lands here too:
+      //   createViteConfig({ define: {
+      //     'process.env.MY_PUBLIC_KEY': JSON.stringify(process.env.MY_PUBLIC_KEY),
+      //   }})
+      // (only reference PUBLIC vars in client code — a defined secret would be
+      // inlined into the browser bundle). An app that puts a top-level `define`
+      // in its own config reintroduces both problems for the server; use
+      // `environments.client.define` there as well.
+      environments: {
+        client: {
+          define: clientDefine(opts),
+        },
       },
       // WORKSPACE mode: exclude the source-shipping workspace packages (@_linked/*,
       // lincd-*) from esbuild's dep pre-bundler. They resolve to `src/` via the
