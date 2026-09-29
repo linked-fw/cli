@@ -775,7 +775,16 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // a SECOND Node-loaded core and split the shape registry. Installed packages
         // that depend on a workspace (e.g. published fuseki when core itself is a
         // workspace) are bundled too, so they import the Vite-loaded workspace.
-        noExternal: ssrNoExternal(workspaces, await workspaceDependents(workspaces)),
+        //
+        // NOT DEV (a release build of the backend): nothing is force-bundled. The
+        // compiled backend is loaded by Node next to the installed
+        // `@_linked/server`, so every framework package has to stay a bare import
+        // that resolves to that same node_modules copy. `workspaces` is always
+        // empty here, and handing that to `ssrNoExternal` used to select the
+        // standalone list — which compiled a private `server-utils` into `lib/`,
+        // so no app provider was `instanceof` the server's `ShapeProvider` and
+        // `LinkedServer` dropped them all ("exports two generic backend providers").
+        noExternal: isDev ? ssrNoExternal(workspaces, await workspaceDependents(workspaces)) : [],
         // STANDALONE: the SSR module runner (`vite.ssrLoadModule`, used to
         // load LinkedServer + the app graph in commands/start.ts) has its OWN
         // condition list, defaulting to `resolve.conditions`. Set it

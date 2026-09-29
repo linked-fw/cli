@@ -94,6 +94,15 @@ describe('findInlinedWorkspaceImports', () => {
     ]);
   });
 
+  test('spots an installed framework package compiled into the output', () => {
+    const source =
+      'import {BackendProvider} from "./node_modules/@_linked/server-utils/lib/esm/utils/BackendProvider.js";';
+
+    expect(findInlinedWorkspaceImports(source)).toEqual([
+      './node_modules/@_linked/server-utils/lib/esm/utils/BackendProvider.js',
+    ]);
+  });
+
   test('does not confuse an app directory that happens to be named packages', () => {
     // `@_linked/foo/packages/…` is a bare specifier, not a relative one.
     const source = 'import x from "@_linked/foo/packages/bar.js";';

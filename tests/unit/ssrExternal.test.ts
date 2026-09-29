@@ -142,6 +142,20 @@ describe('ssr.noExternal', () => {
     expect(bundled(noExternal, 'left-pad')).toBe(false);
   });
 
+  it('a production build force-bundles nothing, so the backend shares the server\'s framework copies', async () => {
+    // No workspaces, as for a standalone app — but not dev. Compiling
+    // server-utils into lib/ gave the backend its own ShapeProvider class, and
+    // LinkedServer (installed) dropped every provider the app exported.
+    writeJson(path.join(tmp, 'package.json'), {name: 'app', dependencies: {'@_linked/core': '1'}});
+    process.chdir(tmp);
+    const factory = createViteConfig() as any;
+    const config = await factory({command: 'build', mode: 'production'});
+    const noExternal = config.ssr.noExternal as (string | RegExp)[];
+    for (const pkg of ['@_linked/server-utils', '@_linked/react', '@_linked/core']) {
+      expect(bundled(noExternal, pkg)).toBe(false);
+    }
+  });
+
   it('standalone bundles only the context-holding framework packages', () => {
     const noExternal = ssrNoExternal([]);
     expect(bundled(noExternal, '@_linked/server-utils')).toBe(true);
