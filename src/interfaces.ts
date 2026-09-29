@@ -41,43 +41,6 @@ export interface PackageDetails {
 }
 
 /**
- * Webpack build configuration
- */
-export interface LinkedWebpackConfig {
-  /**
-   * Enable webpack filesystem caching for faster rebuilds
-   * @default true
-   */
-  cache?: boolean;
-
-  /**
-   * Enable webpack bundle analyzer to visualize bundle size
-   * @default false
-   */
-  analyse?: boolean;
-
-  /**
-   * Additional webpack plugins
-   */
-  plugins?: any[];
-
-  /**
-   * Webpack externals configuration - modules to exclude from bundle
-   */
-  externals?: {[npmModule: string]: string};
-
-  /**
-   * Webpack alias configuration for import path shortcuts
-   */
-  alias?: {[oldNpmPath: string]: string};
-
-  /**
-   * Patterns for CSS files that should not use CSS Modules
-   */
-  cssGlobalModulePaths?: (RegExp | string)[];
-}
-
-/**
  * Server-specific configuration
  */
 export interface LinkedServerConfig {
@@ -128,17 +91,12 @@ export interface LinkedServerConfig {
  */
 export interface LinkedConfig {
   /**
-   * CSS processing mode (shared by webpack and server for SSR)
+   * CSS processing mode (shared by the Vite build and the server for SSR)
    * - 'tailwind': Use Tailwind CSS v4 with @tailwindcss/postcss. Still supports CSS Modules for .module.css files
    * - 'postcss': Use PostCSS with nesting support and CSS Modules for .module.css files
    * @default 'postcss'
    */
   cssMode?: 'tailwind' | 'postcss';
-
-  /**
-   * Webpack build configuration
-   */
-  webpack?: LinkedWebpackConfig;
 
   /**
    * Server configuration

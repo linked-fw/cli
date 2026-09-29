@@ -533,7 +533,7 @@ export function execPromise(
 
 export function generateScopedNameProduction(cssClassName, filepath, css?) {
   //for app development we can use short unique hashes
-  //but for webpack bundles of lincd modules, we need to ensure unique class names across bundles of many packages
+  //but for bundles of lincd modules, we need to ensure unique class names across bundles of many packages
   //generate a short unique hash based on cssClassName and filepath
   let hash = crypto
     .createHash('md5')

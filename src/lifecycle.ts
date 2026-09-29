@@ -2,7 +2,7 @@
 //
 // Extracted from cli-methods.ts so the SSR module graph (started from
 // `commands/start.ts`) doesn't have to walk the rest of that file. The
-// legacy webpack-era helpers in cli-methods.ts contain many dynamic
+// the older helpers in cli-methods.ts contain many dynamic
 // `import(<variable>)` calls Vite can't analyze statically and would
 // emit warnings about — even though startWithVite never calls them.
 
@@ -185,7 +185,7 @@ export async function loadBackendStorageConfig(): Promise<any> {
  * workspace package that declares `"linkedPackage": true`.
  *
  * Lives here (not in cli-methods.ts) so consumers like LinkedServer can
- * import it without dragging the rest of the legacy webpack flow into
+ * import it without dragging the rest of the legacy cli-methods flow into
  * Vite's SSR module graph.
  */
 export function getLincdPackages(

@@ -2,14 +2,10 @@
 //The line above calls the TSX typescript executer as runtime, which extends node.js and supports running typescript
 // see: https://www.npmjs.com/package/tsx
 
-// import babelRegister from '@babel/register';
-// babelRegister({extensions: ['.ts', '.tsx']});
-
 import chalk from 'chalk';
 import {
   addCapacitor,
   buildAll,
-  buildApp,
   buildPackage,
   buildUpdated,
   checkImports,
@@ -101,12 +97,6 @@ program
 program
   .command('start')
   .action(async (options) => {
-    // Vite is the default. The pre-Vite webpack dev server in
-    // cli-methods startServer stays reachable through the deprecated
-    // `--legacy` flag for projects that have not moved to Vite yet.
-    if (options?.legacy) {
-      return startServer();
-    }
     const {startWithVite} = await import('./commands/start.js');
     return startWithVite({env: options?.env, apiOnly: options?.apiOnly});
   })
@@ -115,7 +105,6 @@ program
     '--api-only',
     'Serve only the backend API: no vite.config, src/App.tsx or src/routes.tsx needed; page requests get a 404',
   )
-  .option('--legacy', 'Use the pre-Vite webpack dev server (deprecated; will be removed)')
   .description(
     'Start the Linked dev server. Vite-backed by default.',
   );
@@ -305,26 +294,20 @@ program.command('build-metadata').action(() => {
 program
   .command('build-app')
   .action(async (options) => {
-    // If vite.config.{ts,js,mjs} exists in cwd,
-    // run `vite build` for the client bundle. Falls back to webpack
-    // buildApp() when no Vite config (legacy apps).
+    // Vite is the only app build. An app without a `vite.config.{ts,js,mjs}`
+    // is rejected by name rather than falling back to anything.
     await runAppCommand(async () => {
-      const {hasViteConfig, buildViteApp, assertReleaseFlagsUnused} =
-        await import('./commands/build-app.js');
-      if (hasViteConfig()) {
-        // Vite apps use the manifest-verified build and publishing flow.
-        await buildViteApp({
-          environmentNames: splitEnvOption(options?.env),
-          target: options?.target,
-          publish: options?.publish === true,
-          revision: options?.revision,
-          allowDirty: options?.allowDirty === true,
-        });
-        return;
-      }
-      // Older apps without Vite keep the existing Webpack build temporarily.
-      assertReleaseFlagsUnused(options || {});
-      return buildApp();
+      const {assertViteApp, buildViteApp} = await import(
+        './commands/build-app.js'
+      );
+      assertViteApp();
+      await buildViteApp({
+        environmentNames: splitEnvOption(options?.env),
+        target: options?.target,
+        publish: options?.publish === true,
+        revision: options?.revision,
+        allowDirty: options?.allowDirty === true,
+      });
     });
   })
   .option('--env <env>', 'The node environment to use. Default is "development"')
@@ -342,7 +325,7 @@ program
     'Build from a working tree with uncommitted changes; the release revision gets a "-dirty" suffix',
   )
   .description(
-    'Build the linked app frontend and backend for production, and write a release manifest. Uses Vite for the frontend when vite.config exists; falls back to webpack.',
+    'Build the linked app frontend and backend for production, and write a release manifest. Requires a vite.config in the app root.',
   );
 
 program

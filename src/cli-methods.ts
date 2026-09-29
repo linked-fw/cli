@@ -33,9 +33,7 @@ import {LinkedFileStorage} from '@_linked/core/utils/LinkedFileStorage';
 import type {PackageDetails} from './interfaces.js';
 // import pkg from 'lincd/utils/LinkedFileStorage';
 // const { LinkedFileStorage } = pkg;
-// const config = require('@_linked/server/site.webpack.config');
 import {glob} from 'glob';
-import webpack from 'webpack';
 
 import ora, {Ora} from 'ora';
 import stagedGitFiles from 'staged-git-files';
@@ -2248,138 +2246,6 @@ export const startServer = async (
   } else {
     return server.start();
   }
-};
-export const buildApp = async () => {
-  await buildFrontend();
-  await buildBackend();
-  console.log(chalk.magenta(`✅ ${process.env.NODE_ENV} app build finished`));
-  process.exit(0);
-};
-export const buildFrontend = async () => {
-  await ensureEnvironmentLoaded();
-  // @vite-ignore — the webpack build path is legacy code, only reached
-  // by `linked build-frontend` which is not part of the Vite dev/SSR
-  // flow. Tell Vite not to graph-walk into it so we don't emit
-  // import-analysis warnings for a file we never load via SSR.
-  const webpackAppConfig = await (
-    await import(/* @vite-ignore */ './config-webpack-app.js')
-  ).getWebpackAppConfig();
-
-  console.log(
-    chalk.magenta(`🛠 Building ${process.env.NODE_ENV} frontend bundles`),
-  );
-  await new Promise((resolve, reject) => {
-    webpack(webpackAppConfig as any, async (err, stats) => {
-      if (err) {
-        console.error(err.stack || err);
-        process.exit(1);
-      }
-      const info = stats.toJson();
-      if (stats.hasErrors()) {
-        console.log('Finished running webpack with errors.');
-        info.errors.forEach((e) => console.error(e));
-        // process.exit(1);
-        reject();
-      } else {
-        console.log(
-          stats.toString({
-            chunks: false,
-            assets: true,
-            entrypoints: false,
-            modules: false,
-            moduleAssets: false,
-            colors: true,
-          }),
-        );
-        console.log('App build process finished');
-        resolve(true);
-        // console.log(
-        // 	chalk.green('\t'+Object.keys(stats.compilation.assets).join('\n\t')),
-        // );
-
-        //build metadata (JSON-LD files containing metadata about the lincd components, shapes & ontologies in this app or its packages)
-        // let updatedPaths = await buildMetadata();
-        // console.log(chalk.green("Updated metadata:\n")+" - "+updatedPaths.map(p => chalk.magenta(p.replace(process.cwd(),''))).join("\n - "));
-      }
-      // process.exit();
-    });
-  }).then(async () => {
-    // make sure environment is not development for storage config
-    // and if we want to upload to storage, we need set S3_BUCKET_ENDPOINT
-    if (
-      process.env.NODE_ENV === 'development' ||
-      !process.env.S3_BUCKET_ENDPOINT
-    ) {
-      console.warn(
-        'Upload build to storage skip in development environment or S3_BUCKET_ENDPOINT is not set',
-      );
-      return;
-      // process.exit();
-    }
-
-    if (process.env.APP_ENV) {
-      console.warn('Not uploading to CDN for app builds');
-      return;
-      // process.exit();
-    }
-
-    // load the storage config
-    const storageConfig = await loadBackendStorageConfig();
-
-    // check if LinkedFileStorage has a default FileStore
-    // if yes: copy all the files in the build folder over with LinkedFileStorage
-    if (LinkedFileStorage.getDefaultStore()) {
-      // get public directory
-      const rootDirectory = 'public';
-      const pathDir = path.join(process.cwd(), rootDirectory);
-      if (!fs.existsSync(pathDir)) {
-        console.warn(
-          'No public directory found. Please create a public directory in the root of your project',
-        );
-        return;
-      }
-
-      // get all files in the web directory and then upload them to the storage
-      const files = await getFiles(pathDir);
-      console.log(
-        chalk.magenta(
-          `🕊  Publishing ${files.length} public files to linked file storage`,
-        ),
-      );
-      const clearSpinner = ora({
-        discardStdin: true,
-        text: `Publishing ${files.length} public files`,
-      }).start();
-
-      let counter = 0;
-      const uploads = files.map(async (filePath) => {
-        // read file content
-        const fileContent = await fs.promises.readFile(filePath);
-
-        // replace pathDir with rootDirectory in filePath to get pathname
-        // example: /Users/username/project/www/index.html -> /project/www/index.html
-        const pathname = filePath.replace(pathDir, `/${rootDirectory}`);
-
-        // upload file to storage.
-        //
-        // preventDuplicates: false because this publishes a public/ folder to a
-        // CDN, where the key is the address: `main-hwqwrAvA.css` has to land as
-        // `main-hwqwrAvA.css` or the name baked into the HTML does not resolve,
-        // and republishing an unchanged build has to overwrite in place rather
-        // than accumulate a second copy under a new key.
-        await LinkedFileStorage.saveFile(pathname, fileContent, {
-          preventDuplicates: false,
-        })
-          .then(() => {
-            clearSpinner.text = `${counter++}/${files.length}: - Published ${pathname} `;
-          })
-          .catch(console.error);
-      });
-
-      const urls = await Promise.all(uploads);
-      clearSpinner.succeed(`${urls.length} files uploaded to storage`);
-    }
-  });
 };
 /**
  * Compile the app's backend into `lib/`.
