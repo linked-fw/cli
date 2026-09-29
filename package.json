@@ -1,6 +1,6 @@
 {
   "name": "@_linked/cli",
-  "version": "1.25.2",
+  "version": "1.26.0",
   "packageManager": "npm@11.19.1",
   "description": "Command line tools for the @_linked/* packages and apps",
   "main": "lib/esm/index.js",
@@ -32,7 +32,7 @@
     "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib && npm run chmod-bin",
     "chmod-bin": "chmod +x lib/esm/launch.js",
     "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && tsc -p tsconfig-esm.json",
-    "copy-to-lib": "echo '\ud83d\udcab Copying CSS assets to lib folder' && copyfiles -u 1 'src/**/*.css' lib/esm",
+    "copy-to-lib": "echo '💫 Copying CSS assets to lib folder' && copyfiles -u 1 'src/**/*.css' lib/esm",
     "dev": "tsc -p tsconfig-esm.json -w",
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "jest --config jest.config.cjs",
@@ -50,7 +50,7 @@
   ],
   "repository": "https://github.com/linked-fw/cli",
   "author": {
-    "name": "Ren\u00e9 Verheij",
+    "name": "René Verheij",
     "url": "https://github.com/flyon",
     "email": "rpwverheij@gmail.com"
   },
