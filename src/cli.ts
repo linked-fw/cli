@@ -439,6 +439,54 @@ program
   });
 
 program
+  .command('localize [packages...]')
+  .description(
+    'Develop an npm dependency from a git checkout: clone it, install inside the checkout, build it and symlink it into node_modules — without touching package.json or package-lock.json. Name packages exactly as npm names them (@_linked/rdfs, lodash); the repository is read from the published `repository` field. With no names, reports what is localized.',
+  )
+  .option('--list', 'Report what is localized rather than localizing anything.')
+  .option(
+    '--check',
+    'With --list: exit 1 when something recorded is not actually linked.',
+  )
+  .option(
+    '--relink',
+    'Recreate the recorded symlinks. This is what a postinstall runs.',
+  )
+  .option('--dir <path>', 'Where checkouts live (default: packages-local).')
+  .option(
+    '--repo <git-url>',
+    'Clone this instead of the published repository, and record it.',
+  )
+  .option(
+    '--subdir <path>',
+    "The package's directory inside the repository (monorepos).",
+  )
+  .option(
+    '--build <cmd>',
+    'Run this in the checkout after installing; a failure only warns. Defaults to `linked build`; pass an empty string to build nothing.',
+  )
+  .option(
+    '--force',
+    'Overwrite a symlink pointing outside the checkout directory.',
+  )
+  .action(async (packages: string[], options) => {
+    const {runLocalize} = await import('./commands/localize.js');
+    return runLocalize(packages, options);
+  });
+
+program
+  .command('delocalize [packages...]')
+  .description(
+    'Undo localize: unlink the packages and forget them, keeping the checkout. With no names, undoes every localized package.',
+  )
+  .option('--purge', 'Also delete the checkout.')
+  .option('--force', 'With --purge, delete even a checkout localize refuses.')
+  .action(async (packages: string[], options) => {
+    const {runDelocalize} = await import('./commands/localize.js');
+    return runDelocalize(packages, options);
+  });
+
+program
   .command('yarn')
   .description(
     'Run yarn at the workspace root. Forwards all extra args to yarn.',
