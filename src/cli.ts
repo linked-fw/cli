@@ -441,7 +441,7 @@ program
 program
   .command('yarn')
   .description(
-    "Run yarn at the workspace root while preserving nested repositories' yarn.lock files. Forwards all extra args to yarn.",
+    'Run yarn at the workspace root. Forwards all extra args to yarn.',
   )
   .allowUnknownOption(true)
   .action(async () => {

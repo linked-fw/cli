@@ -625,46 +625,10 @@ export function developPackage(target, mode) {
   }
 }
 
-function checkWorkspaces(rootPath, workspaces, res) {
-  // console.log('checking workspaces at '+rootPath+": "+workspaces.toString());
-  if (workspaces.packages) {
-    workspaces = workspaces.packages;
-  }
-
-  workspaces.forEach((workspace) => {
-    let workspacePath = path.join(rootPath, workspace.replace('/*', ''));
-    if (workspace.indexOf('/*') !== -1) {
-      // console.log(workspacePath);
-      if (fs.existsSync(workspacePath)) {
-        let folders = fs.readdirSync(workspacePath);
-        folders.forEach((folder) => {
-          if (folder !== './' && folder !== '../') {
-            checkPackagePath(rootPath, path.join(workspacePath, folder), res);
-          }
-        });
-      }
-    } else {
-      checkPackagePath(rootPath, workspacePath, res);
-    }
-  });
-}
-
-function checkPackagePath(rootPath, packagePath, res) {
-  let packageJsonPath = path.join(packagePath, 'package.json');
-  // console.log('checking '+packagePath);
-  if (fs.existsSync(packageJsonPath)) {
-    var pack = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-    //some packages are not true lincd packages, but we still want them to be re-built automatically. This is what lincd_util is for
-    if (pack && pack.workspaces) {
-      checkWorkspaces(packagePath, pack.workspaces, res);
-    } else if (pack && pack.linkedPackage === true) {
-      res.push({
-        path: packagePath,
-        packageName: pack.name,
-      });
-    }
-  }
-}
+// checkWorkspaces/checkPackagePath used to live here as a second, unreferenced
+// copy of the workspaces walk in lifecycle.ts. Both copies ignored negated
+// `workspaces` entries; the live one now shares ./workspace-globs.js, and this
+// dead duplicate is gone rather than left to be revived with the old bug.
 
 export function runOnPackagesGroupedByDependencies(
   lincdPackages,
@@ -2561,7 +2525,7 @@ export const createPackage = async (
   });
 
   // npm is the default for a new package. yarn is only consulted when the new
-  // package lands inside an existing yarn project (an mrgit/yarn-3 monorepo),
+  // package lands inside an existing yarn project (a yarn-3 monorepo),
   // where adding an npm lockfile would break the workspace.
   const insideYarnProject =
     detectPackageManager(path.dirname(path.resolve(targetFolder))) === 'yarn';

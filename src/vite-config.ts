@@ -14,6 +14,7 @@ import react from '@vitejs/plugin-react';
 import fsExtra from 'fs-extra';
 import path from 'node:path';
 import {generateScopedName} from './utils.js';
+import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import type {Plugin, UserConfig} from 'vite';
 
 /**
@@ -297,81 +298,60 @@ export async function workspaceDependents(
 }
 
 /**
- * Walk the app's package.json `workspaces` field to build a lookup table
- * from npm name → absolute src/ directory. Used by the resolver plugin
- * to map bare specifiers like `@_linked/foo/bar` directly to source.
- * No glob library: workspaces only support trailing `/*` patterns.
+ * Read a package root as a SOURCE install: `{name, srcDir}` iff it has a
+ * package.json with a name and ships a `src/` dir. Published packages have only
+ * `lib/` and are skipped — they resolve via their exports.
  */
-export async function discoverWorkspaces(
-  extraGlobs: string[] = [],
+async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
+  const pkgPath = path.join(root, 'package.json');
+  if (!(await fsExtra.pathExists(pkgPath))) return null;
+  const srcDir = path.join(root, 'src');
+  if (!(await fsExtra.pathExists(srcDir))) return null;
+  try {
+    const json = await fsExtra.readJson(pkgPath);
+    return json.name ? {name: json.name, srcDir} : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Linked packages installed as SOURCE, found by walking the app's
+ * `dependencies` + `devDependencies` (and recursing through the `dependencies`
+ * of each linked package found), keeping those marked `"linkedPackage": true`
+ * — the same marker the CLI keys on (see cli-methods.ts) — and registering the
+ * ones that ship `src/`.
+ *
+ * A dep ships `src/` when it is a symlinked workspace clone, a `link:`/`portal:`
+ * dev install, or a LOCALIZED checkout (`packages-local/<pkg>`, in no workspace
+ * glob). That's what lets a STANDALONE app (not itself a workspace root — e.g. a
+ * per-branch clone under /apps) resolve a linked package's `.tsx` sources with
+ * extension probing, instead of falling through to the package's
+ * `development → ./src/*.ts` export (which misses `.tsx` like LinkedServer). A
+ * prod/ejected app installs PUBLISHED packages (no `src/`) → not registered,
+ * resolved via each package's `lib`.
+ *
+ * The marker — NOT the npm scope — drives discovery, so a user's own
+ * custom-scope published linked package (e.g. `@acme/foo` with
+ * `linkedPackage:true`) is picked up too, and linked packages present in
+ * node_modules but not depended upon are ignored.
+ *
+ * Every root is REALPATHED before it is registered: `readInstalledPkg` returns
+ * the `node_modules/<name>` symlink spelling, and Vite's resolver realpaths
+ * every id it produces, so registering the symlink would give one file two
+ * module ids — two instances of the same module.
+ *
+ * Shared by the Vite resolver table (`discoverWorkspaces`) and the `linked start`
+ * HMR watch set, so the two cannot disagree about what is source.
+ */
+export async function discoverLinkedSourceDependencies(
   cwd: string = process.cwd(),
 ): Promise<WorkspaceEntry[]> {
+  const pkgPath = path.join(cwd, 'package.json');
+  if (!(await fsExtra.pathExists(pkgPath))) return [];
   const fs = await import('node:fs/promises');
   const out: WorkspaceEntry[] = [];
   const seen = new Set<string>();
-  // Register a package root iff it ships a `src/` dir (source install). Published
-  // packages have only `lib/` and are skipped — they resolve via their exports.
-  const addFromRoot = async (root: string): Promise<void> => {
-    const subPkgPath = path.join(root, 'package.json');
-    if (!(await fsExtra.pathExists(subPkgPath))) return;
-    const srcDir = path.join(root, 'src');
-    if (!(await fsExtra.pathExists(srcDir))) return;
-    try {
-      const sub = await fsExtra.readJson(subPkgPath);
-      if (sub.name && !seen.has(sub.name)) {
-        seen.add(sub.name);
-        out.push({name: sub.name, srcDir});
-      }
-    } catch {}
-  };
-
-  // 1. The app's own `workspaces` globs — the monorepo-root case (CN, or any app
-  //    that is itself a workspace root). Only trailing `/*` patterns.
-  const pkgPath = path.join(cwd, 'package.json');
-  if (await fsExtra.pathExists(pkgPath)) {
-    const pkg = await fsExtra.readJson(pkgPath);
-    const ownPatterns: string[] = Array.isArray(pkg.workspaces)
-      ? pkg.workspaces
-      : pkg.workspaces?.packages ?? [];
-    // Merge the app's own `workspaces` globs with any caller-supplied
-    // `workspaceGlobs` (e.g. `../lincd.org/modules/*`). Non-existent parents
-    // are skipped below, so passing both nested + standalone layouts is safe.
-    const patterns = [...ownPatterns, ...extraGlobs];
-    for (const pattern of patterns) {
-      const m = pattern.match(/^(.+?)\/\*$/);
-      if (m) {
-        const parent = path.join(cwd, m[1]);
-        if (await fsExtra.pathExists(parent)) {
-          for (const ent of await fs.readdir(parent, {withFileTypes: true})) {
-            if (ent.isDirectory() || ent.isSymbolicLink()) {
-              await addFromRoot(path.join(parent, ent.name));
-            }
-          }
-        }
-      } else {
-        await addFromRoot(path.join(cwd, pattern));
-      }
-    }
-  }
-
-  // 2. Dependency-graph traversal from the app's package.json. Starting from the
-  //    app's own `dependencies` (+ `devDependencies`), keep the deps whose
-  //    resolved package.json is marked `"linkedPackage": true` — the same marker
-  //    the CLI keys on (see cli-methods.ts) — and recurse into THOSE packages'
-  //    `dependencies`, with a visited-set to avoid cycles/rework.
-  //
-  //    A dep is REGISTERED only if it ships `src/` (a symlinked workspace clone,
-  //    or a `link:`/`portal:` dev install) — that's what lets a STANDALONE app
-  //    (not itself a workspace root — e.g. a per-branch clone under /apps) resolve
-  //    a linked package's `.tsx` sources with extension probing, instead of
-  //    falling through to the package's `development → ./src/*.ts` export (which
-  //    misses `.tsx` like LinkedServer). A prod/ejected app installs PUBLISHED
-  //    packages (no `src/`) → not registered, resolved via each package's `lib`.
-  //
-  //    The marker — NOT the npm scope — drives discovery, so a user's own
-  //    custom-scope published linked package (e.g. `@acme/foo` with
-  //    `linkedPackage:true`) is picked up too, and linked packages present in
-  //    node_modules but not depended upon are ignored.
   const visited = new Set<string>();
   const walk = async (
     deps: Record<string, string> | undefined,
@@ -383,22 +363,94 @@ export async function discoverWorkspaces(
       const resolved = await readInstalledPkg(name, fromDir);
       if (!resolved) continue;
       if (resolved.json.linkedPackage !== true) continue;
-      // Register if it ships source (addFromRoot gates on src/ existing).
-      await addFromRoot(resolved.root);
-      // Recurse into this linked package's own dependencies, resolved from its
-      // real location (a symlinked workspace clone resolves from its source dir).
       let realRoot = resolved.root;
       try {
         realRoot = await fs.realpath(resolved.root);
       } catch {}
+      const entry = await readSourcePackage(realRoot);
+      if (entry && !seen.has(entry.name)) {
+        seen.add(entry.name);
+        out.push(entry);
+      }
+      // Recurse from the real location, so a symlinked clone resolves its own
+      // dependencies from its source dir.
       await walk(resolved.json.dependencies, realRoot);
     }
   };
+  const appPkg = await fsExtra.readJson(pkgPath);
+  await walk(appPkg.dependencies, cwd);
+  await walk(appPkg.devDependencies, cwd);
+  return out;
+}
 
+/**
+ * Walk the app's package.json `workspaces` field to build a lookup table
+ * from npm name → absolute src/ directory. Used by the resolver plugin
+ * to map bare specifiers like `@_linked/foo/bar` directly to source.
+ *
+ * Positive patterns are expanded by directory listing, so only a trailing `/*`
+ * is honoured. NEGATED patterns (`"!packages/core"`) are honoured in full, with
+ * npm's semantics — see ./workspace-globs.js. Skipping them would resolve a
+ * package to an excluded directory that the package manager never installed
+ * dependencies for.
+ */
+export async function discoverWorkspaces(
+  extraGlobs: string[] = [],
+  cwd: string = process.cwd(),
+): Promise<WorkspaceEntry[]> {
+  const fs = await import('node:fs/promises');
+  const out: WorkspaceEntry[] = [];
+  const seen = new Set<string>();
+  // Register a package root iff it ships a `src/` dir (source install).
+  const addFromRoot = async (root: string): Promise<void> => {
+    const entry = await readSourcePackage(root);
+    if (!entry || seen.has(entry.name)) return;
+    seen.add(entry.name);
+    out.push(entry);
+  };
+
+  // 1. The app's own `workspaces` globs — the monorepo-root case (CN, or any app
+  //    that is itself a workspace root). Only trailing `/*` patterns.
+  const pkgPath = path.join(cwd, 'package.json');
   if (await fsExtra.pathExists(pkgPath)) {
-    const appPkg = await fsExtra.readJson(pkgPath);
-    await walk(appPkg.dependencies, cwd);
-    await walk(appPkg.devDependencies, cwd);
+    const pkg = await fsExtra.readJson(pkgPath);
+    // Merge the app's own `workspaces` globs with any caller-supplied
+    // `workspaceGlobs` (e.g. `../lincd.org/modules/*`). Non-existent parents
+    // are skipped below, so passing both nested + standalone layouts is safe.
+    // Either list may carry negations, so they are parsed together.
+    const {patterns, negatedPatterns} = parseWorkspacePatterns([
+      ...(Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces?.packages ?? []),
+      ...extraGlobs,
+    ]);
+    const addUnlessNegated = async (root: string): Promise<void> => {
+      const rel = path.relative(cwd, root).split(path.sep).join('/');
+      if (isWorkspacePathNegated(rel, negatedPatterns)) return;
+      await addFromRoot(root);
+    };
+    for (const pattern of patterns) {
+      const m = pattern.match(/^(.+?)\/\*$/);
+      if (m) {
+        const parent = path.join(cwd, m[1]);
+        if (await fsExtra.pathExists(parent)) {
+          for (const ent of await fs.readdir(parent, {withFileTypes: true})) {
+            if (ent.isDirectory() || ent.isSymbolicLink()) {
+              await addUnlessNegated(path.join(parent, ent.name));
+            }
+          }
+        }
+      } else {
+        await addUnlessNegated(path.join(cwd, pattern));
+      }
+    }
+  }
+
+  // 2. Linked deps installed as source — including a localized checkout that is
+  //    in no workspace glob. Shared with the `linked start` watch set; see
+  //    discoverLinkedSourceDependencies above. Glob entries win on a name clash.
+  for (const entry of await discoverLinkedSourceDependencies(cwd)) {
+    if (seen.has(entry.name)) continue;
+    seen.add(entry.name);
+    out.push(entry);
   }
 
   return out;

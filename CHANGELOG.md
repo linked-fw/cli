@@ -1,5 +1,86 @@
 # Changelog
 
+## 1.25.2
+
+### Patch Changes
+
+- [#149](https://github.com/linked-fw/cli/pull/149) [`cec1a1c`](https://github.com/linked-fw/cli/commit/cec1a1c6fce0a77d466d9f39f0c07564da712cff) Thanks [@flyon](https://github.com/flyon)! - `linked yarn` no longer reads a multi-repo manifest from the cwd. The tool that
+  produced nested sibling repos under `packages/` is retired, so there are no
+  nested yarn.lock files to back up: the command is now a plain, arg-preserving
+  passthrough to yarn.
+
+## 1.25.1
+
+### Patch Changes
+
+- [#147](https://github.com/linked-fw/cli/pull/147) [`b131099`](https://github.com/linked-fw/cli/commit/b131099cb509a53b1e04bb2a2ae1dc8b7bd6dbd2) Thanks [@flyon](https://github.com/flyon)! - `discoverWorkspaces` now realpaths a linked dependency's root before registering it, not only
+  before recursing into its own dependencies. The root came from the `node_modules/<name>` symlink
+  while Vite's resolver realpaths every id it produces, so a package installed as a symlink to a
+  checkout outside the workspace (a `packages-local/<pkg>` localized checkout) was served under two
+  ids — `/node_modules/<name>/src/…` and `/<real path>/src/…`. Two module ids mean two module
+  instances: React context and Linked registration state split, surfacing as errors like
+  `useAuth must be used within a ProvideAuth component`.
+
+- [#147](https://github.com/linked-fw/cli/pull/147) [`ebb7ed1`](https://github.com/linked-fw/cli/commit/ebb7ed164c74fa9aa43a4d84c676689ee9c9b19f) Thanks [@flyon](https://github.com/flyon)! - `linked start` now watches linked dependencies that are installed as source, not only packages
+  matched by the app's `workspaces` globs. The HMR watch set feeds `onSourceChange`, the
+  dispose-and-re-index cycle that replaces a package's registered backend providers; built from
+  `workspaces` alone it could not contain a checkout outside the workspace (a `packages-local/<pkg>`
+  localized checkout, in no glob), so a saved backend edit there was reloaded by Vite and then had no
+  effect — the provider instance registered at boot was never replaced.
+
+  The watch set and the Vite resolver table now share one discovery rule
+  (`discoverLinkedSourceDependencies`), so they cannot disagree about what is source. Only working
+  copies are watched: a published package that ships `src/` in its tarball stays inside
+  `node_modules`, which Vite's watcher ignores, so it is resolved from source as before but not
+  counted at boot.
+
+## 1.25.0
+
+### Minor Changes
+
+- [#144](https://github.com/linked-fw/cli/pull/144) [`82e2052`](https://github.com/linked-fw/cli/commit/82e2052c394b2c5b9abf47270f7211e6c907bb11) Thanks [@flyon](https://github.com/flyon)! - Honour negated `workspaces` patterns, the way npm does
+
+  `package.json` `workspaces` entries may be negated (`"!packages/core"`) to
+  exclude a directory from the workspace. npm honours those; three walkers in this
+  CLI did not, and each hand-rolled the same walk:
+
+  - `discoverWorkspaces` (the Vite source resolver, `vite-config.ts`)
+  - `getLincdPackages` / `checkWorkspaces` (`lifecycle.ts`)
+  - `discoverWorkspacePackages` (the dev HMR watcher, `commands/start.ts`)
+
+  A negation was simply inert, so `packages/*` still matched every directory. In a
+  monorepo whose `packages/` holds untracked sibling checkouts — excluded from the
+  workspace precisely so the package manager ignores them — dev resolved those
+  packages to `packages/<name>/src` instead of the installed copy. Those checkouts
+  have no dependencies installed, so the dev server failed to boot on a missing
+  transitive dependency, and unit tests failed to resolve imports.
+
+  All three now share one helper, `src/workspace-globs.ts`, which reproduces npm's
+  semantics (a direct port of `@npmcli/map-workspaces`): `!` prefixes (an even
+  number is not a negation), a leading `./` or `/` stripped, a later exact pattern
+  re-including what an earlier negation excluded, and a `/**` negation covering the
+  directory itself. Exact, non-glob entries are subject to negations too. Positive
+  patterns are still expanded by directory listing, so only a trailing `/*` is
+  honoured there — unchanged.
+
+  Discovery results change for any app whose `workspaces` field contains
+  negations; apps without them are unaffected.
+
+## 1.24.0
+
+### Minor Changes
+
+- [#142](https://github.com/linked-fw/cli/pull/142) [`8a3734e`](https://github.com/linked-fw/cli/commit/8a3734e00eb8dcc0bea6ec502e7acaddbef927bd) Thanks [@flyon](https://github.com/flyon)! - Require `@_linked/core@^2.22.8` (was `^2.21.0`), and pin it in the lockfile.
+
+  The declared range was wide enough that the resolved core depended on whatever the
+  consumer — or this repo's own CI, via `package-lock.json` — happened to install. Core
+  decides how a shape's IRI is minted, so a stale core made this package emit legacy
+  `data.lincd.org` IRIs instead of the arch-02 `linked.cm` scheme. Which IRIs a published
+  package produces should not be a function of the installer's dependency tree.
+
+  Minor rather than patch: this raises the minimum core a consumer must resolve, so it
+  changes what gets installed rather than only what this package does internally.
+
 ## 1.23.0
 
 ### Minor Changes
