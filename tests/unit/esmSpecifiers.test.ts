@@ -259,6 +259,7 @@ describe('planBuildSteps', () => {
       'Removing old files from lib folder',
       'Rewriting ESM import specifiers',
       'Checking shape names',
+      'Checking shape references',
       'Checking dependencies',
     ]);
   });
