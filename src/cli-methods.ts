@@ -1511,8 +1511,10 @@ export const createOntology = async (
   //if this is not a lincd app (but a lincd package instead)
   if (!sourceFolder.includes('frontend')) {
     //then also add an import to index
+    // Import the register sibling, not the terms module: only the sibling calls
+    // linkedOntology(). See the comment in example-ontology.register.ts.
     let indexPath = addLineToIndex(
-      `import './ontologies/${hyphenName}.js';`,
+      `import './ontologies/${hyphenName}.register.js';`,
       'ontologies',
     );
     log(`Added an import of this file from ${chalk.magenta(indexPath)}`);
@@ -2495,6 +2497,7 @@ export const createPackage = async (
       'Gruntfile.js',
       'src/package.ts',
       'src/ontologies/example-ontology.ts',
+      'src/ontologies/example-ontology.register.ts',
       'src/data/example-ontology.json',
     ]
       .map((f) => path.join(targetFolder, f))
@@ -2506,6 +2509,10 @@ export const createPackage = async (
   //rename these to a file name similar to the pkg name
   [
     'src/ontologies/example-ontology.ts',
+    // The register sibling is what index.ts imports; without it here the scaffold keeps a
+    // literal `example-ontology.register.ts` full of unsubstituted `${...}` placeholders and
+    // nothing ever calls linkedOntology().
+    'src/ontologies/example-ontology.register.ts',
     'src/data/example-ontology.json',
     'src/data/example-ontology.json.d.ts',
   ].forEach((f) => {
