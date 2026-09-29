@@ -1,10 +1,10 @@
 ---
-'@_linked/cli': major
+'@_linked/cli': minor
 ---
 
 Remove webpack. Vite is now the only frontend build and dev server this CLI has.
 
-**Breaking.** `linked build-app` no longer falls back to webpack when an app has no
+**Behaviour change.** Released as a minor by the maintainer's decision -- the org does not cut majors at present, and no consumer was on the removed path. `linked build-app` no longer falls back to webpack when an app has no
 `vite.config.{ts,js,mjs}` — it now fails with a message naming the missing file and the config to
 add. `linked start --legacy` is gone (the flag started a dev server that `@_linked/server` stopped
 mounting webpack-dev-middleware for, so it already served no frontend).
