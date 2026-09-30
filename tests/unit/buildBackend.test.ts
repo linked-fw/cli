@@ -1,6 +1,11 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import {
+  assertNoInlinedWorkspaces,
   explainUnresolvedWorkspaceImport,
-  findInlinedWorkspaceImports,
+  findImportSpecifiers,
+  packageRootsForApp,
   resolveBackendEntries,
   workspacePackagesToExternalize,
 } from '../../src/app-release/build-backend';
@@ -58,47 +63,185 @@ describe('workspacePackagesToExternalize', () => {
   });
 });
 
-describe('findInlinedWorkspaceImports', () => {
-  // The whole point of externalizing: a relative import into packages/ is a
-  // second copy of that package, and a second @_linked/core splits
-  // LinkedStorage's routing state from the one the storage config configures.
-  test('spots a workspace package compiled into the output', () => {
+describe('findImportSpecifiers', () => {
+  test('reads static, side-effect, dynamic and require imports', () => {
     const source = [
-      'import {LinkedStorage} from "./packages/core/lib/esm/utils/LinkedStorage.js";',
-      'import {Project} from "./packages/create-now-js/src/shapes/Project.js";',
-    ].join('\n');
-
-    expect(findInlinedWorkspaceImports(source)).toEqual([
-      './packages/core/lib/esm/utils/LinkedStorage.js',
-      './packages/create-now-js/src/shapes/Project.js',
-    ]);
-  });
-
-  test('a correctly externalized backend reports nothing', () => {
-    const source = [
-      'import {LinkedStorage} from "@_linked/core/utils/LinkedStorage";',
-      'import {runWithRequestContext} from "./data/AppDataRouter.js";',
+      'import {a} from "./a.js";',
+      'import "../b.js";',
+      'export * from "./c.js";',
+      'const Page = () => import("./d.js");',
+      "const e = require('./e.js');",
       "import express from 'express';",
     ].join('\n');
 
-    expect(findInlinedWorkspaceImports(source)).toEqual([]);
-  });
-
-  test('spots one pulled in by a lazily imported page', () => {
-    // A lazy page appears as a dynamic import in the output, not a static one.
-    const source =
-      'const Page = () => import("./packages/documents/lib/esm/index.js");';
-
-    expect(findInlinedWorkspaceImports(source)).toEqual([
-      './packages/documents/lib/esm/index.js',
+    expect(findImportSpecifiers(source)).toEqual([
+      '../b.js',
+      './a.js',
+      './c.js',
+      './d.js',
+      './e.js',
+      'express',
     ]);
   });
+});
 
-  test('does not confuse an app directory that happens to be named packages', () => {
-    // `@_linked/foo/packages/…` is a bare specifier, not a relative one.
-    const source = 'import x from "@_linked/foo/packages/bar.js";';
+describe('assertNoInlinedWorkspaces', () => {
+  // A fixture app on disk: src/, a compiled lib/ with sourcemaps, and package
+  // source it may or may not have compiled in.
+  let app: string;
+  const write = (rel: string, content: string) => {
+    const full = path.join(app, rel);
+    fs.mkdirSync(path.dirname(full), {recursive: true});
+    fs.writeFileSync(full, content);
+  };
+  // Emit lib/<rel>.js compiled from <sourceRel>, with the sourcemap Rollup writes.
+  const emit = (rel: string, sourceRel: string, code: string) => {
+    write(`lib/${rel}.js`, code);
+    const mapFile = path.join(app, 'lib', `${rel}.js.map`);
+    write(
+      `lib/${rel}.js.map`,
+      JSON.stringify({
+        version: 3,
+        sources: [path.relative(path.dirname(mapFile), path.join(app, sourceRel))],
+        mappings: '',
+      })
+    );
+  };
+  const documentsRoot = () => [
+    {root: fs.realpathSync(path.join(app, 'packages/documents')), name: '@_linked/documents'},
+  ];
+  const DEEP = 'features/document-studio/components/organisms/PageView';
 
-    expect(findInlinedWorkspaceImports(source)).toEqual([]);
+  beforeEach(() => {
+    app = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-'));
+    write(`src/${DEEP}.tsx`, '');
+    write('src/backend.ts', '');
+    write('packages/documents/package.json', '{"name":"@_linked/documents"}');
+    write('packages/documents/src/conformance/viewmodels.ts', '');
+    write('packages/documents/src/conformance/index.ts', '');
+    emit('backend', 'src/backend.ts', 'import express from "express";');
+  });
+  afterEach(() => fs.rmSync(app, {recursive: true, force: true}));
+
+  test('fails on a workspace package compiled in deep inside a feature folder', async () => {
+    // What a resolve.alias to the package's src produced in CN: the entries are
+    // clean, and the copy is reached from a component four folders down.
+    emit(
+      DEEP,
+      `src/${DEEP}.tsx`,
+      'import {pageOutline} from "../../../../packages/documents/src/conformance/viewmodels.js";'
+    );
+    emit(
+      'packages/documents/src/conformance/viewmodels',
+      'packages/documents/src/conformance/viewmodels.ts',
+      'export const pageOutline = 1;'
+    );
+
+    const failure = assertNoInlinedWorkspaces(app, documentsRoot());
+    await expect(failure).rejects.toThrow(`lib/${DEEP}.js imports`);
+    await expect(failure).rejects.toThrow(
+      '"../../../../packages/documents/src/conformance/viewmodels.js"'
+    );
+    await expect(failure).rejects.toThrow('(@_linked/documents)');
+    await expect(failure).rejects.toThrow('public export');
+    await expect(failure).rejects.toThrow('lib/packages/ exists');
+  });
+
+  test('traces the copy by its source, whatever its directory in lib/ is called', async () => {
+    emit(DEEP, `src/${DEEP}.tsx`, 'import "../../../../_ext/docs/viewmodels.js";');
+    emit(
+      '_ext/docs/viewmodels',
+      'packages/documents/src/conformance/viewmodels.ts',
+      'export const pageOutline = 1;'
+    );
+
+    await expect(assertNoInlinedWorkspaces(app, documentsRoot())).rejects.toThrow(
+      `lib/${DEEP}.js imports "../../../../_ext/docs/viewmodels.js"`
+    );
+  });
+
+  test('catches a localized checkout reached through a node_modules symlink', async () => {
+    // node_modules/@_linked/core -> packages-local/core: its real path has no
+    // node_modules in it, which is what a path-matching guard missed.
+    write('packages-local/core/src/utils/LinkedStorage.ts', '');
+    fs.mkdirSync(path.join(app, 'node_modules/@_linked'), {recursive: true});
+    fs.symlinkSync(
+      path.join(app, 'packages-local/core'),
+      path.join(app, 'node_modules/@_linked/core')
+    );
+    emit('App', 'src/backend.ts', 'import {LinkedStorage} from "./vendor/LinkedStorage.js";');
+    emit(
+      'vendor/LinkedStorage',
+      'node_modules/@_linked/core/src/utils/LinkedStorage.ts',
+      'export class LinkedStorage {}'
+    );
+
+    const roots = await packageRootsForApp(app, async () => []);
+    await expect(assertNoInlinedWorkspaces(app, roots)).rejects.toThrow(
+      /lib\/App\.js imports "\.\/vendor\/LinkedStorage\.js"[\s\S]*\(@_linked\/core\)/
+    );
+  });
+
+  test('fails on an import that leaves lib/ for a package outright', async () => {
+    write('node_modules/@_linked/server-utils/lib/esm/BackendProvider.js', '');
+    emit(
+      'backend',
+      'src/backend.ts',
+      'import {BackendProvider} from "../node_modules/@_linked/server-utils/lib/esm/BackendProvider.js";'
+    );
+
+    const roots = await packageRootsForApp(app, async () => []);
+    await expect(assertNoInlinedWorkspaces(app, roots)).rejects.toThrow(
+      '(@_linked/server-utils)'
+    );
+  });
+
+  test('passes a backend that imports packages through their exports', async () => {
+    emit(
+      DEEP,
+      `src/${DEEP}.tsx`,
+      [
+        'import {pageOutline} from "@_linked/documents/conformance";',
+        'import {Row} from "./FieldFirstTable.js";',
+        'const lazy = () => import("../molecules/PageRail.js");',
+      ].join('\n')
+    );
+    write('src/features/document-studio/components/organisms/FieldFirstTable.tsx', '');
+    emit(
+      'features/document-studio/components/organisms/FieldFirstTable',
+      'src/features/document-studio/components/organisms/FieldFirstTable.tsx',
+      ''
+    );
+
+    await expect(assertNoInlinedWorkspaces(app, documentsRoot())).resolves.toBeUndefined();
+  });
+
+  test('does not flag the app when it is discovered as a workspace itself', async () => {
+    write('package.json', '{"name":"my-app"}');
+    emit(DEEP, `src/${DEEP}.tsx`, 'import "../../../../backend.js";');
+    // No sourcemap, so this file is scanned whatever it is taken to be, and it
+    // reaches both the app's own module and a file of the app outside lib/.
+    write('lib/routes.js', 'import "./backend.js";\nimport pkg from "../package.json";');
+
+    const roots = await packageRootsForApp(app, async () => [
+      {name: 'my-app', srcDir: path.join(app, 'src')},
+    ]);
+    await expect(assertNoInlinedWorkspaces(app, roots)).resolves.toBeUndefined();
+  });
+
+  test('fails on lib/packages/ even without a sourcemap to trace', async () => {
+    write('lib/packages/documents/src/index.js', '');
+
+    await expect(assertNoInlinedWorkspaces(app, [])).rejects.toThrow(
+      'lib/packages/ exists'
+    );
+  });
+
+  test('allows lib/packages/ when the app has its own src/packages/', async () => {
+    write('src/packages/list.ts', '');
+    emit('packages/list', 'src/packages/list.ts', '');
+
+    await expect(assertNoInlinedWorkspaces(app, documentsRoot())).resolves.toBeUndefined();
   });
 });
 

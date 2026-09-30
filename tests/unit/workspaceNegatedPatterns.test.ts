@@ -11,7 +11,7 @@ import {discoverWorkspacePackages} from '../../src/commands/start';
 
 // npm honours NEGATED `workspaces` entries ("!packages/core"); every walker in
 // this CLI must too. CN's npm migration narrows its globs to that form so the
-// gitignored mrgit checkouts under packages/ stop counting as members — and a
+// gitignored sibling checkouts under packages/ stop counting as members — and a
 // walker that ignores the `!` resolves @_linked/primitives to one of those
 // checkouts, whose deps npm never installed, so dev does not boot.
 //

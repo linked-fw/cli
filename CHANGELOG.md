@@ -1,5 +1,246 @@
 # Changelog
 
+## 1.32.0
+
+### Minor Changes
+
+- [#181](https://github.com/linked-fw/cli/pull/181) [`adb992a`](https://github.com/linked-fw/cli/commit/adb992aad55399ff8daee4888cff97c01302e7fc) Thanks [@flyon](https://github.com/flyon)! - `linked build` now enforces the shape-registration standard: every package registers its whole
+  shape set through `src/shapes/index.ts`, and apps load it with `import '<pkg>/shapes/index'`.
+
+  Two new build steps, after "Checking shape references":
+
+  - **Checking shapes/index** loads `lib/esm/shapes/index.js` on its own in a fresh process and fails
+    when it misses any of the package's shapes that its shape modules register when each is loaded
+    alone (the per-module loads are shared with the shape-references check, not repeated). It also
+    fails when the package has shapes but no `shapes/index`, or when the index throws on load. The
+    error lists the missing shapes and the exact `import './X.js';` lines to add. A package without
+    shapes passes.
+  - **Checking sideEffects** fails when `package.json` `sideEffects` is `false`, or is a list that
+    does not match every `lib/esm/shapes/**/*.js`: a bundler drops a side-effect-only import of a
+    module declared side-effect-free, so the index would register nothing in production. The error
+    names the uncovered modules and what to write instead (omit the field, or
+    `["lib/esm/shapes/index.js", "lib/esm/shapes/*.js"]`).
+
+  `linked create-shape` now writes to the `src/shapes/index.ts` next to the source folder it created
+  the shape in, rather than the one under the current directory. The package template's
+  `shapes/index.ts` states the side-effect-imports-only rule, and the React Native template's shapes
+  package gains a `src/shapes/index.ts` that its entry imports.
+
+  The shape-references check no longer tolerates `@_linked/core`'s `PropertyShape.in -> List`: core
+  now registers `List` wherever `PropertyShape` is registered, so the known-unresolved list is empty
+  and that reference fails the build like any other.
+
+## 1.31.0
+
+### Minor Changes
+
+- [#157](https://github.com/linked-fw/cli/pull/157) [`5197e61`](https://github.com/linked-fw/cli/commit/5197e61dc3226ba89402adf34b9ca445631424be) Thanks [@flyon](https://github.com/flyon)! - `create-package` now produces a package that is correct the moment it exists.
+
+  Three defects, fixed together because fixing one alone turns a silent defect into a hard
+  build failure:
+
+  - **The ontology register sibling was never wired up.** The template's `src/index.ts`
+    imported the terms module rather than `<name>.register.js`, and `createPackage` omitted
+    `example-ontology.register.ts` from both its substitution list and its rename list. A new
+    package therefore kept a stray `example-ontology.register.ts` full of unsubstituted
+    `${...}` placeholders, and nothing imported either register file — so `linkedOntology()`
+    never ran and the ontology was never registered. `createOntology` now adds the register
+    import to the index too.
+  - **The template still shipped an entry-graph compile** (`files: [types.ts, index.ts]`,
+    `include: [backend.ts]`). It now uses the whole-folder shape the fleet converged on:
+    `files: ["./src/index.ts"]`, `include: ["./src/**/*.ts", "./src/backend.ts"]`, with tests
+    excluded. This had to follow the fix above: a whole-folder compile would otherwise reach
+    the unsubstituted placeholder and fail.
+  - **A new package had no `.gitignore`**, so `lib/` and `node_modules/` were committable from
+    minute one. The template now ships `gitignore.template` (`lib`, `node_modules`,
+    `*.tsbuildinfo`), renamed by the existing dotfile pass.
+
+  - **`"types"` produced a double mapping.** The template declared
+    `"types": "lib/esm/index.d.ts"` alongside `typesVersions: {"*":{"*":["lib/esm/*"]}}`,
+    which TypeScript applies to the `types` field too — so it asked for
+    `lib/esm/lib/esm/index.d.ts` and `node10` resolution failed outright. Restored to
+    `"types": "index.d.ts"`, the convention the shipped packages already use, with a `//types`
+    note in the file saying why it is correct as written.
+
+  Also fixes the `data.defauilt` typo in the example ontology's ESM JSON import, which made
+  `loadData()` resolve to `undefined` under ESM.
+
+  A new gated suite, `tests/template/package.full.test.ts` (`npm run test:template`),
+  scaffolds with the built CLI, installs, builds, and asserts each of these as a property
+  rather than a claim.
+
+## 1.30.1
+
+### Patch Changes
+
+- [#177](https://github.com/linked-fw/cli/pull/177) [`833c2e6`](https://github.com/linked-fw/cli/commit/833c2e6c3c5716ff9ae092f7644aae499ce216af) Thanks [@flyon](https://github.com/flyon)! - `build-app` now checks every file of the compiled backend for a compiled-in copy of a package, not only `backend.js`, `App.js` and `routes.js`. Each relative import in `lib/` is resolved and the module it reaches is traced back through its sourcemap to the source it was compiled from; if that source's real path is inside a workspace package, `packages-local/`, or an installed `@_linked/*` package, the build fails. This catches a copy reached from deep inside a feature folder, and a localized checkout whose real path has no `node_modules` in it. The build also fails if `lib/packages/`, `lib/packages-local/` or `lib/node_modules/` exists (unless the app has a `src/` directory of that name). The error names the importing file and the import, and points at the package's public export.
+
+## 1.30.0
+
+### Minor Changes
+
+- [#175](https://github.com/linked-fw/cli/pull/175) [`816f961`](https://github.com/linked-fw/cli/commit/816f961709b03ea05341f1a2f62713f721f0e20a) Thanks [@flyon](https://github.com/flyon)! - `linked build` now checks that loading a shape module registers every shape its properties point at.
+
+  A property that names its value shape by `[package, name]` (`shape: ['@_linked/schema', 'ImageObject']`)
+  does not load that shape, and consumers deep-import single shape modules. So a package could ship a
+  module whose query `workspace.image.contentUrl` threw `Shape class not found for …/ImageObject` in a
+  production bundle where nothing else happened to load ImageObject — which is how Create Now came to
+  show "No organizations found". `@_linked/sioc` also named shapes under its old package name
+  (`lincd-sioc`), which could never resolve.
+
+  The new step, **Checking shape references**, runs after the ESM output is final. It loads every module
+  under `lib/esm/shapes/` (and any other module that declares a `@linkedShape`) in a `node` process of
+  its own, with nothing imported first, and then **fails the build** for:
+
+  - a module that throws when loaded on its own (e.g. `Cannot access 'X' before initialization`);
+  - a property of one of the package's shapes whose value shape is not registered — naming the
+    property, the missing shape's IRI and the modules that showed it, and whether the target package's
+    entry registers it (a missing import), does not (a wrong name), or the IRI belongs to no dependency
+    (an old package name).
+
+  `*.class.js` modules are skipped: they are the class half of a split shape module and are checked
+  through the public module that re-exports them. Asset imports (`.css`, images, fonts) load as stubs.
+  `@_linked/core`'s `PropertyShape.in → List` is a known, tracked gap and warns instead of failing.
+
+## 1.29.0
+
+### Minor Changes
+
+- [#173](https://github.com/linked-fw/cli/pull/173) [`830b7b9`](https://github.com/linked-fw/cli/commit/830b7b9fea6f1704bb91e135397a2e9011a28289) Thanks [@flyon](https://github.com/flyon)! - Add `linked localize` and `linked delocalize`, for developing an npm dependency
+  from a git checkout.
+
+  `linked localize <package…>` clones the package's repository (resolved from the
+  registry's `repository` field), installs inside the checkout, builds it and
+  symlinks it into `node_modules` — without touching `package.json` or
+  `package-lock.json`. `--list`/`--check` report what is localized and whether it
+  really is, `--relink` recreates the recorded symlinks and is what a
+  `postinstall` should run, and `delocalize` undoes it.
+
+  The work is done by the new dependency-free `@_linked/localize`, which
+  deliberately has no opinion about how a checkout is built. That is the only
+  thing this CLI adds: it supplies `linked build` as the build command
+  (overridable with `--build`, disabled with `--build ""`).
+
+  Packages are named exactly as npm names them; there is no short-name expansion
+  and no org probing.
+
+## 1.28.2
+
+### Patch Changes
+
+- [#162](https://github.com/linked-fw/cli/pull/162) [`e965600`](https://github.com/linked-fw/cli/commit/e9656005679f137b023d811fc057409071109d27) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now keeps compiled decorated classes named as written. Vite re-prints any published module that mentions `process.env` or `import.meta.env` (client build) or `process.env.NODE_ENV` (dev client) with esbuild, which renamed tsc's `let Foo = class Foo` to `class Foo2` — and an unnamed shape's IRI is its class name. A new `linked:pin-compiled-class-names` plugin pins each such class's name right after its declaration, before its decorators run.
+
+- [#170](https://github.com/linked-fw/cli/pull/170) [`7a9e465`](https://github.com/linked-fw/cli/commit/7a9e465d498ff01247967d586b17e81c29536e08) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now bundles `@_linked/server` in the dev SSR runner (`ssr.noExternal`), in workspace and standalone mode alike. `linked start` loads `LinkedServer` through `vite.ssrLoadModule`, so Vite already evaluated that entry and every file it reaches by relative import, while bare `@_linked/server/...` imports from the app and its storage config went to Node. The package was split across two loaders, and which one evaluated a given file depended on import order: in Create Now, `package.js` and `ontologies/lincd-server.js` evaluated once in each, and `shapes/filestores/LocalFileStore.js` too once the package's `backend` loaded. Vite is now the only loader for it. The new `SSR_ENTRY_PACKAGES` export names the packages this applies to.
+
+## 1.28.1
+
+### Patch Changes
+
+- [#161](https://github.com/linked-fw/cli/pull/161) [`a43b13a`](https://github.com/linked-fw/cli/commit/a43b13ae1d965309f1d783e8570537b4524bdbb1) Thanks [@flyon](https://github.com/flyon)! - A release backend build no longer compiles a private copy of `@_linked/server-utils` and `@_linked/react` into `lib/`. That copy made every provider the app exports fail `LinkedServer`'s `instanceof ShapeProvider` check, so all but one were dropped ("exports two generic backend providers"). `build-app` now also fails if an installed `@_linked/*` package ends up inlined.
+
+## 1.28.0
+
+### Minor Changes
+
+- [#158](https://github.com/linked-fw/cli/pull/158) [`e821daf`](https://github.com/linked-fw/cli/commit/e821dafc4865dfc4db3404eeb20619fe1ad8fcd1) Thanks [@flyon](https://github.com/flyon)! - `linked build` gains a "Checking shape names" step that warns about compiled shapes without `@linkedShape({name})` whose module also reads `process.env` or `import.meta.env` — the ones a consumer's bundler can rename.
+
+- [#158](https://github.com/linked-fw/cli/pull/158) [`ee391de`](https://github.com/linked-fw/cli/commit/ee391dea3b53ed0ae6e19d667397b1fc4433d05b) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now applies its `process.env.*` defines (`NODE_ENV`, `SITE_ROOT`, `APP_NAME`, and anything passed as its `define` option) to the **client environment only** (`environments.client.define`), no longer to the top-level `define` that the SSR environment inherits.
+
+  A top-level define reached the server in two harmful ways. Vite's define pass runs `esbuild.transform` without `keepNames` over every SSR module containing a key, which renamed tsc-emitted decorated classes — `@_linked/server`'s `LinkedServer` and `LincdAPI` registered as `LinkedServer2` / `LincdAPI2` in dev, so their shape IRIs no longer matched. And in a release backend build it inlined the build machine's `SITE_ROOT` instead of reading the deployment's.
+
+  Behaviour change: server-side code loaded through Vite now reads `process.env.SITE_ROOT`, `APP_NAME` and `NODE_ENV` at runtime in dev as well, so those must be set in the server's environment (they already had to be for any externalised package). Apps that add their own top-level `define` in `vite.config` should move it to `environments.client.define`.
+
+### Patch Changes
+
+- [#158](https://github.com/linked-fw/cli/pull/158) [`1a8fe90`](https://github.com/linked-fw/cli/commit/1a8fe90a5f4b974dbae00425f976b77f880f0efa) Thanks [@flyon](https://github.com/flyon)! - The package template's tsconfig (and the CLI's own) now sets `inlineSources`, so published source maps carry their sources instead of pointing at an unshipped `src/`.
+
+## 1.27.0
+
+### Minor Changes
+
+- [#154](https://github.com/linked-fw/cli/pull/154) [`4a1d419`](https://github.com/linked-fw/cli/commit/4a1d419decdd3c4247b0e0c723f94897838dbd67) Thanks [@flyon](https://github.com/flyon)! - `build-all`: find every local package, and never skip one silently
+
+  `build-all` discovered only packages declaring `linkedPackage: true`, only inside the
+  `workspaces` globs, and printed nothing about anything it passed over. Measured against
+  Create Now, that meant `Found 3 total LINCD packages in use by this app` and `exit 0` for a
+  workspace of six tracked members plus 25 localized checkouts — with `@_linked/maps`, a shipped
+  dependency that had simply never been given the flag, dropped from a green build in silence.
+
+  Three changes:
+
+  - **Discovery is by capability, not by declaration.** `build-all` invokes each package's own
+    `build` script, so any package with one is now built, flag or no flag. The flag still governs
+    `linked build` and the dev resolver, and is unchanged there.
+  - **`packages-local/` is scanned** alongside the workspace globs. That directory is deliberately
+    in no glob (`semantu localize` keeps npm from learning about the checkouts), so a walk of
+    `workspaces` alone could never see it.
+  - **Every package found but not built is named, with the reason** — no build script, is a linked
+    app, outside the repository, or not in this app's dependency tree. This alone would have
+    surfaced `@_linked/maps`.
+
+  New exports from `@_linked/cli`: `discoverLocalPackages()`, which returns every local package
+  with the facts callers filter on (`source`, `isLinkedPackage`, `isApp`, `hasBuildScript`), and
+  `planBuildAll()`, which returns what would be built and what would be skipped with reasons.
+  `getLincdPackages()` keeps its narrow meaning — flagged packages, workspace globs only — so the
+  dev resolver and the runtime are unaffected; it now also honours the legacy `lincd: true`
+  spelling of the flag, matching `linked build-package`.
+
+  Also: user-facing output saying "LINCD packages" or suggesting `lincd build-all --from=` now says
+  "linked" and `linked build-all --from=`.
+
+## 1.26.0
+
+### Minor Changes
+
+- [#152](https://github.com/linked-fw/cli/pull/152) [`212ebfd`](https://github.com/linked-fw/cli/commit/212ebfd6e59afdddadfaeb1c74db6084818a3ce4) Thanks [@flyon](https://github.com/flyon)! - Remove webpack. Vite is now the only frontend build and dev server this CLI has.
+
+  **Behaviour change.** Released as a minor by the maintainer's decision -- the org does not cut majors at present, and no consumer was on the removed path. `linked build-app` no longer falls back to webpack when an app has no
+  `vite.config.{ts,js,mjs}` — it now fails with a message naming the missing file and the config to
+  add. `linked start --legacy` is gone (the flag started a dev server that `@_linked/server` stopped
+  mounting webpack-dev-middleware for, so it already served no frontend).
+
+  Removed from the public API: `generateWebpackConfig`, `DeclarationPlugin`, `externaliseModules`,
+  the `LinkedWebpackConfig` type and `LinkedConfig.webpack`. `buildApp` and `buildFrontend` are gone
+  from `@_linked/cli/cli-methods`; the equivalent is `buildViteApp` from
+  `@_linked/cli/commands/build-app` (or the `linked build-app` command). `assertReleaseFlagsUnused`
+  is replaced by `assertViteApp`. The internal webpack loaders and plugins
+  (`plugins/check-imports`, `plugins/watch-run`, `plugins/declaration-plugin`,
+  `plugins/externalise-modules`, `config-webpack`, `config-webpack-app`) are deleted, along with
+  every dependency that existed only to serve them: `webpack`, `webpack-bundle-analyzer`,
+  `webpack-license-plugin`, `webpack-manifest-plugin`, `terser-webpack-plugin`,
+  `copy-webpack-plugin`, `tsconfig-paths-webpack-plugin`, `@pmmmwh/react-refresh-webpack-plugin`,
+  `babel-loader`, `css-loader`, `postcss-loader`, `mini-css-extract-plugin`, `source-map-loader`,
+  `ts-loader`, `react-refresh`, `react-refresh-typescript`, `@babel/register`,
+  `@babel/preset-react`, `@babel/plugin-proposal-decorators` and `@babel/plugin-transform-runtime`.
+  (`@babel/core`, `@babel/preset-env` and `@babel/preset-typescript` stay, moved to
+  devDependencies — they serve this package's own Jest transform via `babel-jest`.)
+
+  **What a webpack app must do:** add a `vite.config.ts` to the app root —
+
+  ```ts
+  import {createViteConfig} from '@_linked/cli/vite-config';
+
+  export default createViteConfig({port: 4040, cssMode: 'tailwind'});
+  ```
+
+  — and drop any `webpack`, `cacheWebpack` or `analyse` keys from `linked.config.js`, which are no
+  longer read. There is no migration path that keeps webpack; pin `@_linked/cli@^1` if you need one
+  while you move.
+
+  `major`, because the removals above are all reachable from the package's published entry points
+  and from documented command behaviour. This is the first major for this package; the alternative
+  (a deprecation cycle) would mean shipping webpack for another release train to serve consumers
+  none of which were found.
+
+## 1.25.2
+
+### Patch Changes
+
+- [#149](https://github.com/linked-fw/cli/pull/149) [`cec1a1c`](https://github.com/linked-fw/cli/commit/cec1a1c6fce0a77d466d9f39f0c07564da712cff) Thanks [@flyon](https://github.com/flyon)! - `linked yarn` no longer reads a multi-repo manifest from the cwd. The tool that
+  produced nested sibling repos under `packages/` is retired, so there are no
+  nested yarn.lock files to back up: the command is now a plain, arg-preserving
+  passthrough to yarn.
+
 ## 1.25.1
 
 ### Patch Changes

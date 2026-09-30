@@ -2,7 +2,7 @@
 //
 // Extracted from cli-methods.ts so the SSR module graph (started from
 // `commands/start.ts`) doesn't have to walk the rest of that file. The
-// legacy webpack-era helpers in cli-methods.ts contain many dynamic
+// the older helpers in cli-methods.ts contain many dynamic
 // `import(<variable>)` calls Vite can't analyze statically and would
 // emit warnings about — even though startWithVite never calls them.
 
@@ -182,16 +182,75 @@ export async function loadBackendStorageConfig(): Promise<any> {
 }
 
 /**
+ * A local package directory found by {@link discoverLocalPackages}, together
+ * with the facts that decide what can be done with it.
+ *
+ * The facts are recorded rather than filtered on, because the bug this type
+ * exists to fix was a SILENT filter: `build-all` discovered only packages
+ * carrying `linkedPackage: true` and printed nothing about the rest, so
+ * `@_linked/maps` — a shipped dependency that simply never got the flag — was
+ * dropped from a green build for as long as nobody counted the names.
+ */
+export interface LocalPackage extends PackageDetails {
+  /** Where the walk found it. */
+  source: 'workspace' | 'local-packages-dir';
+  /** `linkedPackage: true`, or the legacy `lincd: true`. */
+  isLinkedPackage: boolean;
+  /** `linkedApp: true` — built by `linked build-app`, not `linked build`. */
+  isApp: boolean;
+  /** Has a `build` script of its own, which is what `build-all` invokes. */
+  hasBuildScript: boolean;
+}
+
+/**
+ * Directory holding localized checkouts (`semantu localize`). It is
+ * deliberately in NO workspace glob — that is the whole point of the design,
+ * since npm learning about these checkouts is what made their predecessor
+ * under `packages/` a trap — so any walk of `workspaces` alone cannot see it
+ * and has to be told about it separately.
+ */
+export const LOCAL_PACKAGES_DIR = 'packages-local';
+
+/**
  * Walk the app's `package.json` `workspaces` field and return every
  * workspace package that declares `"linkedPackage": true`.
  *
  * Lives here (not in cli-methods.ts) so consumers like LinkedServer can
- * import it without dragging the rest of the legacy webpack flow into
+ * import it without dragging the rest of the legacy cli-methods flow into
  * Vite's SSR module graph.
+ *
+ * Kept deliberately narrow: this is the set the dev resolver and the runtime
+ * treat as linked packages. Commands that want every *buildable* local
+ * package — flag or no flag, workspace or localized checkout — want
+ * {@link discoverLocalPackages} instead.
  */
 export function getLincdPackages(
   rootPath = process.cwd(),
 ): PackageDetails[] {
+  return discoverLocalPackages(rootPath, {includeLocalPackagesDir: false})
+    .filter((pkg) => pkg.isLinkedPackage)
+    .map(({path: packagePath, packageName}) => ({path: packagePath, packageName}));
+}
+
+/**
+ * Every local package directory this app can see, whether or not it declares
+ * `linkedPackage: true`.
+ *
+ * Two sources, because the workspace globs are not the whole picture any more:
+ *
+ *   1. the `workspaces` field (negations honoured — see ./workspace-globs.js);
+ *   2. `packages-local/`, the localized checkouts, which is in no glob.
+ *
+ * Nothing is filtered out here. Callers decide what they can act on and are
+ * expected to SAY what they skipped and why.
+ */
+export function discoverLocalPackages(
+  rootPath = process.cwd(),
+  options: {includeLocalPackagesDir?: boolean; localPackagesDir?: string} = {},
+): LocalPackage[] {
+  const {includeLocalPackagesDir = true, localPackagesDir = LOCAL_PACKAGES_DIR} =
+    options;
+
   let pack = getPackageJSON(rootPath);
   if (!pack || !pack.workspaces) {
     const originalRoot = rootPath;
@@ -200,18 +259,50 @@ export function getLincdPackages(
       pack = getPackageJSON(rootPath);
       if (pack && pack.workspaces) break;
     }
+    if (!pack || !pack.workspaces) {
+      // Standalone apps (scaffolded with `linked create-app`) don't have
+      // workspaces — expected. Fall back to the original root so a
+      // `packages-local/` beside it is still found.
+      rootPath = originalRoot;
+    }
   }
-  if (!pack || !pack.workspaces) {
-    // Standalone apps (scaffolded with `linked create-app`) don't have
-    // workspaces — expected; just no local packages to scan.
-    return [];
+
+  const res: LocalPackage[] = [];
+  if (pack && pack.workspaces) {
+    checkWorkspaces(rootPath, pack.workspaces, res);
   }
-  const res: PackageDetails[] = [];
-  checkWorkspaces(rootPath, pack.workspaces, res);
+  if (includeLocalPackagesDir) {
+    checkLocalPackagesDir(rootPath, localPackagesDir, res);
+  }
   return res;
 }
 
-function checkWorkspaces(rootPath: string, workspaces: any, res: PackageDetails[]) {
+/**
+ * Add every immediate subdirectory of `packages-local/` that holds a
+ * `package.json`. No glob, no negations: the directory has no `workspaces`
+ * entry to interpret, its contents are there because a developer localized
+ * them on purpose, and each one is a plain checkout.
+ */
+function checkLocalPackagesDir(
+  rootPath: string,
+  localPackagesDir: string,
+  res: LocalPackage[],
+) {
+  const dir = path.join(rootPath, localPackagesDir);
+  if (!fs.existsSync(dir)) return;
+  const already = new Set(res.map((pkg) => path.resolve(pkg.path)));
+  for (const entry of fs.readdirSync(dir)) {
+    if (entry.startsWith('.')) continue;
+    const packagePath = path.join(dir, entry);
+    if (!fs.statSync(packagePath).isDirectory()) continue;
+    // A checkout that some glob already picked up must not appear twice —
+    // duplicates would be built twice and counted twice.
+    if (already.has(path.resolve(packagePath))) continue;
+    addPackage(packagePath, 'local-packages-dir', res);
+  }
+}
+
+function checkWorkspaces(rootPath: string, workspaces: any, res: LocalPackage[]) {
   // Negated entries ("!packages/core") are excluded the way npm excludes them
   // — including from the exact-path branch below, which npm also subjects to
   // them. See ./workspace-globs.js.
@@ -238,13 +329,169 @@ function checkWorkspaces(rootPath: string, workspaces: any, res: PackageDetails[
   });
 }
 
-function checkPackagePath(rootPath: string, packagePath: string, res: PackageDetails[]) {
+function checkPackagePath(rootPath: string, packagePath: string, res: LocalPackage[]) {
   const packageJsonPath = path.join(packagePath, 'package.json');
   if (!fs.existsSync(packageJsonPath)) return;
   const pack = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
   if (pack && pack.workspaces) {
     checkWorkspaces(packagePath, pack.workspaces, res);
-  } else if (pack && pack.linkedPackage === true) {
-    res.push({path: packagePath, packageName: pack.name});
+  } else if (pack) {
+    addPackage(packagePath, 'workspace', res, pack);
   }
 }
+
+function addPackage(
+  packagePath: string,
+  source: LocalPackage['source'],
+  res: LocalPackage[],
+  packageJson?: any,
+) {
+  const pack = packageJson ?? getPackageJSON(packagePath);
+  if (!pack || !pack.name) return;
+  res.push({
+    path: packagePath,
+    packageName: pack.name,
+    source,
+    // `lincd: true` is the pre-rename spelling of the same flag and is still
+    // honoured by `linked build-package`; honouring it here too keeps the two
+    // from disagreeing about what a linked package is.
+    isLinkedPackage: pack.linkedPackage === true || pack.lincd === true,
+    isApp: pack.linkedApp === true,
+    hasBuildScript: !!pack.scripts?.build,
+  });
+}
+
+/**
+ * Filters packages to only include those in the dependency tree of the app root
+ */
+function filterPackagesByDependencyTree(
+  allPackages: Map<string, PackageDetails>,
+  appRootPath: string,
+): Map<string, PackageDetails> {
+  const appPackageJson = getPackageJSON(appRootPath);
+  if (!appPackageJson) {
+    return allPackages;
+  }
+
+  const relevantPackages = new Map<string, PackageDetails>();
+  const packagesToCheck = new Set<string>();
+
+  // Start with direct dependencies from app root
+  if (appPackageJson.dependencies) {
+    Object.keys(appPackageJson.dependencies).forEach((dep) => {
+      if (allPackages.has(dep)) {
+        packagesToCheck.add(dep);
+      }
+    });
+  }
+
+  // Recursively add dependencies
+  const processedPackages = new Set<string>();
+
+  while (packagesToCheck.size > 0) {
+    const packageName = Array.from(packagesToCheck)[0];
+    packagesToCheck.delete(packageName);
+
+    if (processedPackages.has(packageName)) {
+      continue;
+    }
+
+    processedPackages.add(packageName);
+    const packageDetails = allPackages.get(packageName);
+
+    if (packageDetails) {
+      relevantPackages.set(packageName, packageDetails);
+
+      // Get this package's dependencies
+      const packageJson = getPackageJSON(packageDetails.path);
+      if (packageJson && packageJson.dependencies) {
+        Object.keys(packageJson.dependencies).forEach((dep) => {
+          if (allPackages.has(dep) && !processedPackages.has(dep)) {
+            packagesToCheck.add(dep);
+          }
+        });
+      }
+    }
+  }
+
+  return relevantPackages;
+}
+
+/** A package `build-all` found but will not build, and why not. */
+export interface SkippedPackage {
+  packageName: string;
+  path: string;
+  reason: string;
+}
+
+/** What `build-all` found, and what it decided to do with each package. */
+export interface BuildAllPlan {
+  build: Map<string, PackageDetails>;
+  skipped: SkippedPackage[];
+}
+
+/**
+ * Decide what `build-all` builds.
+ *
+ * Every discovered package lands in exactly one of `build` or `skipped`, and
+ * `skipped` carries a reason — because the failure mode this replaces was not
+ * a narrow scan, it was a SILENT one. `@_linked/maps` is a shipped Create Now
+ * dependency that never got `linkedPackage: true`; `build-all` dropped it and
+ * printed nothing, so a build covering half the workspace exited 0 and people
+ * acted on it. A skip nobody can see is worse than a failure.
+ *
+ * What counts as buildable is a CAPABILITY, not a declaration: `build-all`
+ * invokes each package's own `build` script, so anything with one can be
+ * built whether or not it carries the flag. The flag is still reported when
+ * it is missing, since the dev resolver and `linked build` do require it.
+ */
+export function planBuildAll(rootPath = './', appRoot?: string): BuildAllPlan {
+  const build = new Map<string, PackageDetails>();
+  const skipped: SkippedPackage[] = [];
+  const buildable: LocalPackage[] = [];
+
+  for (const pkg of discoverLocalPackages(rootPath)) {
+    const detail = {path: pkg.path, packageName: pkg.packageName};
+    // Packages reached through a `../` workspace glob live outside this
+    // repository; building them was never in scope for `build-all`.
+    if (pkg.path.indexOf('../') !== -1 || pkg.path.indexOf('..\\') !== -1) {
+      skipped.push({...detail, reason: 'outside this repository'});
+    } else if (pkg.isApp) {
+      skipped.push({
+        ...detail,
+        reason: 'is a linked app — build it with `linked build-app`',
+      });
+    } else if (!pkg.hasBuildScript) {
+      skipped.push({...detail, reason: 'has no `build` script'});
+    } else {
+      buildable.push(pkg);
+      build.set(pkg.packageName, detail);
+    }
+  }
+
+  // Narrow to what this app actually depends on, if we are inside one.
+  if (appRoot) {
+    const appPackageJson = getPackageJSON(appRoot);
+    const isAppWithLinkedDeps =
+      appPackageJson &&
+      appPackageJson.lincd !== true &&
+      appPackageJson.dependencies &&
+      Object.keys(appPackageJson.dependencies).some((dep) => build.has(dep));
+
+    if (isAppWithLinkedDeps) {
+      const inTree = filterPackagesByDependencyTree(build, appRoot);
+      for (const pkg of buildable) {
+        if (inTree.has(pkg.packageName)) continue;
+        build.delete(pkg.packageName);
+        skipped.push({
+          path: pkg.path,
+          packageName: pkg.packageName,
+          reason: `not in ${appPackageJson.name || 'this app'}'s dependency tree`,
+        });
+      }
+    }
+  }
+
+  return {build, skipped};
+}
+

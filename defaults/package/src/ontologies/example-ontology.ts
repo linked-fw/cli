@@ -11,7 +11,7 @@ export var loadData = () => {
   } else {
     // ESM import
     //@ts-ignore
-    return import('../data/${hyphen_name}.json',{ with: { type: "json" } }).then((data) => data.defauilt);
+    return import('../data/${hyphen_name}.json',{ with: { type: "json" } }).then((data) => data.default);
   }
 };
 

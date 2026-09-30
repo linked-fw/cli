@@ -1,4 +1,4 @@
-// Vite config helper for linked apps. Replaces webpack-based dev + build.
+// Vite config helper for linked apps. The one dev + build pipeline.
 //
 // Apps use this from their own vite.config.ts:
 //
@@ -7,7 +7,7 @@
 //
 // The helper preserves the dev-mode `generateScopedName` (readable
 // `_packageName_filename_className`) so CSS module class names match
-// what the previous webpack chain produced for trace/debug. Production
+// what the previous bundler chain produced for trace/debug. Production
 // uses Vite's default scoping (content-hash, equivalent uniqueness).
 import {defineConfig} from 'vite';
 import react from '@vitejs/plugin-react';
@@ -15,6 +15,7 @@ import fsExtra from 'fs-extra';
 import path from 'node:path';
 import {generateScopedName} from './utils.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
+import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
 import type {Plugin, UserConfig} from 'vite';
 
 /**
@@ -147,7 +148,10 @@ export interface LinkedViteConfigOptions {
   plugins?: Plugin[];
   /** Extra PostCSS plugins (e.g. `postcss-media-to-container`). */
   postcssPlugins?: unknown[];
-  /** Extra `define` entries (used to bridge legacy `process.env.X` refs to client). */
+  /**
+   * Extra `define` entries for the CLIENT environment only (used to bridge
+   * `process.env.X` refs into the browser). Never applied server-side.
+   */
   define?: Record<string, string>;
   /**
    * Extra workspace globs (trailing `/*`, or a direct package dir) resolved
@@ -495,6 +499,23 @@ async function resolveWorkspaceSpecifier(
 }
 
 /**
+ * Packages whose entry `linked start` hands to `vite.ssrLoadModule` by name
+ * (`@_linked/server/shapes/LinkedServer`, see `commands/start.ts`).
+ *
+ * Vite transforms an explicitly requested entry, and every file it reaches by
+ * RELATIVE import, whether or not the package is external. The same package's
+ * bare-specifier imports from anywhere else (the app's `src`, the storage
+ * config) are externalized to Node. Left external, the package is split across
+ * two loaders, and which copy a file ends up in depends on import order: a file
+ * the module runner has already evaluated is reused, one it has not is loaded
+ * by Node, and Node then loads that file's relative imports itself. Measured in
+ * CN: `package.js` and `ontologies/lincd-server.js` evaluated once by each
+ * loader, and `LocalFileStore.js` too once the package's `backend` was loaded.
+ * Bundling the package makes Vite the only loader for it.
+ */
+export const SSR_ENTRY_PACKAGES = ['@_linked/server'];
+
+/**
  * `ssr.noExternal` for the dev SSR runner. With source workspaces, only those
  * package names are bundled by Vite; everything else in node_modules (including
  * published `@_linked/*`) is externalized to Node. Vite matches these entries
@@ -502,13 +523,38 @@ async function resolveWorkspaceSpecifier(
  * Installed packages that depend on a workspace (`dependents`, from
  * `workspaceDependents`) are bundled too, so they share the Vite-loaded workspace.
  * Standalone (no workspaces): the context-holding framework packages are bundled.
+ * In both modes, `SSR_ENTRY_PACKAGES` are bundled.
  */
 export function ssrNoExternal(
   workspaces: {name: string}[],
   dependents: string[] = [],
 ): (string | RegExp)[] {
-  if (workspaces.length === 0) return [/^@_linked\/server-utils$/, /^@_linked\/react$/];
-  return [...new Set([...workspaces.map((w) => w.name), ...dependents])];
+  if (workspaces.length === 0) {
+    return [/^@_linked\/server-utils$/, /^@_linked\/react$/, ...SSR_ENTRY_PACKAGES];
+  }
+  return [...new Set([...workspaces.map((w) => w.name), ...dependents, ...SSR_ENTRY_PACKAGES])];
+}
+
+/**
+ * The `process.env.*` values inlined into the browser bundle — and only there.
+ * See the `environments.client.define` note in `createViteConfig` for why the
+ * server environment must not receive them.
+ */
+export function clientDefine(
+  opts: Pick<LinkedViteConfigOptions, 'define' | 'port'> = {},
+): Record<string, string> {
+  return {
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
+    'process.env.SITE_ROOT': JSON.stringify(
+      process.env.SITE_ROOT ?? `http://localhost:${process.env.PORT ?? opts.port ?? 4040}`,
+    ),
+    // The app's display name, so client components (e.g. the header) can read it
+    // like the SSR <title> does (server-utils Html reads process.env.APP_NAME). The
+    // browser has no `process`, so inline it; falls back to a generic label when
+    // unset so a bare checkout never renders `undefined`.
+    'process.env.APP_NAME': JSON.stringify(process.env.APP_NAME ?? 'Linked App'),
+    ...(opts.define ?? {}),
+  };
 }
 
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
@@ -634,6 +680,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
               },
             } as Plugin)
           : null,
+        // Published lib JS: keep decorated shape classes named `Foo`, not the
+        // `Foo2` Vite's esbuild re-prints would give them — see the plugin.
+        pinCompiledClassNames(),
         react({
           babel: {
             parserOpts: {
@@ -681,6 +730,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // `.../BackendAPIStore`, and every Server.call on that shape 501'd.
         // The same mangling made registration report `Shape undefined does not
         // extend base class`.
+        //
+        // Vite honours this in the minifier only: its per-file TypeScript
+        // transform and its define pass both run esbuild with keepNames off.
+        // `pinCompiledClassNames` above covers what those passes rename.
         keepNames: true,
       },
       // STANDALONE resolve conditions.
@@ -763,8 +816,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // DIFFERENT module instances → two `AppContext` objects → `useAppContext()` sees
         // no provider (null) → "Cannot destructure 'isNativeApp'" and a blank "SSR timed
         // out". Bundling makes them one instance in Vite's SSR module graph (matching how
-        // workspace mode bundles everything). Native-dep packages (`server`/`fuseki`) stay
-        // external so their prebuilt binaries load via Node.
+        // workspace mode bundles everything). `fuseki` stays external; `server` is bundled
+        // because `start` loads its entry through Vite (`SSR_ENTRY_PACKAGES`). Their native
+        // dependencies (e.g. `sharp`) are separate packages and stay external either way.
         //
         // WORKSPACE: bundle ONLY the discovered source workspaces (they resolve to `src/`
         // for HMR). Published framework packages installed under node_modules (lib-only)
@@ -774,8 +828,18 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // as `@_linked/fuseki/shapes/FusekiStore` through native `import()`, which pulled
         // a SECOND Node-loaded core and split the shape registry. Installed packages
         // that depend on a workspace (e.g. published fuseki when core itself is a
-        // workspace) are bundled too, so they import the Vite-loaded workspace.
-        noExternal: ssrNoExternal(workspaces, await workspaceDependents(workspaces)),
+        // workspace) are bundled too, so they import the Vite-loaded workspace. The one
+        // published exception is `SSR_ENTRY_PACKAGES`, which Vite loads regardless.
+        //
+        // NOT DEV (a release build of the backend): nothing is force-bundled. The
+        // compiled backend is loaded by Node next to the installed
+        // `@_linked/server`, so every framework package has to stay a bare import
+        // that resolves to that same node_modules copy. `workspaces` is always
+        // empty here, and handing that to `ssrNoExternal` used to select the
+        // standalone list — which compiled a private `server-utils` into `lib/`,
+        // so no app provider was `instanceof` the server's `ShapeProvider` and
+        // `LinkedServer` dropped them all ("exports two generic backend providers").
+        noExternal: isDev ? ssrNoExternal(workspaces, await workspaceDependents(workspaces)) : [],
         // STANDALONE: the SSR module runner (`vite.ssrLoadModule`, used to
         // load LinkedServer + the app graph in commands/start.ts) has its OWN
         // condition list, defaulting to `resolve.conditions`. Set it
@@ -786,38 +850,49 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
           ? {resolve: {conditions: ['module', 'node']}}
           : {}),
       },
-      define: {
-        // The FRAMEWORK's only client-side env dependency: `@_linked/server-utils`'s
-        // `Server.ts` reads `process.env.SITE_ROOT` to target the backend. The
-        // browser has no `process`, and Vite (unlike webpack's EnvironmentPlugin)
-        // doesn't auto-inline `process.env.X`, so we define SITE_ROOT here — it's
-        // always the app's own origin, defaulted to `http://localhost:<port>` (an
-        // explicit `SITE_ROOT` env, e.g. from `.env-cmdrc`, still wins). NODE_ENV
-        // is a common client guard, so define it too.
-        //
-        // We define only these SPECIFIC tokens (never a whole-object `process.env`
-        // replacement): Vite's `define` also hits the SSR transform, and the backend
-        // reads `process.env` at runtime (e.g. passes the whole object to
-        // `parseDatasetsConfig`) — clobbering bare `process.env` would strip the
-        // server's env.
-        //
-        // Apps expose their OWN frontend env vars by adding to `define` in their
-        // `vite.config.ts`, e.g.:
-        //   createViteConfig({ define: {
-        //     'process.env.MY_PUBLIC_KEY': JSON.stringify(process.env.MY_PUBLIC_KEY),
-        //   }})
-        // (only reference PUBLIC vars in client code — a defined secret would be
-        // inlined into the browser bundle).
-        'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
-        'process.env.SITE_ROOT': JSON.stringify(
-          process.env.SITE_ROOT ?? `http://localhost:${process.env.PORT ?? opts.port ?? 4040}`,
-        ),
-        // The app's display name, so client components (e.g. the header) can read it
-        // like the SSR <title> does (server-utils Html reads process.env.APP_NAME). The
-        // browser has no `process`, so inline it; falls back to a generic label when
-        // unset so a bare checkout never renders `undefined`.
-        'process.env.APP_NAME': JSON.stringify(process.env.APP_NAME ?? 'Linked App'),
-        ...(opts.define ?? {}),
+      // Client-only, deliberately: these go on the `client` environment, not the
+      // top-level `define`, because a top-level `define` is inherited by the SSR
+      // environment too.
+      //
+      // The browser needs them. `@_linked/server-utils`'s `Server.ts` reads
+      // `process.env.SITE_ROOT` to target the backend; the browser has no
+      // `process`, and Vite (unlike a bundler's EnvironmentPlugin) doesn't
+      // auto-inline `process.env.X`, so SITE_ROOT is defined here — always the
+      // app's own origin, defaulted to `http://localhost:<port>` (an explicit
+      // `SITE_ROOT` env, e.g. from `.env-cmdrc`, still wins). NODE_ENV is a
+      // common client guard, so it is defined too.
+      //
+      // The server must NOT get them, for two reasons:
+      // - it reads `process.env` at runtime, so an inlined build-time value is
+      //   wrong there (a release backend would carry the build machine's
+      //   SITE_ROOT rather than the deployment's);
+      // - worse, every `define` key is a trigger. Vite's `vite:define` plugin
+      //   runs `esbuild.transform` — without `keepNames` — over any SSR module
+      //   whose text contains a key. esbuild renames the inner binding of a
+      //   tsc-emitted decorated class (`let LinkedServer = class LinkedServer`
+      //   becomes `class LinkedServer2`), and a shape's IRI is built from its
+      //   class name, so `@_linked/server`'s `LinkedServer` and `LincdAPI`
+      //   registered as `LinkedServer2` / `LincdAPI2` in dev. Without user keys
+      //   the SSR environment has none of its own (`keepProcessEnv` is on for
+      //   it), so nothing server-side is rewritten.
+      //
+      // Only these SPECIFIC tokens, never a whole-object `process.env`
+      // replacement: in a client build Vite already maps any other
+      // `process.env.X` to `{}.X` (undefined), which is what client code expects.
+      //
+      // Apps expose their OWN frontend env vars through the `define` option,
+      // which lands here too:
+      //   createViteConfig({ define: {
+      //     'process.env.MY_PUBLIC_KEY': JSON.stringify(process.env.MY_PUBLIC_KEY),
+      //   }})
+      // (only reference PUBLIC vars in client code — a defined secret would be
+      // inlined into the browser bundle). An app that puts a top-level `define`
+      // in its own config reintroduces both problems for the server; use
+      // `environments.client.define` there as well.
+      environments: {
+        client: {
+          define: clientDefine(opts),
+        },
       },
       // WORKSPACE mode: exclude the source-shipping workspace packages (@_linked/*,
       // lincd-*) from esbuild's dep pre-bundler. They resolve to `src/` via the

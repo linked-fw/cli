@@ -25,6 +25,13 @@ import {
   runScriptCommand,
 } from './utils/packageManager.js';
 import {rewriteExtensionlessImports} from './utils/esmSpecifiers.js';
+import {checkShapeNames} from './utils/shapeNames.js';
+import {
+  checkShapeReferences,
+  inspectShapeReferences,
+  type ShapeReferenceReport,
+} from './utils/shapeReferences.js';
+import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
 
 import {spawn as spawnChild} from 'child_process';
 import {findNearestPackageJson} from 'find-nearest-package-json';
@@ -33,9 +40,7 @@ import {LinkedFileStorage} from '@_linked/core/utils/LinkedFileStorage';
 import type {PackageDetails} from './interfaces.js';
 // import pkg from 'lincd/utils/LinkedFileStorage';
 // const { LinkedFileStorage } = pkg;
-// const config = require('@_linked/server/site.webpack.config');
 import {glob} from 'glob';
-import webpack from 'webpack';
 
 import ora, {Ora} from 'ora';
 import stagedGitFiles from 'staged-git-files';
@@ -62,8 +67,17 @@ import {
   ensureEnvironmentLoaded,
   loadBackendStorageConfig,
   getLincdPackages,
+  discoverLocalPackages,
+  planBuildAll,
 } from './lifecycle.js';
-export {ensureEnvironmentLoaded, loadBackendStorageConfig, getLincdPackages};
+import type {BuildAllPlan} from './lifecycle.js';
+export {
+  ensureEnvironmentLoaded,
+  loadBackendStorageConfig,
+  getLincdPackages,
+  discoverLocalPackages,
+  planBuildAll,
+};
 
 var variables = {};
 /**
@@ -941,109 +955,41 @@ function findAppRoot(startPath = process.cwd()): string | null {
 }
 
 /**
- * Filters packages to only include those in the dependency tree of the app root
+ * Print the discovery result in full: what will be built, and every package
+ * that was found and will not be. Nothing is discovered silently.
  */
-function filterPackagesByDependencyTree(
-  allPackages: Map<string, PackageDetails>,
-  appRootPath: string,
-): Map<string, PackageDetails> {
-  const appPackageJson = getPackageJSON(appRootPath);
-  if (!appPackageJson) {
-    return allPackages;
+function printBuildAllPlan(plan: BuildAllPlan) {
+  console.log(
+    chalk.magenta(
+      `Found ${plan.build.size} linked package${plan.build.size === 1 ? '' : 's'} to build: ` +
+        Array.from(plan.build.keys()).join(', '),
+    ),
+  );
+  if (plan.skipped.length === 0) return;
+  console.log(
+    chalk.yellow(
+      `Skipping ${plan.skipped.length} package${plan.skipped.length === 1 ? '' : 's'} found but not built:`,
+    ),
+  );
+  for (const skip of [...plan.skipped].sort((a, b) =>
+    a.packageName.localeCompare(b.packageName),
+  )) {
+    console.log(chalk.yellow(`  - ${skip.packageName}: ${skip.reason}`));
   }
-
-  const relevantPackages = new Map<string, PackageDetails>();
-  const packagesToCheck = new Set<string>();
-
-  // Start with direct dependencies from app root
-  if (appPackageJson.dependencies) {
-    Object.keys(appPackageJson.dependencies).forEach((dep) => {
-      if (allPackages.has(dep)) {
-        packagesToCheck.add(dep);
-      }
-    });
-  }
-
-  // Recursively add dependencies
-  const processedPackages = new Set<string>();
-
-  while (packagesToCheck.size > 0) {
-    const packageName = Array.from(packagesToCheck)[0];
-    packagesToCheck.delete(packageName);
-
-    if (processedPackages.has(packageName)) {
-      continue;
-    }
-
-    processedPackages.add(packageName);
-    const packageDetails = allPackages.get(packageName);
-
-    if (packageDetails) {
-      relevantPackages.set(packageName, packageDetails);
-
-      // Get this package's dependencies
-      const packageJson = getPackageJSON(packageDetails.path);
-      if (packageJson && packageJson.dependencies) {
-        Object.keys(packageJson.dependencies).forEach((dep) => {
-          if (allPackages.has(dep) && !processedPackages.has(dep)) {
-            packagesToCheck.add(dep);
-          }
-        });
-      }
-    }
-  }
-
-  return relevantPackages;
 }
 
 export function buildAll(options) {
   console.log(
-    'Building all LINCD packages of this repository in order of dependencies',
+    'Building all linked packages of this repository in order of dependencies',
   );
-  let lincdPackages = getLocalLincdPackageMap();
-  const originalPackageCount = lincdPackages.size;
 
-  // Check if we're in an app context and filter packages accordingly
-  const appRoot = findAppRoot();
+  const plan = planBuildAll('./', findAppRoot() || undefined);
+  printBuildAllPlan(plan);
+  let lincdPackages = plan.build;
 
-  if (appRoot) {
-    const appPackageJson = getPackageJSON(appRoot);
-    // Check if this is an app (not a lincd package itself) with lincd dependencies
-    const isAppWithLincdDeps =
-      appPackageJson &&
-      appPackageJson.lincd !== true &&
-      appPackageJson.dependencies &&
-      Object.keys(appPackageJson.dependencies).some((dep) =>
-        lincdPackages.has(dep),
-      );
-
-    if (isAppWithLincdDeps) {
-      debugInfo(chalk.blue(`Found app root at: ${appRoot}`));
-      const filteredPackages = filterPackagesByDependencyTree(
-        lincdPackages,
-        appRoot,
-      );
-
-      console.log(
-        chalk.magenta(
-          `Found ${filteredPackages.size} total LINCD packages in use by this app`,
-        ),
-      );
-
-      lincdPackages = filteredPackages;
-    } else {
-      debugInfo(
-        chalk.blue(
-          `Building all ${originalPackageCount} packages from workspace`,
-        ),
-      );
-    }
-  } else {
-    debugInfo(
-      chalk.blue(
-        `No workspace root found, building all ${originalPackageCount} packages`,
-      ),
-    );
+  if (lincdPackages.size === 0) {
+    console.log(chalk.yellow('Nothing to build.'));
+    return;
   }
 
   let startFrom: string;
@@ -1191,7 +1137,7 @@ export function buildAll(options) {
                 log(
                   'Run ' +
                     chalk.greenBright(
-                      `lincd build-all --from=${pkg.packageName}`,
+                      `linked build-all --from=${pkg.packageName}`,
                     ) +
                     ' to build only the remaining packages',
                 ); //"+dependentModules.map(d => d.packageName).join(", ")));
@@ -1251,7 +1197,7 @@ export function buildAll(options) {
             ); //"+dependentModules.map(d => d.packageName).join(", ")));
             log(
               'Run ' +
-              chalk.greenBright(`lincd build-all --from=${pkg.packageName}`) +
+              chalk.greenBright(`linked build-all --from=${pkg.packageName}`) +
               ' to build only the remaining packages',
             ); //"+dependentModules.map(d => d.packageName).join(", ")));
             process.exit(1);
@@ -1534,8 +1480,10 @@ export const createOntology = async (
   //if this is not a lincd app (but a lincd package instead)
   if (!sourceFolder.includes('frontend')) {
     //then also add an import to index
+    // Import the register sibling, not the terms module: only the sibling calls
+    // linkedOntology(). See the comment in example-ontology.register.ts.
     let indexPath = addLineToIndex(
-      `import './ontologies/${hyphenName}.js';`,
+      `import './ontologies/${hyphenName}.register.js';`,
       'ontologies',
     );
     log(`Added an import of this file from ${chalk.magenta(indexPath)}`);
@@ -1544,9 +1492,13 @@ export const createOntology = async (
 // The shapes barrel (src/shapes/index.ts) is imported by both the frontend index and
 // the backend entry, so every shape registers on both boot paths (and materializes into
 // app-data on boot). `create-shape` adds each new shape here — NOT to the main index.
+// It holds side-effect imports only (no exports), in packages and apps alike: apps load a
+// package's whole set with `import '<pkg>/shapes/index'`, and `linked build` fails a
+// package whose shapes/index misses one of its shapes.
 const SHAPES_BARREL_HEADER =
   `// Shape registry — every shape is imported here so its @linkedShape decorator runs and\n` +
-  `// the shape registers on both boot paths (backend materialization + frontend). \`linked\n` +
+  `// the shape registers on both boot paths (backend materialization + frontend).\n` +
+  `// Side-effect imports only: no exports, components or providers. \`linked\n` +
   `// create-shape\` maintains this list.\n//SHAPES\n`;
 
 const ensureBackendImportsShapes = function (root: string = process.cwd()) {
@@ -1768,7 +1720,9 @@ export const createShape = async (name, basePath = process.cwd()) => {
   // Register the shape in the shapes barrel (src/shapes/index.ts) — NOT the main index —
   // and make sure the barrel is loaded on both boot paths. This is what makes the app
   // materialize its own shapes on boot.
-  const barrelPath = addShapeToBarrel(hyphenName);
+  // The barrel sits next to the shape: in the source folder's parent, not the cwd, which
+  // is only the same folder when the command runs from the package or app root.
+  const barrelPath = addShapeToBarrel(hyphenName, path.dirname(sourceFolder));
   log(`Registered the shape in ${chalk.magenta(barrelPath.replace(basePath, ''))}`);
 };
 
@@ -1996,7 +1950,7 @@ export const depCheck = async (packagePath: string = process.cwd()) => {
           reject(
             chalk.red(
               packagePath.split('/').pop() +
-                '\n[ERROR] These LINCD packages are imported but they are not listed in package.json:\n- ' +
+                '\n[ERROR] These linked packages are imported but they are not listed in package.json:\n- ' +
                 missingLincdPackages
                   .map((missedKey) => {
                     const files = results.missing[missedKey];
@@ -2233,138 +2187,6 @@ export const startServer = async (
   } else {
     return server.start();
   }
-};
-export const buildApp = async () => {
-  await buildFrontend();
-  await buildBackend();
-  console.log(chalk.magenta(`✅ ${process.env.NODE_ENV} app build finished`));
-  process.exit(0);
-};
-export const buildFrontend = async () => {
-  await ensureEnvironmentLoaded();
-  // @vite-ignore — the webpack build path is legacy code, only reached
-  // by `linked build-frontend` which is not part of the Vite dev/SSR
-  // flow. Tell Vite not to graph-walk into it so we don't emit
-  // import-analysis warnings for a file we never load via SSR.
-  const webpackAppConfig = await (
-    await import(/* @vite-ignore */ './config-webpack-app.js')
-  ).getWebpackAppConfig();
-
-  console.log(
-    chalk.magenta(`🛠 Building ${process.env.NODE_ENV} frontend bundles`),
-  );
-  await new Promise((resolve, reject) => {
-    webpack(webpackAppConfig as any, async (err, stats) => {
-      if (err) {
-        console.error(err.stack || err);
-        process.exit(1);
-      }
-      const info = stats.toJson();
-      if (stats.hasErrors()) {
-        console.log('Finished running webpack with errors.');
-        info.errors.forEach((e) => console.error(e));
-        // process.exit(1);
-        reject();
-      } else {
-        console.log(
-          stats.toString({
-            chunks: false,
-            assets: true,
-            entrypoints: false,
-            modules: false,
-            moduleAssets: false,
-            colors: true,
-          }),
-        );
-        console.log('App build process finished');
-        resolve(true);
-        // console.log(
-        // 	chalk.green('\t'+Object.keys(stats.compilation.assets).join('\n\t')),
-        // );
-
-        //build metadata (JSON-LD files containing metadata about the lincd components, shapes & ontologies in this app or its packages)
-        // let updatedPaths = await buildMetadata();
-        // console.log(chalk.green("Updated metadata:\n")+" - "+updatedPaths.map(p => chalk.magenta(p.replace(process.cwd(),''))).join("\n - "));
-      }
-      // process.exit();
-    });
-  }).then(async () => {
-    // make sure environment is not development for storage config
-    // and if we want to upload to storage, we need set S3_BUCKET_ENDPOINT
-    if (
-      process.env.NODE_ENV === 'development' ||
-      !process.env.S3_BUCKET_ENDPOINT
-    ) {
-      console.warn(
-        'Upload build to storage skip in development environment or S3_BUCKET_ENDPOINT is not set',
-      );
-      return;
-      // process.exit();
-    }
-
-    if (process.env.APP_ENV) {
-      console.warn('Not uploading to CDN for app builds');
-      return;
-      // process.exit();
-    }
-
-    // load the storage config
-    const storageConfig = await loadBackendStorageConfig();
-
-    // check if LinkedFileStorage has a default FileStore
-    // if yes: copy all the files in the build folder over with LinkedFileStorage
-    if (LinkedFileStorage.getDefaultStore()) {
-      // get public directory
-      const rootDirectory = 'public';
-      const pathDir = path.join(process.cwd(), rootDirectory);
-      if (!fs.existsSync(pathDir)) {
-        console.warn(
-          'No public directory found. Please create a public directory in the root of your project',
-        );
-        return;
-      }
-
-      // get all files in the web directory and then upload them to the storage
-      const files = await getFiles(pathDir);
-      console.log(
-        chalk.magenta(
-          `🕊  Publishing ${files.length} public files to linked file storage`,
-        ),
-      );
-      const clearSpinner = ora({
-        discardStdin: true,
-        text: `Publishing ${files.length} public files`,
-      }).start();
-
-      let counter = 0;
-      const uploads = files.map(async (filePath) => {
-        // read file content
-        const fileContent = await fs.promises.readFile(filePath);
-
-        // replace pathDir with rootDirectory in filePath to get pathname
-        // example: /Users/username/project/www/index.html -> /project/www/index.html
-        const pathname = filePath.replace(pathDir, `/${rootDirectory}`);
-
-        // upload file to storage.
-        //
-        // preventDuplicates: false because this publishes a public/ folder to a
-        // CDN, where the key is the address: `main-hwqwrAvA.css` has to land as
-        // `main-hwqwrAvA.css` or the name baked into the HTML does not resolve,
-        // and republishing an unchanged build has to overwrite in place rather
-        // than accumulate a second copy under a new key.
-        await LinkedFileStorage.saveFile(pathname, fileContent, {
-          preventDuplicates: false,
-        })
-          .then(() => {
-            clearSpinner.text = `${counter++}/${files.length}: - Published ${pathname} `;
-          })
-          .catch(console.error);
-      });
-
-      const urls = await Promise.all(uploads);
-      clearSpinner.succeed(`${urls.length} files uploaded to storage`);
-    }
-  });
 };
 /**
  * Compile the app's backend into `lib/`.
@@ -2635,7 +2457,7 @@ export const createPackage = async (
   let {hyphenName, camelCaseName, underscoreName} =
     setNameVariables(cleanPackageName);
 
-  log("Creating new LINCD package '" + name + "'");
+  log("Creating new linked package '" + name + "'");
   fs.copySync(
     path.join(getScriptDir(), '..', '..', 'defaults', 'package'),
     targetFolder,
@@ -2650,6 +2472,7 @@ export const createPackage = async (
       'Gruntfile.js',
       'src/package.ts',
       'src/ontologies/example-ontology.ts',
+      'src/ontologies/example-ontology.register.ts',
       'src/data/example-ontology.json',
     ]
       .map((f) => path.join(targetFolder, f))
@@ -2661,6 +2484,10 @@ export const createPackage = async (
   //rename these to a file name similar to the pkg name
   [
     'src/ontologies/example-ontology.ts',
+    // The register sibling is what index.ts imports; without it here the scaffold keeps a
+    // literal `example-ontology.register.ts` full of unsubstituted `${...}` placeholders and
+    // nothing ever calls linkedOntology().
+    'src/ontologies/example-ontology.register.ts',
     'src/data/example-ontology.json',
     'src/data/example-ontology.json.d.ts',
   ].forEach((f) => {
@@ -2680,7 +2507,7 @@ export const createPackage = async (
   });
 
   // npm is the default for a new package. yarn is only consulted when the new
-  // package lands inside an existing yarn project (an mrgit/yarn-3 monorepo),
+  // package lands inside an existing yarn project (a yarn-3 monorepo),
   // where adding an npm lockfile would break the workspace.
   const insideYarnProject =
     detectPackageManager(path.dirname(path.resolve(targetFolder))) === 'yarn';
@@ -2718,7 +2545,7 @@ export const createPackage = async (
   }
 
   log(
-    `Prepared a new LINCD package in ${chalk.magenta(targetFolder)}`,
+    `Prepared a new linked package in ${chalk.magenta(targetFolder)}`,
     `Run ${chalk.blueBright(
       runScriptCommand(setup.packageManager, 'build'),
     )} from this directory to build once`,
@@ -3062,7 +2889,13 @@ export function runtimeSourceForLibFile(
   return path.join(packagePath, 'src', ...parts.slice(1));
 }
 
-export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
+export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
+  // Loading every shape module in a child process of its own is the slow part of
+  // a build; the shape checks below share one run, started by the first to ask.
+  let inspection: Promise<ShapeReferenceReport> | undefined;
+  const inspectShapes = () =>
+    (inspection ??= inspectShapeReferences(packagePath));
+  return [
   {
     name: 'Checking imports',
     apply: () => checkImports(packagePath + '/src'),
@@ -3156,10 +2989,36 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
     },
   },
   {
+    // Reads the emitted lib/esm, so it runs after everything that writes it.
+    name: 'Checking shape names',
+    apply: () => checkShapeNames(packagePath),
+  },
+  {
+    // Loads each compiled shape module on its own, so it needs the final
+    // lib/esm too. Fails the build: an unresolved reference is a query that
+    // throws "Shape class not found" in a consumer's bundle.
+    name: 'Checking shape references',
+    apply: () => checkShapeReferences(packagePath, undefined, inspectShapes()),
+  },
+  {
+    // Same per-module loads: loading lib/esm/shapes/index.js alone must register
+    // every shape of this package that its shape modules register one by one,
+    // because apps load a package's shapes with `import '<pkg>/shapes/index'`.
+    name: 'Checking shapes/index',
+    apply: () => checkShapesIndex(packagePath, undefined, inspectShapes()),
+  },
+  {
+    // A bundler drops the side-effect-only imports in shapes/index of a module
+    // package.json calls side-effect-free.
+    name: 'Checking sideEffects',
+    apply: async () => checkShapesSideEffects(packagePath),
+  },
+  {
     name: 'Checking dependencies',
     apply: () => depCheck(packagePath),
   },
-];
+  ];
+};
 
 export const compilePackage = async (packagePath = process.cwd()) => {
   //echo 'compiling CJS' && tsc -p tsconfig-cjs.json && echo 'compiling ESM' && tsc -p tsconfig-esm.json

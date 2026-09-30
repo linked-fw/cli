@@ -186,8 +186,36 @@ linked setup-publish --scope community      # use NPM_AUTH_TOKEN_CM instead of N
 linked start                      # run the dev server (app)
 linked start --api-only           # run only the backend API (no page rendering, no vite.config needed)
 linked dev                        # file-watch rebuild (package)
-linked yarn <args>                # safe-yarn: run yarn at root while preserving nested yarn.lock files
+linked yarn <args>                # safe-yarn: run yarn at the workspace root, forwarding all args
 ```
+
+### Developing a dependency from a git checkout
+
+`linked localize` clones an npm dependency, installs inside the checkout, builds
+it with `linked build` and symlinks it into `node_modules` — **without** touching
+`package.json` or `package-lock.json`, so the manifest still describes the
+released dependency and CI is unaffected.
+
+```bash
+linked localize @_linked/rdfs     # clone, install, build, symlink into node_modules
+linked localize                   # report what is localized (same as --list)
+linked localize --list --check    # exit 1 when something recorded is not actually linked
+linked localize --relink          # recreate the recorded symlinks — run this from postinstall
+linked delocalize @_linked/rdfs   # unlink and forget, keeping the checkout
+linked delocalize --purge         # undo everything and delete the checkouts
+```
+
+Name packages exactly as npm names them (`@_linked/rdfs`, `lodash`): the
+repository is read from the package's published `repository` field, so there is
+no short-name expansion and no org guessing. `--dir` moves the checkout
+directory (default `packages-local`), `--repo`/`--subdir` cover a package whose
+published metadata does not point at the right place, and `--build "<cmd>"`
+replaces `linked build` (an empty string builds nothing). A failing build only
+warns — a package whose build is broken is usually why you localized it.
+
+The work is done by [`@_linked/localize`](https://www.npmjs.com/package/@_linked/localize),
+which is dependency-free and framework-agnostic; this CLI only supplies the
+build command.
 
 ### Registry / dev utilities
 
