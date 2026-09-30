@@ -26,7 +26,12 @@ import {
 } from './utils/packageManager.js';
 import {rewriteExtensionlessImports} from './utils/esmSpecifiers.js';
 import {checkShapeNames} from './utils/shapeNames.js';
-import {checkShapeReferences} from './utils/shapeReferences.js';
+import {
+  checkShapeReferences,
+  inspectShapeReferences,
+  type ShapeReferenceReport,
+} from './utils/shapeReferences.js';
+import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
 
 import {spawn as spawnChild} from 'child_process';
 import {findNearestPackageJson} from 'find-nearest-package-json';
@@ -1466,9 +1471,13 @@ export const createOntology = async (
 // The shapes barrel (src/shapes/index.ts) is imported by both the frontend index and
 // the backend entry, so every shape registers on both boot paths (and materializes into
 // app-data on boot). `create-shape` adds each new shape here — NOT to the main index.
+// It holds side-effect imports only (no exports), in packages and apps alike: apps load a
+// package's whole set with `import '<pkg>/shapes/index'`, and `linked build` fails a
+// package whose shapes/index misses one of its shapes.
 const SHAPES_BARREL_HEADER =
   `// Shape registry — every shape is imported here so its @linkedShape decorator runs and\n` +
-  `// the shape registers on both boot paths (backend materialization + frontend). \`linked\n` +
+  `// the shape registers on both boot paths (backend materialization + frontend).\n` +
+  `// Side-effect imports only: no exports, components or providers. \`linked\n` +
   `// create-shape\` maintains this list.\n//SHAPES\n`;
 
 const ensureBackendImportsShapes = function (root: string = process.cwd()) {
@@ -1690,7 +1699,9 @@ export const createShape = async (name, basePath = process.cwd()) => {
   // Register the shape in the shapes barrel (src/shapes/index.ts) — NOT the main index —
   // and make sure the barrel is loaded on both boot paths. This is what makes the app
   // materialize its own shapes on boot.
-  const barrelPath = addShapeToBarrel(hyphenName);
+  // The barrel sits next to the shape: in the source folder's parent, not the cwd, which
+  // is only the same folder when the command runs from the package or app root.
+  const barrelPath = addShapeToBarrel(hyphenName, path.dirname(sourceFolder));
   log(`Registered the shape in ${chalk.magenta(barrelPath.replace(basePath, ''))}`);
 };
 
@@ -2814,7 +2825,13 @@ const loadServerClass = async (): Promise<any> => {
   }
 };
 
-export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
+export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
+  // Loading every shape module in a child process of its own is the slow part of
+  // a build; the shape checks below share one run, started by the first to ask.
+  let inspection: Promise<ShapeReferenceReport> | undefined;
+  const inspectShapes = () =>
+    (inspection ??= inspectShapeReferences(packagePath));
+  return [
   {
     name: 'Checking imports',
     apply: () => checkImports(packagePath + '/src'),
@@ -2954,13 +2971,27 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
     // lib/esm too. Fails the build: an unresolved reference is a query that
     // throws "Shape class not found" in a consumer's bundle.
     name: 'Checking shape references',
-    apply: () => checkShapeReferences(packagePath),
+    apply: () => checkShapeReferences(packagePath, undefined, inspectShapes()),
+  },
+  {
+    // Same per-module loads: loading lib/esm/shapes/index.js alone must register
+    // every shape of this package that its shape modules register one by one,
+    // because apps load a package's shapes with `import '<pkg>/shapes/index'`.
+    name: 'Checking shapes/index',
+    apply: () => checkShapesIndex(packagePath, undefined, inspectShapes()),
+  },
+  {
+    // A bundler drops the side-effect-only imports in shapes/index of a module
+    // package.json calls side-effect-free.
+    name: 'Checking sideEffects',
+    apply: async () => checkShapesSideEffects(packagePath),
   },
   {
     name: 'Checking dependencies',
     apply: () => depCheck(packagePath),
   },
-];
+  ];
+};
 
 export const compilePackage = async (packagePath = process.cwd()) => {
   //echo 'compiling CJS' && tsc -p tsconfig-cjs.json && echo 'compiling ESM' && tsc -p tsconfig-esm.json
