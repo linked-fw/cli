@@ -207,7 +207,7 @@ counts *in the compiled-output commits*. A three-day window over all deletions g
 because other commits also deleted files. Both numbers are correct answers to different questions.
 
 `sentry` still has a `tsconfig-es5.json` —
-[CN backlog 087](../../../../docs/backlog/087-dead-tsconfig-es5-in-s3-and-sentry.md), now one
+Create Now's `docs/backlog/087-dead-tsconfig-es5-in-s3-and-sentry.md`, now one
 repo rather than two.
 
 ---
@@ -264,7 +264,7 @@ Not deprecated — **absent**. It appears nowhere in the installed package. The 
 jsdom/`NODE_ENV` trap would have been silently ignored: an unknown key in a vitest config is not
 an error, so the config would have looked correct and done nothing. The real mechanism is
 `test.projects`.
-[CN backlog 084](../../../../docs/backlog/084-the-jsdom-node-env-trap-in-backend-tests.md).
+Create Now's `docs/backlog/084-the-jsdom-node-env-trap-in-backend-tests.md`.
 
 ### R4 — "the sweep would produce a release to watch" — false, and the publish half is unverified
 
@@ -345,7 +345,7 @@ squash.
 Still outstanding:
 
 - **`sentry/tsconfig-es5.json`** still exists — the last one
-  ([CN backlog 087](../../../../docs/backlog/087-dead-tsconfig-es5-in-s3-and-sentry.md)).
+  (Create Now's `docs/backlog/087-dead-tsconfig-es5-in-s3-and-sentry.md`).
 - **`sentry`, `server-utils`, `semantu-cli`** are the three repos not yet on the tsconfig
   standard (§1.2 layer 3).
 - **`server-utils`** has one uncommitted edit (`src/types/ShapeDetails.ts`) and is the only repo
