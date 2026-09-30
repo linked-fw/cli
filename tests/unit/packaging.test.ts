@@ -64,3 +64,29 @@ describe('packaging', () => {
     }
   });
 });
+
+// The published lib/esm is loaded by Node's ESM resolver, which does not add
+// extensions. `npm run build` is plain tsc and emits specifiers exactly as
+// written, so an extensionless relative import in src ships broken — importing
+// `@_linked/cli` failed with ERR_MODULE_NOT_FOUND on './tailwind.config' for
+// that reason. Guard the source so the output is correct under any build path.
+describe('esm specifiers in src', () => {
+  test('every relative import names its .js file', async () => {
+    const ts = require('typescript');
+    const files = await glob('src/**/*.{ts,mts,cts}', {
+      cwd: repoRoot,
+      ignore: ['**/*.d.ts'],
+    });
+    const offenders: string[] = [];
+    for (const file of files) {
+      const text = fs.readFileSync(path.join(repoRoot, file), 'utf8');
+      const {importedFiles} = ts.preProcessFile(text, true, true);
+      for (const {fileName} of importedFiles) {
+        if (!/^\.\.?(\/|$)/.test(fileName)) continue;
+        if (/\.(js|mjs|cjs|json|css)$/.test(fileName)) continue;
+        offenders.push(`${file}: '${fileName}'`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
