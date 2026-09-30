@@ -2229,11 +2229,6 @@ export const upgradePackages = async () => {
   // let packages = getLocalLincdModules();
   let packages = getLocalLincdPackageMap();
   let dirname = getScriptDir();
-  const tsConfigCJS = path.join(
-    dirname,
-    '../../defaults/package',
-    'tsconfig-cjs.json',
-  );
   const tsConfigESM = path.join(
     dirname,
     '../../defaults/package',
