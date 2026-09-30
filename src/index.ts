@@ -1,13 +1,13 @@
-export {default as tailwindConfig} from './tailwind.config';
-// export {buildMetadata} from './metadata';
-export * from './utils';
-export {defineConfig} from './defineConfig';
-export type {LinkedConfig, LinkedServerConfig} from './interfaces';
+export {default as tailwindConfig} from './tailwind.config.js';
+// export {buildMetadata} from './metadata.js';
+export * from './utils.js';
+export {defineConfig} from './defineConfig.js';
+export type {LinkedConfig, LinkedServerConfig} from './interfaces.js';
 
-export {buildPackageByPath} from './commands/build-package';
-export {safeYarn} from './commands/safe-yarn';
-export {setupPublish} from './commands/setup-publish';
-export {resolveBuildTarget} from './app-release/resolve-build-target';
+export {buildPackageByPath} from './commands/build-package.js';
+export {safeYarn} from './commands/safe-yarn.js';
+export {setupPublish} from './commands/setup-publish.js';
+export {resolveBuildTarget} from './app-release/resolve-build-target.js';
 export {
   buildReleasePrefix,
   createReleaseManifest,
@@ -24,29 +24,29 @@ export {
   IMMUTABLE_CACHE_CONTROL,
   MANIFEST_SOURCE_PATH,
   VITE_OUTPUT_DIR,
-} from './app-release/create-release-manifest';
-export {resolveDeclaredStaticAssets} from './app-release/static-assets';
+} from './app-release/create-release-manifest.js';
+export {resolveDeclaredStaticAssets} from './app-release/static-assets.js';
 export {
   loadReleaseManifest,
   planReleasePublish,
   publishRelease,
-} from './app-release/publisher';
+} from './app-release/publisher.js';
 export {
   normalizeAccessURL,
   resolveAppAssetsStore,
-} from './app-release/app-assets-store';
-export {buildViteApp, hasViteConfig} from './commands/build-app';
-export {publishApp} from './commands/publish-app';
+} from './app-release/app-assets-store.js';
+export {buildViteApp, hasViteConfig} from './commands/build-app.js';
+export {publishApp} from './commands/publish-app.js';
 export {
   serveCompiledApp,
   validateCompiledAppArtifacts,
-} from './commands/serve-app';
+} from './commands/serve-app.js';
 export {
   joinObjectKey,
   joinStaticAssetUrl,
   normalizeReleasePath,
   resolveExistingPathWithinRoot,
-} from './app-release/paths';
+} from './app-release/paths.js';
 export type {
   AppBuildTarget,
   AppPublishConfig,
@@ -56,9 +56,9 @@ export type {
   LinkedAppReleaseManifest,
   PublishPlan,
   PublishResult,
-} from './app-release/types';
+} from './app-release/types.js';
 export type {
   CreateReleaseManifestOptions,
   ReleaseFileOrigin,
   ReleaseIdentity,
-} from './app-release/create-release-manifest';
+} from './app-release/create-release-manifest.js';
