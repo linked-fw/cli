@@ -59,6 +59,13 @@ export interface ShapeReferenceReport {
   unresolved: UnresolvedShapeReference[];
   /** Unresolved references that match {@link KNOWN_UNRESOLVED}. */
   known: UnresolvedShapeReference[];
+  /**
+   * The package's own shapes (by IRI) registered after loading each module on
+   * its own, keyed like {@link modules}. Read before the probe loads any entry
+   * for its second look, so it is exactly what that one module registers.
+   * Modules that threw are absent.
+   */
+  registered: Record<string, string[]>;
   /** Set when the registry could not be inspected, so nothing was checked. */
   skipped?: string;
 }
@@ -71,26 +78,15 @@ export interface ShapeReferenceReport {
  * accepted design. No package was found with a legitimate reason to leave a
  * reference unresolved; add an opt-out mechanism when one turns up.
  *
- * - `@_linked/core`: `PropertyShape.in` names `List` by `[package, name]`
- *   because `List`'s module depends on the SHACL shapes. Only core's entry
- *   loads `List`, so a process that deep-imports core without its entry cannot
- *   traverse `sh:in`. Tracked as core's backlog-045; core builds with `linked
- *   build-all`, which must not fail on it meanwhile. Remove this entry once
- *   core registers `List` wherever `PropertyShape` is registered.
+ * Empty: `@_linked/core`'s `PropertyShape.in -> List`, the one entry this held,
+ * is fixed in core (List is registered wherever PropertyShape is).
  */
 export const KNOWN_UNRESOLVED: {
   package: string;
   shape: string;
   property: string;
   valueShape: string;
-}[] = [
-  {
-    package: '@_linked/core',
-    shape: '/shape/core/PropertyShape',
-    property: 'in',
-    valueShape: '/shape/core/List',
-  },
-];
+}[] = [];
 
 /** arch-02: the `{slug}` in `{baseUri}shape/{slug}/{Name}`. Mirrors core's `packageNameToSlug`. */
 export const packageNameToSlug = (packageName: string): string =>
@@ -134,7 +130,7 @@ const PROBE = `
 import {register} from 'node:module';
 register('data:text/javascript,' + encodeURIComponent(${JSON.stringify(ASSET_HOOK)}));
 const MARK = '__LINKED_SHAPE_REFERENCES__';
-const out = {error: null, unresolved: [], registry: true};
+const out = {error: null, unresolved: [], registry: true, registered: []};
 const reg = () => globalThis.__linkedShapeRegistry;
 const ownSlug = process.env.LINKED_PROBE_SLUG;
 const report = () => {
@@ -146,6 +142,10 @@ try {
   if (!r || !r.nodeShapeRegistry) {
     out.registry = false;
   } else {
+    // Before the second look below: that loads whole entries and would add theirs.
+    for (const id of r.nodeShapeRegistry.keys()) {
+      if (id.includes('/shape/' + ownSlug + '/')) out.registered.push(id);
+    }
     for (const [id, ns] of r.nodeShapeRegistry) {
       if (!id.includes('/shape/' + ownSlug + '/')) continue;
       for (const ps of ns.propertyShapes || []) {
@@ -181,6 +181,7 @@ report();
 interface ProbeResult {
   error: string | null;
   registry: boolean;
+  registered: string[];
   unresolved: {
     shape: string;
     property: string;
@@ -226,7 +227,7 @@ const runProbe = (
             ? `did not finish loading within ${timeoutMs}ms`
             : String(stderr).trim().split('\n').slice(-4).join('\n') ||
               String(err || 'exited without reporting');
-        resolve({error: why, registry: true, unresolved: []});
+        resolve({error: why, registry: true, registered: [], unresolved: []});
       },
     );
   });
@@ -296,6 +297,7 @@ export const inspectShapeReferences = async (
     loadErrors: [],
     unresolved: [],
     known: [],
+    registered: {},
   };
   if (modules.length === 0) return report;
 
@@ -358,6 +360,7 @@ export const inspectShapeReferences = async (
       report.loadErrors.push({module, error: r.error});
       return;
     }
+    report.registered[module] = r.registered;
     for (const u of r.unresolved) {
       const key = `${u.shape}\u0000${u.property}\u0000${u.valueShape}`;
       const existing = byReference.get(key);
@@ -406,8 +409,9 @@ const describeReference = (ref: UnresolvedShapeReference): string => {
 export const checkShapeReferences = async (
   packagePath: string,
   options?: Parameters<typeof inspectShapeReferences>[1],
+  inspection?: Promise<ShapeReferenceReport>,
 ): Promise<true | string | {error: string}> => {
-  const report = await inspectShapeReferences(packagePath, options);
+  const report = await (inspection ?? inspectShapeReferences(packagePath, options));
   if (report.skipped) return `skipped: ${report.skipped}`;
   const problems: string[] = [];
   if (report.loadErrors.length > 0) {

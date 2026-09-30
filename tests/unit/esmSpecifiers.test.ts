@@ -260,6 +260,8 @@ describe('planBuildSteps', () => {
       'Rewriting ESM import specifiers',
       'Checking shape names',
       'Checking shape references',
+      'Checking shapes/index',
+      'Checking sideEffects',
       'Checking dependencies',
     ]);
   });
