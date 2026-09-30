@@ -78,26 +78,15 @@ export interface ShapeReferenceReport {
  * accepted design. No package was found with a legitimate reason to leave a
  * reference unresolved; add an opt-out mechanism when one turns up.
  *
- * - `@_linked/core`: `PropertyShape.in` names `List` by `[package, name]`
- *   because `List`'s module depends on the SHACL shapes. Only core's entry
- *   loads `List`, so a process that deep-imports core without its entry cannot
- *   traverse `sh:in`. Tracked as core's backlog-045; core builds with `linked
- *   build-all`, which must not fail on it meanwhile. Remove this entry once
- *   core registers `List` wherever `PropertyShape` is registered.
+ * Empty: `@_linked/core`'s `PropertyShape.in -> List`, the one entry this held,
+ * is fixed in core (List is registered wherever PropertyShape is).
  */
 export const KNOWN_UNRESOLVED: {
   package: string;
   shape: string;
   property: string;
   valueShape: string;
-}[] = [
-  {
-    package: '@_linked/core',
-    shape: '/shape/core/PropertyShape',
-    property: 'in',
-    valueShape: '/shape/core/List',
-  },
-];
+}[] = [];
 
 /** arch-02: the `{slug}` in `{baseUri}shape/{slug}/{Name}`. Mirrors core's `packageNameToSlug`. */
 export const packageNameToSlug = (packageName: string): string =>

@@ -195,21 +195,6 @@ describe('checkShapeReferences', () => {
     expect(await checkShapeReferences(dir)).toBe(true);
   });
 
-  test("warns rather than fails for core's known PropertyShape.in -> List", async () => {
-    // Loading core's package module registers PropertyShape, whose `in` names
-    // List by [package, name]; List is registered only by core's entry.
-    fixture({
-      'lib/esm/package.js':
-        "import { linkedPackage } from '@_linked/core/utils/Package';\nexport const { linkedShape } = linkedPackage('@_linked/core');\n",
-      'lib/esm/shapes/Thing.js': shapeClass('Thing', {}),
-    });
-    const result = await checkShapeReferences(dir);
-    expect(typeof result).toBe('string');
-    expect(result).toContain(
-      'core/PropertyShape.in -> https://linked.cm/shape/core/List',
-    );
-  });
-
   test('passes when there is nothing to check', async () => {
     fixture({});
     expect(await checkShapeReferences(dir)).toBe(true);

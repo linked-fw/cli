@@ -188,6 +188,15 @@ describe('checkShapesSideEffects', () => {
     expect(checkShapesSideEffects(dir)).toBe(true);
   });
 
+  test("passes core's `**/` forms, with and without braces", () => {
+    withShapes(['**/shapes/index.js', '**/shapes/*.js', '**/shapes/*.ts']);
+    expect(checkShapesSideEffects(dir)).toBe(true);
+    withShapes(['**/shapes/index.{js,ts}', '**/shapes/*.{js,ts}']);
+    expect(checkShapesSideEffects(dir)).toBe(true);
+    withShapes(['**/shapes/index.{js,ts}']);
+    expect(checkShapesSideEffects(dir)).toEqual({error: expect.stringContaining('  lib/esm/shapes/Person.js')});
+  });
+
   test('a single-level glob misses nested shape folders', () => {
     withShapes(['lib/esm/shapes/*.js'], {
       'lib/esm/shapes/geo/Point.js': 'export {};\n',

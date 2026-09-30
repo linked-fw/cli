@@ -23,3 +23,7 @@ Two new build steps, after "Checking shape references":
 the shape in, rather than the one under the current directory. The package template's
 `shapes/index.ts` states the side-effect-imports-only rule, and the React Native template's shapes
 package gains a `src/shapes/index.ts` that its entry imports.
+
+The shape-references check no longer tolerates `@_linked/core`'s `PropertyShape.in -> List`: core
+now registers `List` wherever `PropertyShape` is registered, so the known-unresolved list is empty
+and that reference fails the build like any other.
