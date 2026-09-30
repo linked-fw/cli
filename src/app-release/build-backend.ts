@@ -84,52 +84,268 @@ export const workspacePackagesToExternalize = async (
 };
 
 /**
- * A relative import from `lib/` into `packages/` means a workspace package was
- * compiled in after all. One into `node_modules/@_linked/` means an installed
- * framework package was: `lib/node_modules/@_linked/server-utils` is a second
- * `ShapeProvider` class, so the server's `instanceof` check rejects every
- * provider the app exports.
+ * Every module specifier a compiled file imports: static `from "…"`, side-effect
+ * `import "…"`, dynamic `import("…")`, and `require("…")`.
  *
- * Worth failing the build over rather than leaving to be discovered: the
- * output is perfectly valid JavaScript, and the symptom is the app refusing to
- * boot with a message about storage routing that points nowhere near here.
+ * Deliberately loose — it can match text inside a string or a comment. That is
+ * harmless: only specifiers that resolve to a file on disk are acted on, and
+ * only when that file turns out to be a copy of a package.
  */
-export const findInlinedWorkspaceImports = (source: string): string[] => {
-  // Both static `from "…"` and dynamic `import("…")`: a lazily imported page
-  // can drag a workspace package in on its own, and only the second form
-  // appears in the output for it.
+export const findImportSpecifiers = (source: string): string[] => {
   const matches = source.matchAll(
-    /(?:from|import)\s*\(?\s*["'](\.[^"']*\/(?:packages|node_modules\/@_linked)\/[^"']+)["']/g
+    /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g
   );
   return [...new Set([...matches].map((m) => m[1]))].sort();
 };
 
-export const assertNoInlinedWorkspaces = async (
+/** One import in `lib/` that reaches a compiled-in copy of a package. */
+export interface InlinedPackageImport {
+  /** The importing file, relative to the app root (`lib/…/PageView.js`). */
+  file: string;
+  /** The specifier exactly as it appears in that file. */
+  specifier: string;
+  /** Real path of the package source the imported module was compiled from. */
+  origin: string;
+  /** Name of the package that source belongs to, when it is known. */
+  packageName?: string;
+}
+
+/**
+ * A directory whose real path is package code the backend must import rather
+ * than compile: a workspace package, a localized checkout, an installed
+ * framework package.
+ */
+export interface PackageRoot {
+  root: string;
+  name?: string;
+}
+
+/**
+ * Top-level directories of `lib/` that only exist when code from outside
+ * `src/` was compiled in.
+ *
+ * `preserveModules` lays `lib/` out relative to the common ancestor of every
+ * module in the build. With `preserveModulesRoot: src` the app's own files lose
+ * their `src/` prefix, and anything else keeps its path from the app root — so
+ * a compiled-in workspace package lands at `lib/packages/…`, an installed one at
+ * `lib/node_modules/…`. Only when the app has no `src/` directory of that name,
+ * since an app is free to have its own `src/packages/`.
+ */
+const STRAY_OUTPUT_DIRS = ['packages', 'packages-local', 'node_modules'];
+
+const realpathOr = (p: string): string => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+
+const isInside = (child: string, parent: string): boolean => {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+const listJsFiles = async (dir: string): Promise<string[]> => {
+  const out: string[] = [];
+  const walk = async (current: string) => {
+    const entries = await fs.promises.readdir(current, {withFileTypes: true});
+    await Promise.all(
+      entries.map(async (entry) => {
+        const full = path.join(current, entry.name);
+        if (entry.isDirectory()) await walk(full);
+        else if (/\.(?:m|c)?js$/.test(entry.name)) out.push(full);
+      })
+    );
+  };
+  await walk(dir);
+  return out.sort();
+};
+
+/**
+ * The package roots an app's compiled backend must never contain a copy of,
+ * as real paths: every discovered workspace package, everything under
+ * `packages-local/`, and every installed `@_linked/*` package (whose real path
+ * is a localized checkout when it has been localized).
+ */
+export const packageRootsForApp = async (
   appRoot: string,
-  readFile: (p: string) => Promise<string> = (p) => fs.readFile(p, 'utf8')
-): Promise<void> => {
-  // Every entry, not just the backend: `App.js` and `routes.js` reach code the
-  // backend never imports, so a package can be inlined through either of them.
-  const inlined = new Set<string>();
-  for (const name of Object.keys(BACKEND_ENTRIES)) {
-    const entryPath = path.join(appRoot, 'lib', `${name}.js`);
-    if (!fs.existsSync(entryPath)) continue;
-    for (const found of findInlinedWorkspaceImports(await readFile(entryPath))) {
-      inlined.add(found);
+  discover: (
+    globs: string[],
+    cwd: string
+  ) => Promise<{name: string; srcDir: string}[]> = async (globs, cwd) => {
+    const {discoverWorkspaces} = await import('../vite-config.js');
+    return discoverWorkspaces(globs, cwd);
+  }
+): Promise<PackageRoot[]> => {
+  const roots: PackageRoot[] = [];
+  for (const ws of await discover([], appRoot)) {
+    roots.push({root: realpathOr(path.dirname(ws.srcDir)), name: ws.name});
+  }
+  const packagesLocal = path.join(appRoot, 'packages-local');
+  if (fs.existsSync(packagesLocal)) {
+    for (const entry of await fs.readdir(packagesLocal)) {
+      roots.push({root: realpathOr(path.join(packagesLocal, entry))});
+    }
+    roots.push({root: realpathOr(packagesLocal)});
+  }
+  const linkedScope = path.join(appRoot, 'node_modules', '@_linked');
+  if (fs.existsSync(linkedScope)) {
+    for (const entry of await fs.readdir(linkedScope)) {
+      roots.push({
+        root: realpathOr(path.join(linkedScope, entry)),
+        name: `@_linked/${entry}`,
+      });
+    }
+    roots.push({root: realpathOr(linkedScope)});
+  }
+  // The app itself can be discovered as a workspace; its own source is not a
+  // second copy of anything.
+  const appSrc = realpathOr(path.join(appRoot, 'src'));
+  return roots.filter(({root}) => !isInside(appSrc, root));
+};
+
+/**
+ * Find every import in the compiled backend that reaches a compiled-in copy of
+ * a package.
+ *
+ * Each relative specifier is resolved against its file, and the module it
+ * lands on is traced back to the source it was compiled from through that
+ * module's sourcemap. The source's REAL path is then compared with the
+ * package roots — so it does not matter what the copy's directory in `lib/` is
+ * called, or whether the package was reached through a symlink. An import that
+ * leaves `lib/` altogether is judged by its own real path.
+ *
+ * Only imports from the app's own modules are reported: they are the ones to
+ * change, and every compiled-in copy is reached through one of them.
+ */
+export const findInlinedPackageImports = async (
+  appRoot: string,
+  packageRoots: PackageRoot[]
+): Promise<{imports: InlinedPackageImport[]; strayDirs: string[]}> => {
+  const libDir = path.join(appRoot, 'lib');
+  const strayDirs = STRAY_OUTPUT_DIRS.filter(
+    (name) =>
+      fs.existsSync(path.join(libDir, name)) &&
+      !fs.existsSync(path.join(appRoot, 'src', name))
+  ).map((name) => `lib/${name}/`);
+  if (!fs.existsSync(libDir)) return {imports: [], strayDirs};
+
+  const ownerOf = (real: string): PackageRoot | undefined =>
+    packageRoots
+      .filter(({root}) => isInside(real, root))
+      // The most specific root names the package; a named one wins a tie.
+      .sort(
+        (a, b) =>
+          b.root.length - a.root.length || Number(!!b.name) - Number(!!a.name)
+      )[0];
+
+  // Where a module in lib/ was compiled from, via its sourcemap.
+  const originCache = new Map<string, string[]>();
+  const originsOf = async (moduleFile: string): Promise<string[]> => {
+    const cached = originCache.get(moduleFile);
+    if (cached) return cached;
+    let origins: string[] = [];
+    try {
+      const map = JSON.parse(await fs.readFile(`${moduleFile}.map`, 'utf8'));
+      const base = path.resolve(path.dirname(moduleFile), map.sourceRoot || '');
+      origins = (map.sources || [])
+        .filter((s: unknown) => typeof s === 'string' && !s.startsWith('\0'))
+        .map((s: string) => realpathOr(path.resolve(base, s.replace(/^file:\/\//, ''))));
+    } catch {
+      // No sourcemap: nothing to trace. The stray-directory check still
+      // catches the usual layout of a compiled-in package.
+    }
+    originCache.set(moduleFile, origins);
+    return origins;
+  };
+  const packageSourceOf = async (moduleFile: string) => {
+    for (const origin of await originsOf(moduleFile)) {
+      const owner = ownerOf(origin);
+      if (owner) return {origin, owner};
+    }
+    return undefined;
+  };
+
+  const imports: InlinedPackageImport[] = [];
+  for (const file of await listJsFiles(libDir)) {
+    // A compiled-in copy importing its own siblings is noise; report where the
+    // app reaches into it.
+    if (await packageSourceOf(file)) continue;
+    const source = await fs.readFile(file, 'utf8');
+    for (const specifier of findImportSpecifiers(source)) {
+      const isPath =
+        specifier.startsWith('./') ||
+        specifier.startsWith('../') ||
+        specifier.startsWith('/') ||
+        specifier.startsWith('file://');
+      if (!isPath) continue;
+      const target = specifier.startsWith('file://')
+        ? specifier.slice('file://'.length)
+        : path.resolve(path.dirname(file), specifier);
+
+      let found: {origin: string; owner: PackageRoot} | undefined;
+      if (isInside(target, libDir)) {
+        found = await packageSourceOf(target);
+      } else {
+        const real = realpathOr(target);
+        const owner = ownerOf(real);
+        if (owner) found = {origin: real, owner};
+      }
+      if (!found) continue;
+      imports.push({
+        file: path.relative(appRoot, file),
+        specifier,
+        origin: found.origin,
+        packageName: found.owner.name,
+      });
     }
   }
-  if (inlined.size === 0) return;
+  return {imports, strayDirs};
+};
 
-  const named = [...inlined].sort();
+/**
+ * Fail the build when the compiled backend contains a copy of a package.
+ *
+ * A copy compiles and runs — and then fails somewhere else entirely: a second
+ * `@_linked/core` splits `LinkedStorage`'s routing state from the one the
+ * storage config configures, and a second `@_linked/server-utils` is a second
+ * `ShapeProvider` class, so the server's `instanceof` check rejects every
+ * provider the app exports. Neither message points anywhere near here.
+ *
+ * Every file in `lib/` is checked, not only the entries: a copy reached from
+ * a feature folder three imports deep is just as much a second copy.
+ */
+export const assertNoInlinedWorkspaces = async (
+  appRoot: string,
+  packageRoots?: PackageRoot[]
+): Promise<void> => {
+  const roots = packageRoots || (await packageRootsForApp(appRoot));
+  const {imports, strayDirs} = await findInlinedPackageImports(appRoot, roots);
+  if (imports.length === 0 && strayDirs.length === 0) return;
+
+  const lines = imports.slice(0, 8).map(
+    (found) =>
+      `  ${found.file} imports "${found.specifier}"\n` +
+      `    — a compiled-in copy of ${found.origin}` +
+      (found.packageName ? ` (${found.packageName})` : '')
+  );
+  if (imports.length > 8) lines.push(`  …and ${imports.length - 8} more`);
+  const names = [
+    ...new Set(imports.map((i) => i.packageName).filter(Boolean)),
+  ] as string[];
   throw new Error(
-    'The compiled backend inlined workspace packages instead of importing ' +
-      'them: ' +
-      named.slice(0, 3).join(', ') +
-      (named.length > 3 ? `, and ${named.length - 3} more` : '') +
-      '. Each one is a second copy of that package, and a second copy of ' +
-      '@_linked/core splits LinkedStorage\'s routing state from the one the ' +
-      'storage config configures. Check that the package is discoverable as a ' +
-      'workspace, so it can be named in ssr.external.'
+    'The compiled backend contains a copy of package code instead of importing it:\n' +
+      (lines.length ? lines.join('\n') + '\n' : '') +
+      (strayDirs.length
+        ? `  ${strayDirs.join(', ')} exists — only code compiled from outside src/ lands there\n`
+        : '') +
+      'Each copy is a second instance of that package: its classes fail `instanceof` ' +
+      'and its registries are empty. Import the package through its public export ' +
+      (names.length ? `(${names.map((n) => `"${n}" or "${n}/…"`).join(', ')}) ` : '') +
+      'rather than a path into its files, and check that nothing — a resolve.alias, ' +
+      'a `development` export condition — maps that import to its source. A ' +
+      'workspace package must also be discoverable, so it can be named in ssr.external.'
   );
 };
 
