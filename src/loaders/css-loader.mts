@@ -1,6 +1,7 @@
 import createLoader from 'create-esm-loader';
 // import parseCSS from 'css-parse';
-import {generateScopedName, generateScopedNameProduction} from '../utils.js';
+import {generateScopedName} from '../utils.js';
+import {cssModuleExports, generateScopedNameProduction} from '../css-module-names.js';
 
 const cssLoader = {
   resolve(specifier, opts) {
@@ -41,23 +42,16 @@ const cssLoader = {
 };
 
 function parseCssToObject(rawSource: string, filename) {
-  const output = {};
-  let myResults = rawSource.match(/\.[a-zA-Z_]{1}[\w]+[\s:]/g);
-  if (myResults) {
-    myResults
-      .map((result) => {
-        return result.replace(/[\.\s:]/g, '');
-      })
-      .forEach((selector) => {
-        let scopedClassName;
-        if (process.env.NODE_ENV === 'production') {
-          scopedClassName = generateScopedNameProduction(selector, filename);
-        } else {
-          scopedClassName = generateScopedName(selector, filename);
-        }
-        output[selector] = scopedClassName;
-      });
-  }
+  // Must produce the names the Vite builds produce for the same file — see
+  // css-module-names.ts. The server renders with these; the client's stylesheet
+  // is written with Vite's. Anything but a development run serves compiled
+  // output (see startServer), so only 'development' gets the dev names — a
+  // `staging` or unset NODE_ENV must still match the production stylesheet.
+  const output = cssModuleExports(
+    rawSource,
+    filename,
+    process.env.NODE_ENV === 'development' ? generateScopedName : generateScopedNameProduction,
+  );
   // console.log(myResults);
   // for (const rule of parseCSS(rawSource).stylesheet.rules) {
   //   if(rule.selectors)
