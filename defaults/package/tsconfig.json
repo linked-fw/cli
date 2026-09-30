@@ -9,10 +9,22 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "pretty": true,
+    "skipLibCheck": true,
     "jsx": "react",
     "types": ["node"]
   },
   "files": [
-    "./src/types.ts","./src/index.ts"],
-  "include": ["./src/backend.ts"]
+    "./src/index.ts"
+  ],
+  "include": [
+    "./src/**/*.ts",
+    "./src/backend.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "./src/__tests__/**",
+    "./src/tests/**",
+    "./src/test-helpers/**"
+  ]
 }
