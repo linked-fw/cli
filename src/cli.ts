@@ -487,6 +487,16 @@ program
   });
 
 program
+  .command('doctor')
+  .description(
+    "Check the app's dev dependency setup: optimizeDeps.include entries that do not resolve, and linked packages whose dependencies' React peer range excludes the app's React. Exits 1 on a warning.",
+  )
+  .action(async () => {
+    const {runDoctor} = await import('./commands/doctor.js');
+    return runDoctor();
+  });
+
+program
   .command('yarn')
   .description(
     'Run yarn at the workspace root. Forwards all extra args to yarn.',

@@ -188,6 +188,21 @@ linked dev                        # file-watch rebuild (package)
 linked yarn <args>                # safe-yarn: run yarn at the workspace root, forwarding all args
 ```
 
+```bash
+linked doctor                     # check optimizeDeps.include and React peer ranges of linked packages' deps
+```
+
+`createViteConfig()` takes care of two things apps used to configure by hand:
+
+- **HMR port.** Derived from the dev port (`24678 + (PORT - 4040)`); when another process already
+  holds it, the next free port is used and logged. `LINKED_HMR_PORT` sets it explicitly.
+- **`optimizeDeps.include` for linked packages' dependencies.** Linked packages are excluded from
+  Vite's optimizer, so Vite never sees their own imports (Radix, `vaul`, `js-cookie`…). In dev
+  those are read from the packages' import graph — server-only code left out, npm-nested
+  installs written as `'<pkg> > <dep>'` — and added to whatever the app lists. `DEBUG=linked`
+  prints them; `clientDepIncludes: {deny: [...]}` keeps entries out and
+  `clientDepIncludes: false` (or `LINKED_CLIENT_DEP_INCLUDES=0`) turns it off.
+
 ### Developing a dependency from a git checkout
 
 `linked localize` clones an npm dependency, installs inside the checkout, builds
