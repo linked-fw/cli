@@ -8,12 +8,14 @@
 // The helper preserves the dev-mode `generateScopedName` (readable
 // `_packageName_filename_className`) so CSS module class names match
 // what the previous bundler chain produced for trace/debug. Production
-// uses Vite's default scoping (content-hash, equivalent uniqueness).
+// uses `generateScopedNameProduction`, which the Node CSS loader shares so the
+// server renders the class names the client's stylesheet defines.
 import {defineConfig} from 'vite';
 import react from '@vitejs/plugin-react';
 import fsExtra from 'fs-extra';
 import path from 'node:path';
 import {generateScopedName} from './utils.js';
+import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
 import {isFrameworkPkg, readInstalledPkg} from './installed-packages.js';
@@ -753,7 +755,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       ].filter(Boolean) as Plugin[],
       css: {
         modules: {
-          generateScopedName: isDev ? generateScopedName : undefined,
+          generateScopedName: isDev ? generateScopedName : generateScopedNameProduction,
         },
         postcss: opts.postcssPlugins
           ? {plugins: opts.postcssPlugins as any}
