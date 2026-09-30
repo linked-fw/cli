@@ -16,6 +16,14 @@ const RENAME_TRIGGER = /process\.env|import\.meta\.(?:env|hot)/;
 /** `Foo = __decorate([ …decorators… ], Foo)`, as tsc emits it. */
 const DECORATED = /\b([A-Za-z_$][\w$]*) = __decorate\(\[([\s\S]*?)\], \1\)/g;
 
+/** Whether a compiled module declares a shape: a tsc-emitted `@linkedShape` class. */
+export const declaresShape = (source: string): boolean => {
+  for (const [, , decorators] of source.matchAll(DECORATED)) {
+    if (/\blinkedShape\b/.test(decorators)) return true;
+  }
+  return false;
+};
+
 export interface ExposedShape {
   file: string;
   className: string;

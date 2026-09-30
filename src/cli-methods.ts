@@ -26,6 +26,7 @@ import {
 } from './utils/packageManager.js';
 import {rewriteExtensionlessImports} from './utils/esmSpecifiers.js';
 import {checkShapeNames} from './utils/shapeNames.js';
+import {checkShapeReferences} from './utils/shapeReferences.js';
 
 import {spawn as spawnChild} from 'child_process';
 import {findNearestPackageJson} from 'find-nearest-package-json';
@@ -2940,6 +2941,13 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => [
     // Reads the emitted lib/esm, so it runs after everything that writes it.
     name: 'Checking shape names',
     apply: () => checkShapeNames(packagePath),
+  },
+  {
+    // Loads each compiled shape module on its own, so it needs the final
+    // lib/esm too. Fails the build: an unresolved reference is a query that
+    // throws "Shape class not found" in a consumer's bundle.
+    name: 'Checking shape references',
+    apply: () => checkShapeReferences(packagePath),
   },
   {
     name: 'Checking dependencies',
