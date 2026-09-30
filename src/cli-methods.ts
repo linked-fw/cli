@@ -1159,7 +1159,16 @@ export function buildAll(options) {
             command = execPromise(buildCmd, false, false, {
               cwd: pkgDir,
             })
-              .then((res) => res === '' || typeof res === 'string')
+              .then(async (res) => {
+                const compiled = res === '' || typeof res === 'string';
+                if (!compiled) return compiled;
+                // The package script compiles TypeScript. CSS and JSON are not
+                // compiler output, so copy them after every successful build.
+                // A failed copy is a failed build: the app release reads these
+                // files from lib and cannot guess them later.
+                const copied = await copyRuntimeAssets(pkgDir);
+                return copied ? compiled : undefined;
+              })
               .catch((err) => {
                 // A non-zero exit is a failed build. Report it and resolve to
                 // undefined, which is what the result handler below reads as
@@ -3174,6 +3183,49 @@ const loadServerClass = async (): Promise<any> => {
   }
 };
 
+/**
+ * Copy source assets that `tsc` does not emit into `lib/esm` (and `lib/cjs`
+ * when the package publishes CommonJS). Returns false when a copy fails.
+ */
+export async function copyRuntimeAssets(packagePath: string): Promise<boolean> {
+  const files = await glob(packagePath + '/src/**/*.{json,d.ts,css,scss}');
+  let cjsPublished = false;
+  try {
+    cjsPublished = packagePublishesCjs(
+      JSON.parse(
+        fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
+      ),
+    );
+  } catch {}
+  const results = await Promise.all(
+    files.map(async (file) => {
+      const relative = path.relative(path.join(packagePath, 'src'), file);
+      try {
+        await fs.copy(file, path.join(packagePath, 'lib', 'esm', relative));
+        if (cjsPublished) {
+          await fs.copy(file, path.join(packagePath, 'lib', 'cjs', relative));
+        }
+        return true;
+      } catch (err) {
+        console.warn(err);
+        return false;
+      }
+    }),
+  );
+  return results.every((copied) => copied === true);
+}
+
+/** `lib/esm` or `lib/cjs` path mapped back to the file it was copied from. */
+export function runtimeSourceForLibFile(
+  packagePath: string,
+  libFile: string,
+): string | null {
+  const relative = path.relative(path.join(packagePath, 'lib'), libFile);
+  const parts = relative.split(path.sep);
+  if (parts[0] !== 'esm' && parts[0] !== 'cjs') return null;
+  return path.join(packagePath, 'src', ...parts.slice(1));
+}
+
 export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
   // Loading every shape module in a child process of its own is the slow part of
   // a build; the shape checks below share one run, started by the first to ask.
@@ -3199,44 +3251,7 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
   },
   {
     name: 'Copying files to lib folder',
-    apply: async () => {
-      const files = await glob(packagePath + '/src/**/*.{json,d.ts,css,scss}');
-      let cjsPublished = false;
-      try {
-        cjsPublished = packagePublishesCjs(
-          JSON.parse(
-            fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
-          ),
-        );
-      } catch {}
-      return Promise.all(
-        files.map(async (file) => {
-          try {
-            await fs.copy(
-              file,
-              packagePath +
-                '/lib/esm/' +
-                file.replace(packagePath + '/src/', ''),
-            );
-            // Only mirror into lib/cjs when there is a CJS build to mirror.
-            if (cjsPublished) {
-              await fs.copy(
-                file,
-                packagePath +
-                  '/lib/cjs/' +
-                  file.replace(packagePath + '/src/', ''),
-              );
-            }
-            return true;
-          } catch (err) {
-            console.warn(err);
-            return false;
-          }
-        }),
-      ).then((allResults) => {
-        return allResults.every((r) => r === true);
-      });
-    },
+    apply: () => copyRuntimeAssets(packagePath),
   },
   {
     name: 'Dual package support',
@@ -4023,6 +4038,11 @@ export const removeOldFiles = async (packagePath) => {
       const stats = await fs.stat(file);
       const currentTime = new Date().getTime();
       const lastModifiedTime = stats.mtime.getTime();
+
+      // CSS, JSON, and other files copied from src are not compiler output.
+      // Their age must not decide whether the runtime can import them.
+      const source = runtimeSourceForLibFile(packagePath, file);
+      if (source && (await fs.pathExists(source))) continue;
 
       // Check if the difference between the current time and last modified time is greater than 120 seconds
       if (currentTime - lastModifiedTime > 120000) {
