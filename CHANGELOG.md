@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.33.1
+
+### Patch Changes
+
+- [#186](https://github.com/linked-fw/cli/pull/186) [`b0357c1`](https://github.com/linked-fw/cli/commit/b0357c14f4db5eabf55899e4503dde8f413616f8) Thanks [@flyon](https://github.com/flyon)! - `import('@_linked/cli')` works in Node again. The root entry re-exported its modules with extensionless specifiers (`./tailwind.config`, `./utils`, …), which Node's ESM resolver does not complete, so importing the package failed with `ERR_MODULE_NOT_FOUND`. The source now names the `.js` files, and a unit test rejects extensionless relative imports anywhere in `src`.
+
 ## 1.33.0
 
 ### Minor Changes
