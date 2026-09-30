@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.35.0
+
+### Minor Changes
+
+- [#192](https://github.com/linked-fw/cli/pull/192) [`c7ff707`](https://github.com/linked-fw/cli/commit/c7ff707ff60567e87fd3310fc55512ac514a84f2) Thanks [@flyon](https://github.com/flyon)! - The dev resolver (`linked:resolve-workspace-ts`, also used by apps' Vitest) no longer needs a `development` -> `src` export condition to load a source workspace from `src`. When a subpath's name matches no file under `src` — a renamed export such as `@_linked/translation/key-sync/node` (`src/key-sync-node.ts`) or a directory export such as `@_linked/documents/conformance` — it reads the workspace's own `exports` (`import`/`default`), maps the `lib/esm/...` target back to `src` (probing `.tsx`/`.ts`) and uses it only if that source file exists. Specifiers the name-based lookup already resolved are unchanged.
+
+### Patch Changes
+
+- [#192](https://github.com/linked-fw/cli/pull/192) [`8088b59`](https://github.com/linked-fw/cli/commit/8088b59c3744bfc0f0dcabe0751e401b894501b5) Thanks [@flyon](https://github.com/flyon)! - `create-package` now scaffolds an ESM-only, lib-only package: `"type": "module"`, `main` and every `exports` entry point at `lib/esm`, no `require` condition, no CJS build, no `tsconfig-cjs.json` and no `tsconfig-to-dual-package`. A CJS build of a package that imports `@_linked/core` could never load, because core is ESM-only.
+
 ## 1.34.0
 
 ### Minor Changes
