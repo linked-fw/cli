@@ -19,7 +19,10 @@ import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
 import {isFrameworkPkg, readInstalledPkg} from './installed-packages.js';
-import {linkedClientDepIncludesPlugin} from './client-dep-includes.js';
+import {
+  linkedClientDepIncludesPlugin,
+  resolveExportsSubpath,
+} from './client-dep-includes.js';
 import type {Plugin, UserConfig} from 'vite';
 
 /** Default dev server port, and Vite's default HMR websocket port. */
@@ -244,7 +247,7 @@ export interface LinkedViteConfigOptions {
   clientDepIncludes?: boolean | {deny?: (string | RegExp)[]};
 }
 
-interface WorkspaceEntry {
+export interface WorkspaceEntry {
   name: string;
   srcDir: string;
 }
@@ -497,14 +500,69 @@ export async function discoverWorkspaces(
   return out;
 }
 
+const isFile = async (p: string): Promise<boolean> =>
+  fsExtra
+    .stat(p)
+    .then((st) => st.isFile())
+    .catch(() => false);
+
+/**
+ * Map a `lib/esm` file back to its source under `srcDir`: `.js`/`.jsx` probe
+ * `.tsx` then `.ts`, anything else (css, json, ...) is taken literally.
+ */
+async function libTargetToSource(
+  srcDir: string,
+  rel: string,
+): Promise<string | null> {
+  if (/\.jsx?$/.test(rel)) {
+    const base = path.join(srcDir, rel.replace(/\.jsx?$/, ''));
+    for (const ext of ['.tsx', '.ts']) {
+      if (await isFile(base + ext)) return base + ext;
+    }
+    return null;
+  }
+  const literal = path.join(srcDir, rel);
+  return (await isFile(literal)) ? literal : null;
+}
+
+/**
+ * The name-based lookup's fallback: resolve `subpath` (`.` or `./x/y`) through
+ * the workspace's own `exports` under `import`/`default`, and map a
+ * `./lib/esm/...` target to the same path under src. This is what reaches
+ * source for a subpath whose export key does not match a file name
+ * (`@_linked/translation/key-sync/node` -> `lib/esm/key-sync-node.js` ->
+ * `src/key-sync-node.ts`), a directory subpath (`./conformance` ->
+ * `lib/esm/conformance/index.js`), or a bare name whose src has no index.
+ * Without it such a specifier falls through to Vite, which picks the package's
+ * `lib/esm` copy while the rest of the package comes from src: two instances of
+ * every module-level registry. It must not depend on a `development` -> src
+ * condition, because src/ is not published and packages do not declare one.
+ */
+async function resolveViaWorkspaceExports(
+  ws: WorkspaceEntry,
+  subpath: string,
+): Promise<string | null> {
+  let json: any;
+  try {
+    json = await fsExtra.readJson(path.join(path.dirname(ws.srcDir), 'package.json'));
+  } catch {
+    return null;
+  }
+  const target = resolveExportsSubpath(json, subpath, ['import', 'default']);
+  if (!target || !target.startsWith('./lib/esm/')) return null;
+  return libTargetToSource(ws.srcDir, target.slice('./lib/esm/'.length));
+}
+
 /**
  * Resolve a bare specifier like `@_linked/foo/bar`, `lincd-rdfs/Foo`, or
- * `pkg/utils/Bar.js` against the workspace lookup. Tries extensions in
- * order: .ts, .tsx, then the literal id (for files that already include
- * an extension or for non-TS assets). Returns null when the specifier
- * doesn't match any workspace package or no candidate exists on disk.
+ * `pkg/utils/Bar.js` against the workspace lookup. Tries the file name first:
+ * .tsx, .ts, then the literal file (for files that already include an
+ * extension or for non-TS assets). When the name matches no file, falls back to
+ * the workspace's `exports` map (see `resolveViaWorkspaceExports`). Returns null
+ * when the specifier doesn't match any workspace package or no candidate exists
+ * on disk.
  */
-async function resolveWorkspaceSpecifier(
+export async function resolveWorkspaceSpecifier(
   specifier: string,
   workspaces: WorkspaceEntry[],
 ): Promise<string | null> {
@@ -514,7 +572,7 @@ async function resolveWorkspaceSpecifier(
         const p = path.join(ws.srcDir, ext);
         if (await fsExtra.pathExists(p)) return p;
       }
-      return null;
+      return resolveViaWorkspaceExports(ws, '.');
     }
     if (specifier.startsWith(ws.name + '/')) {
       const subpath = specifier.slice(ws.name.length + 1);
@@ -526,10 +584,11 @@ async function resolveWorkspaceSpecifier(
         if (await fsExtra.pathExists(p)) return p;
       }
       // Files that already include an extension Vite handles (.css, .json,
-      // .svg, etc.) — return the literal path under src.
+      // .svg, etc.) — return the literal path under src. A FILE only: a
+      // directory of the same name is a directory subpath, left to `exports`.
       const literal = path.join(ws.srcDir, subpath);
-      if (await fsExtra.pathExists(literal)) return literal;
-      return null;
+      if (await isFile(literal)) return literal;
+      return resolveViaWorkspaceExports(ws, './' + subpath);
     }
   }
   return null;
