@@ -11,6 +11,9 @@
 //   - the tsconfig compiles the whole src folder, not just the entry graph, so a module
 //     nothing imports still emits;
 //   - but tests under src do NOT emit;
+//   - the tsconfigs carry the fleet-standard emit-neutral shape (rootDir pinned in
+//     the base, no downlevelIteration, no moduleResolution node10), and the emit is
+//     therefore not nested under an extra src/ level;
 //   - no `${...}` template placeholder survives substitution;
 //   - the package RESOLVES, under both node10 and bundler — the guard against
 //     "fixing" a types field by looking for a file on disk instead of resolving it
@@ -135,6 +138,62 @@ describeFull('create-package (full)', () => {
 
   test('a *.test.ts under src does not emit', () => {
     expect(fs.existsSync(path.join(pkg, 'lib', 'esm', 'orphan.test.js'))).toBe(false);
+  });
+
+  // The emit-neutral tsconfig shape, shared across the whole @_linked fleet. Asserted
+  // here so the template cannot drift back:
+  //
+  //   - `rootDir: "./src"` in the BASE config, so both derived configs inherit it.
+  //     Without it TypeScript infers the root and TS7 emits to lib/esm/src/index.js,
+  //     which breaks every path in `exports`. TS7 refuses to infer at all (TS5011).
+  //   - no `downlevelIteration` anywhere. It is removed in TS7 (TS5102) and is already
+  //     a no-op: every target here is >= es2015.
+  //   - no `moduleResolution: "node"`/"node10" — removed in TS7 (TS5108).
+  //   - both derived configs `extends` the base, so there is one place to change.
+  test('the tsconfigs have the fleet-standard emit-neutral shape', () => {
+    const read = (name: string) =>
+      ts.parseConfigFileTextToJson(name, fs.readFileSync(path.join(pkg, name), 'utf8'))
+        .config as any;
+
+    const base = read('tsconfig.json');
+    const esm = read('tsconfig-esm.json');
+    const cjs = read('tsconfig-cjs.json');
+
+    expect(base.compilerOptions.rootDir).toBe('./src');
+
+    for (const [name, config] of [
+      ['tsconfig.json', base],
+      ['tsconfig-esm.json', esm],
+      ['tsconfig-cjs.json', cjs],
+    ] as const) {
+      expect([name, config.compilerOptions.downlevelIteration]).toEqual([
+        name,
+        undefined,
+      ]);
+      expect([name, config.compilerOptions.moduleResolution]).not.toEqual([name, 'node']);
+      expect([name, config.compilerOptions.moduleResolution]).not.toEqual([
+        name,
+        'node10',
+      ]);
+      // rootDir is inherited, never restated or overridden in a derived config.
+      if (name !== 'tsconfig.json') {
+        expect([name, config.extends]).toEqual([name, './tsconfig.json']);
+        expect([name, config.compilerOptions.rootDir]).toEqual([name, undefined]);
+      }
+    }
+
+    // The emit targets are what the `exports` map and `typesVersions` point at.
+    expect([esm.compilerOptions.outDir, cjs.compilerOptions.outDir]).toEqual([
+      'lib/esm',
+      'lib/cjs',
+    ]);
+  });
+
+  // The direct consequence of rootDir: the entry lands at lib/esm/index.js, NOT at
+  // lib/esm/src/index.js. This is what actually breaks when rootDir is absent.
+  test('the emit is not nested under an extra src/ level', () => {
+    expect(fs.existsSync(path.join(pkg, 'lib', 'esm', 'src'))).toBe(false);
+    expect(fs.existsSync(path.join(pkg, 'lib', 'cjs', 'src'))).toBe(false);
   });
 
   test('a new package is gitignored from minute one', () => {
