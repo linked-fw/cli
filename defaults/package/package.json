@@ -12,18 +12,17 @@
   },
   "version": "1.0.0",
   "linkedPackage": true,
-  "main": "lib/cjs/index.js",
+  "type": "module",
+  "main": "lib/esm/index.js",
   "module": "lib/esm/index.js",
   "//types": "Correct as written, do not 'fix' it: typesVersions below is applied to the types field too, so \"index.d.ts\" resolves to lib/esm/index.d.ts. Writing that literal path applies the mapping twice (lib/esm/lib/esm/index.d.ts) and breaks node10 resolution. Verify with ts.resolveModuleName under node10 AND bundler, not by looking for the file on disk.",
   "types": "index.d.ts",
   "license": "ISC",
   "scripts": {
     "start": "linked dev",
-    "build": "rimraf ./lib && npm run build-esm && npm run build-cjs && npm run copy-to-lib && npm run dual-package",
+    "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib",
     "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && tsc -p tsconfig-esm.json",
-    "build-cjs": "echo \"compiling CJS\" && rimraf ./lib/cjs && tsc -p tsconfig-cjs.json",
-    "copy-to-lib": "echo 'copying CSS + JSON assets to lib folder' && copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/esm && copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/cjs",
-    "dual-package": "echo 'adding package.json to each lib folder for dual output support' && tsconfig-to-dual-package ./tsconfig-cjs.json ./tsconfig-esm.json"
+    "copy-to-lib": "echo 'copying CSS + JSON assets to lib folder' && copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/esm"
   },
   "keywords": [
     "linked",
@@ -34,18 +33,15 @@
   "exports": {
     ".": {
       "types": "./lib/esm/index.d.ts",
-      "import": "./lib/esm/index.js",
-      "require": "./lib/cjs/index.js"
+      "import": "./lib/esm/index.js"
     },
     "./*.js": {
       "types": "./lib/esm/*.d.ts",
-      "import": "./lib/esm/*.js",
-      "require": "./lib/cjs/*.js"
+      "import": "./lib/esm/*.js"
     },
     "./*": {
       "types": "./lib/esm/*.d.ts",
-      "import": "./lib/esm/*.js",
-      "require": "./lib/cjs/*.js"
+      "import": "./lib/esm/*.js"
     }
   },
   "typesVersions": {
@@ -63,7 +59,6 @@
     "@_linked/cli": "^1.2",
     "copyfiles": "^2.4.1",
     "rimraf": "^5.0.7",
-    "tsconfig-to-dual-package": "^1.2.0",
     "typescript": "^5.7.3"
   }
 }

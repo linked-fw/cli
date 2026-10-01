@@ -1,5 +1,82 @@
 # Changelog
 
+## 1.35.0
+
+### Minor Changes
+
+- [#192](https://github.com/linked-fw/cli/pull/192) [`c7ff707`](https://github.com/linked-fw/cli/commit/c7ff707ff60567e87fd3310fc55512ac514a84f2) Thanks [@flyon](https://github.com/flyon)! - The dev resolver (`linked:resolve-workspace-ts`, also used by apps' Vitest) no longer needs a `development` -> `src` export condition to load a source workspace from `src`. When a subpath's name matches no file under `src` — a renamed export such as `@_linked/translation/key-sync/node` (`src/key-sync-node.ts`) or a directory export such as `@_linked/documents/conformance` — it reads the workspace's own `exports` (`import`/`default`), maps the `lib/esm/...` target back to `src` (probing `.tsx`/`.ts`) and uses it only if that source file exists. Specifiers the name-based lookup already resolved are unchanged.
+
+### Patch Changes
+
+- [#192](https://github.com/linked-fw/cli/pull/192) [`8088b59`](https://github.com/linked-fw/cli/commit/8088b59c3744bfc0f0dcabe0751e401b894501b5) Thanks [@flyon](https://github.com/flyon)! - `create-package` now scaffolds an ESM-only, lib-only package: `"type": "module"`, `main` and every `exports` entry point at `lib/esm`, no `require` condition, no CJS build, no `tsconfig-cjs.json` and no `tsconfig-to-dual-package`. A CJS build of a package that imports `@_linked/core` could never load, because core is ESM-only.
+
+## 1.34.0
+
+### Minor Changes
+
+- [#190](https://github.com/linked-fw/cli/pull/190) [`1ad56c2`](https://github.com/linked-fw/cli/commit/1ad56c2f1f7dcda5b6d752344c259d771e5f4c14) Thanks [@flyon](https://github.com/flyon)! - Scaffold new packages with the fleet-standard, emit-neutral tsconfig shape.
+
+  `defaults/package/tsconfig.json` now pins `rootDir: "./src"` and drops the no-op
+  `downlevelIteration`, and `tsconfig-esm.json` uses `moduleResolution: "bundler"`
+  instead of `"node"`. All three options are removed or no longer inferred in
+  TypeScript 7 (TS5011, TS5102, TS5108), so a package scaffolded today was born
+  needing the same fix that has just been applied across every `@_linked/*` repo.
+
+  The change is emit-neutral: without `rootDir` TypeScript infers it, and the
+  inferred value is already `./src`; `downlevelIteration` is a no-op at every
+  target used here (>= es2015).
+
+  `RUN_TEMPLATE_FULL=1` now asserts the shape — `rootDir` pinned in the base only,
+  no `downlevelIteration` or `moduleResolution: node` in any of the three configs,
+  both derived configs extending the base, and no extra `src/` level in the emit —
+  so the template cannot drift back.
+
+## 1.33.2
+
+### Patch Changes
+
+- [#188](https://github.com/linked-fw/cli/pull/188) [`b160ea2`](https://github.com/linked-fw/cli/commit/b160ea2f1571bfba6708fc653dbc96d53503c235) Thanks [@flyon](https://github.com/flyon)! - Server-rendered components from packages now get the CSS-module class names the client's stylesheet defines.
+
+  In a production build the client (Vite) named CSS-module classes by a hash of the processed CSS, while the Node CSS loader that `serve-app` uses for packages in `node_modules` (e.g. every `@_linked/primitives` component) hashed the class with the file's absolute URL. The two never agreed, so every element the server rendered from a package carried a class no stylesheet defined — for example the loading spinner and `Typography` were unstyled on first load, and stayed unstyled after hydration because React does not patch class names.
+
+  Both now use one `generateScopedNameProduction`: `_<class>_<hash>`, hashing the owning package's name, the file's path inside it (without `src/`, `lib/esm/` or `lib/cjs/`) and the class, so the name does not depend on the install location or build flavour. The Node loader also finds every class a stylesheet defines (it used to miss a class directly followed by `{`, `.`, `,` or `>`, and truncated hyphenated ones), and uses the development names only when `NODE_ENV` is `development`, matching `startServer`.
+
+## 1.33.1
+
+### Patch Changes
+
+- [#186](https://github.com/linked-fw/cli/pull/186) [`b0357c1`](https://github.com/linked-fw/cli/commit/b0357c14f4db5eabf55899e4503dde8f413616f8) Thanks [@flyon](https://github.com/flyon)! - `import('@_linked/cli')` works in Node again. The root entry re-exported its modules with extensionless specifiers (`./tailwind.config`, `./utils`, …), which Node's ESM resolver does not complete, so importing the package failed with `ERR_MODULE_NOT_FOUND`. The source now names the `.js` files, and a unit test rejects extensionless relative imports anywhere in `src`.
+
+## 1.33.0
+
+### Minor Changes
+
+- [#184](https://github.com/linked-fw/cli/pull/184) [`259c812`](https://github.com/linked-fw/cli/commit/259c812966942a029a113a9f3dfcfd6c628696db) Thanks [@flyon](https://github.com/flyon)! - Dev server: the HMR port and the optimizer's include list now configure themselves, and
+  `linked doctor` checks what they cannot fix.
+
+  - **The HMR port is chosen automatically.** The port derived from the dev port
+    (`24678 + (PORT - 4040)`) is still the default, but when another process already holds it —
+    a second checkout of the same app, or an unrelated dev server — `createViteConfig` now takes the
+    next free port and logs it, instead of leaving the second app without HMR. Vite serves the
+    configured port to the browser, so the client follows. `LINKED_HMR_PORT` sets the port
+    explicitly and replaces app-specific overrides.
+  - **`optimizeDeps.include` is generated for linked packages' client dependencies.** Linked
+    packages are excluded from Vite's optimizer so the browser loads one copy of each, which also
+    means Vite never crawls their imports: a CommonJS dependency then fails in the browser, and any
+    other one triggers a re-optimise and reload mid-session. Apps listed those dependencies by hand,
+    including npm-nested ones (`'@_linked/primitives > vaul'`). In dev they are now read from the
+    excluded packages' import graph: files importing Node builtins or server-only packages (and
+    files importing those) are server code and are skipped, and a dependency the app root resolves
+    to a different copy gets the nested form. The entries are added to the app's own list, never
+    replace it; `clientDepIncludes: {deny}` / `false`, or `LINKED_CLIENT_DEP_INCLUDES=0`, opt out,
+    and `DEBUG=linked` prints what was added. Results for installed packages are cached in
+    `node_modules/.cache/linked/`.
+  - **`linked doctor`** loads the app's dev config and warns about `optimizeDeps.include` entries
+    that do not resolve (naming the nested form when that is the problem), and about linked
+    packages whose dependencies' React peer range excludes the app's React — the reason npm nests
+    them — with the dependency to bump. It also lists hand-written entries that are now generated.
+    Exits 1 on a warning.
+
 ## 1.32.0
 
 ### Minor Changes

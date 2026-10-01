@@ -11,6 +11,11 @@
 //   - the tsconfig compiles the whole src folder, not just the entry graph, so a module
 //     nothing imports still emits;
 //   - but tests under src do NOT emit;
+//   - the tsconfigs carry the fleet-standard emit-neutral shape (rootDir pinned in
+//     the base, no downlevelIteration, no moduleResolution node10), and the emit is
+//     therefore not nested under an extra src/ level;
+//   - it is ESM-only (no tsconfig-cjs.json, no lib/cjs, no `require` export) and its
+//     entry and a subpath import under node by name;
 //   - no `${...}` template placeholder survives substitution;
 //   - the package RESOLVES, under both node10 and bundler — the guard against
 //     "fixing" a types field by looking for a file on disk instead of resolving it
@@ -135,6 +140,84 @@ describeFull('create-package (full)', () => {
 
   test('a *.test.ts under src does not emit', () => {
     expect(fs.existsSync(path.join(pkg, 'lib', 'esm', 'orphan.test.js'))).toBe(false);
+  });
+
+  // The emit-neutral tsconfig shape, shared across the whole @_linked fleet. Asserted
+  // here so the template cannot drift back:
+  //
+  //   - `rootDir: "./src"` in the BASE config, so both derived configs inherit it.
+  //     Without it TypeScript infers the root and TS7 emits to lib/esm/src/index.js,
+  //     which breaks every path in `exports`. TS7 refuses to infer at all (TS5011).
+  //   - no `downlevelIteration` anywhere. It is removed in TS7 (TS5102) and is already
+  //     a no-op: every target here is >= es2015.
+  //   - no `moduleResolution: "node"`/"node10" — removed in TS7 (TS5108).
+  //   - both derived configs `extends` the base, so there is one place to change.
+  test('the tsconfigs have the fleet-standard emit-neutral shape', () => {
+    const read = (name: string) =>
+      ts.parseConfigFileTextToJson(name, fs.readFileSync(path.join(pkg, name), 'utf8'))
+        .config as any;
+
+    const base = read('tsconfig.json');
+    const esm = read('tsconfig-esm.json');
+
+    expect(base.compilerOptions.rootDir).toBe('./src');
+
+    for (const [name, config] of [
+      ['tsconfig.json', base],
+      ['tsconfig-esm.json', esm],
+    ] as const) {
+      expect([name, config.compilerOptions.downlevelIteration]).toEqual([
+        name,
+        undefined,
+      ]);
+      expect([name, config.compilerOptions.moduleResolution]).not.toEqual([name, 'node']);
+      expect([name, config.compilerOptions.moduleResolution]).not.toEqual([
+        name,
+        'node10',
+      ]);
+      // rootDir is inherited, never restated or overridden in a derived config.
+      if (name !== 'tsconfig.json') {
+        expect([name, config.extends]).toEqual([name, './tsconfig.json']);
+        expect([name, config.compilerOptions.rootDir]).toEqual([name, undefined]);
+      }
+    }
+
+    // The emit target is what the `exports` map and `typesVersions` point at.
+    expect(esm.compilerOptions.outDir).toBe('lib/esm');
+  });
+
+  // The direct consequence of rootDir: the entry lands at lib/esm/index.js, NOT at
+  // lib/esm/src/index.js. This is what actually breaks when rootDir is absent.
+  test('the emit is not nested under an extra src/ level', () => {
+    expect(fs.existsSync(path.join(pkg, 'lib', 'esm', 'src'))).toBe(false);
+  });
+
+  // ESM-only: a CJS build of anything importing @_linked/core cannot load (core is
+  // ESM-only, so `require` of it fails with ERR_PACKAGE_PATH_NOT_EXPORTED). The
+  // scaffold must not produce one, nor carry the config that would.
+  test('the package is ESM-only: no CJS config, build or export', () => {
+    expect(fs.existsSync(path.join(pkg, 'tsconfig-cjs.json'))).toBe(false);
+    expect(fs.existsSync(path.join(pkg, 'lib', 'cjs'))).toBe(false);
+    const manifest = JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8'));
+    expect(manifest.type).toBe('module');
+    expect(manifest.main).toBe('lib/esm/index.js');
+    expect(JSON.stringify(manifest.exports)).not.toContain('require');
+    expect(JSON.stringify(manifest.exports)).not.toContain('development');
+    expect(manifest.devDependencies['tsconfig-to-dual-package']).toBeUndefined();
+  });
+
+  // The published entry and a subpath load under Node's own ESM resolver, through the
+  // exports map (a symlink into node_modules, so the package resolves by name).
+  test('the built package imports under node by name and by subpath', () => {
+    const consumer = path.join(tmp, 'node-consumer');
+    fs.mkdirSync(path.join(consumer, 'node_modules'), {recursive: true});
+    const link = path.join(consumer, 'node_modules', PKG);
+    if (!fs.existsSync(link)) fs.symlinkSync(pkg, link, 'dir');
+    const out = run(
+      `node --input-type=module -e "const a = await import('${PKG}'); const b = await import('${PKG}/package'); console.log(typeof a, b.packageName)"`,
+      consumer,
+    );
+    expect(out.trim()).toBe(`object ${PKG}`);
   });
 
   test('a new package is gitignored from minute one', () => {

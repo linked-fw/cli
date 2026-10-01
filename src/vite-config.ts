@@ -8,29 +8,22 @@
 // The helper preserves the dev-mode `generateScopedName` (readable
 // `_packageName_filename_className`) so CSS module class names match
 // what the previous bundler chain produced for trace/debug. Production
-// uses Vite's default scoping (content-hash, equivalent uniqueness).
+// uses `generateScopedNameProduction`, which the Node CSS loader shares so the
+// server renders the class names the client's stylesheet defines.
 import {defineConfig} from 'vite';
 import react from '@vitejs/plugin-react';
 import fsExtra from 'fs-extra';
 import path from 'node:path';
 import {generateScopedName} from './utils.js';
+import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
+import {isFrameworkPkg, readInstalledPkg} from './installed-packages.js';
+import {
+  linkedClientDepIncludesPlugin,
+  resolveExportsSubpath,
+} from './client-dep-includes.js';
 import type {Plugin, UserConfig} from 'vite';
-
-/**
- * Framework packages that MUST be single-instance per runtime — they hold
- * module-level state (`@_linked/core`'s shape registry, `LinkedStorage`, the query
- * context) or register shapes into it. Two copies in one runtime split that state
- * and mangle shape identity (`Person`→`Person2`). This ONE list is the single source
- * of truth for the standalone `optimizeDeps.exclude` (`linkedDeps`). In workspace mode
- * `ssr.noExternal` is keyed on the discovered source workspaces instead (see
- * `ssrNoExternal`), so published framework packages stay external and single-instance
- * under Node.
- */
-const FRAMEWORK_PKG_PATTERNS: RegExp[] = [/^@_linked\//, /^lincd-/];
-const isFrameworkPkg = (name: string): boolean =>
-  FRAMEWORK_PKG_PATTERNS.some((re) => re.test(name));
 
 /** Default dev server port, and Vite's default HMR websocket port. */
 const DEFAULT_DEV_PORT = 4040;
@@ -135,6 +128,82 @@ export function hmrPortFor(devPort: unknown): number {
   return Math.min(MAX_HMR_PORT, Math.max(MIN_HMR_PORT, derived));
 }
 
+/** How far past the derived port `resolveHmrPort` looks for a free one. */
+const HMR_PORT_SEARCH_RANGE = 100;
+
+/**
+ * Whether `port` can be listened on the way Vite's HMR websocket server
+ * listens: every interface, since `createViteConfig` sets no `hmr.host`.
+ */
+export function isPortFree(port: number, host?: string): Promise<boolean> {
+  return import('node:net').then(
+    (net) =>
+      new Promise<boolean>((resolve) => {
+        const probe = net.createServer();
+        probe.unref();
+        probe.once('error', () => resolve(false));
+        probe.listen({port, host, exclusive: true}, () => probe.close(() => resolve(true)));
+      }),
+  );
+}
+
+/**
+ * Ports this process already chose, by derived port. Vite re-evaluates the
+ * config when it restarts the server (a vite.config edit), and it does so while
+ * the old server still holds the port — probing again would see our own socket
+ * and move to the next port on every restart.
+ */
+const chosenHmrPorts: Map<number, number> = ((globalThis as any)[Symbol.for('@_linked/cli.hmrPorts')] ??=
+  new Map<number, number>());
+
+export interface ResolveHmrPortOptions {
+  /** The dev port the HMR port is derived from (`process.env.PORT ?? opts.port`). */
+  devPort: unknown;
+  env?: NodeJS.ProcessEnv;
+  isFree?: (port: number) => Promise<boolean>;
+  log?: (message: string) => void;
+}
+
+/**
+ * The HMR websocket port for this dev server.
+ *
+ * `LINKED_HMR_PORT` wins outright. Otherwise the port derived from the dev port
+ * (`hmrPortFor`) is used if it is free, and the next free port above it if it
+ * is not: the derivation keeps apps on distinct dev ports apart, but not an app
+ * from an unrelated process (or a second checkout of the same app) that already
+ * holds the derived port. Vite injects the configured `hmr.port` into the
+ * client it serves, so the browser connects to whichever port was chosen.
+ *
+ * If nothing in range is free the derived port is returned and Vite reports the
+ * conflict, as it did before.
+ */
+export async function resolveHmrPort({
+  devPort,
+  env = process.env,
+  isFree = isPortFree,
+  log = (m) => console.log(m),
+}: ResolveHmrPortOptions): Promise<number> {
+  const override = env.LINKED_HMR_PORT;
+  if (override !== undefined && override.trim() !== '') {
+    const port = Number(override);
+    if (Number.isInteger(port) && port >= 1 && port <= MAX_HMR_PORT) return port;
+    log(`[linked] ignoring LINKED_HMR_PORT=${override}: not a port number`);
+  }
+  const derived = hmrPortFor(devPort);
+  const remembered = chosenHmrPorts.get(derived);
+  if (remembered !== undefined) return remembered;
+  for (let port = derived; port <= Math.min(MAX_HMR_PORT, derived + HMR_PORT_SEARCH_RANGE); port++) {
+    if (await isFree(port)) {
+      chosenHmrPorts.set(derived, port);
+      if (port !== derived) {
+        log(`[linked] HMR port ${derived} is in use; using ${port} (set LINKED_HMR_PORT to choose one)`);
+      }
+      return port;
+    }
+  }
+  return derived;
+}
+
 export interface LinkedViteConfigOptions {
   /** Dev server port. Default 4040. */
   port?: number;
@@ -167,49 +236,20 @@ export interface LinkedViteConfigOptions {
    * exactly like the app's own `workspaces` field.
    */
   workspaceGlobs?: string[];
+  /**
+   * Add the third-party client dependencies of the excluded framework packages
+   * to `optimizeDeps.include` in dev (see ./client-dep-includes.ts). Default on;
+   * `false` (or `LINKED_CLIENT_DEP_INCLUDES=0`) turns it off, and `deny` keeps
+   * entries out — matched against the entry (`'@_linked/primitives > vaul'`),
+   * the specifier (`'vaul'`) or the package name. Run with `DEBUG=linked` to see
+   * what was added.
+   */
+  clientDepIncludes?: boolean | {deny?: (string | RegExp)[]};
 }
 
-interface WorkspaceEntry {
+export interface WorkspaceEntry {
   name: string;
   srcDir: string;
-}
-
-// Resolve a dependency name to its installed package.json the way Node does:
-// look in `<dir>/node_modules/<name>`, then each parent directory's
-// node_modules, starting from the requiring package's directory. This finds
-// deps that npm/yarn workspaces HOISTED to the monorepo root (an app under
-// `services/api` whose dep lives in `<root>/node_modules`). The walk stops
-// after the nearest directory whose package.json declares `workspaces` (the
-// workspace root), or at the filesystem root. Returns null when the package
-// isn't installed (e.g. an optional dep) — we skip rather than throw.
-async function isWorkspaceRoot(dir: string): Promise<boolean> {
-  try {
-    const json = await fsExtra.readJson(path.join(dir, 'package.json'));
-    return !!json.workspaces;
-  } catch {
-    return false;
-  }
-}
-
-async function readInstalledPkg(
-  name: string,
-  fromDir: string,
-): Promise<{root: string; json: any} | null> {
-  let dir = path.resolve(fromDir);
-  while (true) {
-    const root = path.join(dir, 'node_modules', name);
-    const pkgJson = path.join(root, 'package.json');
-    if (await fsExtra.pathExists(pkgJson)) {
-      try {
-        return {root, json: await fsExtra.readJson(pkgJson)};
-      } catch {
-        return null;
-      }
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir || (await isWorkspaceRoot(dir))) return null;
-    dir = parent;
-  }
 }
 
 /**
@@ -460,14 +500,69 @@ export async function discoverWorkspaces(
   return out;
 }
 
+const isFile = async (p: string): Promise<boolean> =>
+  fsExtra
+    .stat(p)
+    .then((st) => st.isFile())
+    .catch(() => false);
+
+/**
+ * Map a `lib/esm` file back to its source under `srcDir`: `.js`/`.jsx` probe
+ * `.tsx` then `.ts`, anything else (css, json, ...) is taken literally.
+ */
+async function libTargetToSource(
+  srcDir: string,
+  rel: string,
+): Promise<string | null> {
+  if (/\.jsx?$/.test(rel)) {
+    const base = path.join(srcDir, rel.replace(/\.jsx?$/, ''));
+    for (const ext of ['.tsx', '.ts']) {
+      if (await isFile(base + ext)) return base + ext;
+    }
+    return null;
+  }
+  const literal = path.join(srcDir, rel);
+  return (await isFile(literal)) ? literal : null;
+}
+
+/**
+ * The name-based lookup's fallback: resolve `subpath` (`.` or `./x/y`) through
+ * the workspace's own `exports` under `import`/`default`, and map a
+ * `./lib/esm/...` target to the same path under src. This is what reaches
+ * source for a subpath whose export key does not match a file name
+ * (`@_linked/translation/key-sync/node` -> `lib/esm/key-sync-node.js` ->
+ * `src/key-sync-node.ts`), a directory subpath (`./conformance` ->
+ * `lib/esm/conformance/index.js`), or a bare name whose src has no index.
+ * Without it such a specifier falls through to Vite, which picks the package's
+ * `lib/esm` copy while the rest of the package comes from src: two instances of
+ * every module-level registry. It must not depend on a `development` -> src
+ * condition, because src/ is not published and packages do not declare one.
+ */
+async function resolveViaWorkspaceExports(
+  ws: WorkspaceEntry,
+  subpath: string,
+): Promise<string | null> {
+  let json: any;
+  try {
+    json = await fsExtra.readJson(path.join(path.dirname(ws.srcDir), 'package.json'));
+  } catch {
+    return null;
+  }
+  const target = resolveExportsSubpath(json, subpath, ['import', 'default']);
+  if (!target || !target.startsWith('./lib/esm/')) return null;
+  return libTargetToSource(ws.srcDir, target.slice('./lib/esm/'.length));
+}
+
 /**
  * Resolve a bare specifier like `@_linked/foo/bar`, `lincd-rdfs/Foo`, or
- * `pkg/utils/Bar.js` against the workspace lookup. Tries extensions in
- * order: .ts, .tsx, then the literal id (for files that already include
- * an extension or for non-TS assets). Returns null when the specifier
- * doesn't match any workspace package or no candidate exists on disk.
+ * `pkg/utils/Bar.js` against the workspace lookup. Tries the file name first:
+ * .tsx, .ts, then the literal file (for files that already include an
+ * extension or for non-TS assets). When the name matches no file, falls back to
+ * the workspace's `exports` map (see `resolveViaWorkspaceExports`). Returns null
+ * when the specifier doesn't match any workspace package or no candidate exists
+ * on disk.
  */
-async function resolveWorkspaceSpecifier(
+export async function resolveWorkspaceSpecifier(
   specifier: string,
   workspaces: WorkspaceEntry[],
 ): Promise<string | null> {
@@ -477,7 +572,7 @@ async function resolveWorkspaceSpecifier(
         const p = path.join(ws.srcDir, ext);
         if (await fsExtra.pathExists(p)) return p;
       }
-      return null;
+      return resolveViaWorkspaceExports(ws, '.');
     }
     if (specifier.startsWith(ws.name + '/')) {
       const subpath = specifier.slice(ws.name.length + 1);
@@ -489,10 +584,11 @@ async function resolveWorkspaceSpecifier(
         if (await fsExtra.pathExists(p)) return p;
       }
       // Files that already include an extension Vite handles (.css, .json,
-      // .svg, etc.) — return the literal path under src.
+      // .svg, etc.) — return the literal path under src. A FILE only: a
+      // directory of the same name is a directory subpath, left to `exports`.
       const literal = path.join(ws.srcDir, subpath);
-      if (await fsExtra.pathExists(literal)) return literal;
-      return null;
+      if (await isFile(literal)) return literal;
+      return resolveViaWorkspaceExports(ws, './' + subpath);
     }
   }
   return null;
@@ -591,14 +687,17 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         /* best-effort — no package.json is fine */
       }
     }
+    const devPort = process.env.PORT ?? opts.port;
+    const clientDepIncludes =
+      isDev && opts.clientDepIncludes !== false && process.env.LINKED_CLIENT_DEP_INCLUDES !== '0';
     const config: UserConfig = {
       server: {
         port: opts.port ?? 4040,
         middlewareMode: true,
-        // Unique HMR websocket port per app/worktree (PORT env override wins,
-        // else opts.port) — see `hmrPortFor`. Apps can still override this with
-        // their own `server.hmr` in mergeConfig.
-        hmr: {port: hmrPortFor(process.env.PORT ?? opts.port)},
+        // Unique HMR websocket port per app/worktree, derived from the dev port
+        // and moved to a free one when taken — see `resolveHmrPort`. Apps can
+        // still override this with their own `server.hmr` in mergeConfig.
+        hmr: {port: isDev ? await resolveHmrPort({devPort}) : hmrPortFor(devPort)},
       },
       build: {
         outDir: opts.outDir ?? 'public/bundles',
@@ -705,11 +804,17 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
               },
             } as Plugin)
           : null,
+        clientDepIncludes
+          ? linkedClientDepIncludesPlugin({
+              sourceWorkspaces: workspaces,
+              deny: typeof opts.clientDepIncludes === 'object' ? opts.clientDepIncludes.deny : undefined,
+            })
+          : null,
         ...(opts.plugins ?? []),
       ].filter(Boolean) as Plugin[],
       css: {
         modules: {
-          generateScopedName: isDev ? generateScopedName : undefined,
+          generateScopedName: isDev ? generateScopedName : generateScopedNameProduction,
         },
         postcss: opts.postcssPlugins
           ? {plugins: opts.postcssPlugins as any}
@@ -904,7 +1009,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // `@_linked/core` (no per-subpath duplication → stable class names → shape URIs
       // match the backend — see `linkedDeps` above). These packages are ESM with no
       // bare CJS runtime deps (e.g. `classnames` is inlined in `@_linked/react`), so
-      // serving them as native ESM needs no `optimizeDeps.include` interop shim.
+      // serving them as native ESM needs no interop shim.
+      // An excluded package is not crawled, so its OWN third-party imports (Radix,
+      // vaul, js-cookie…) are listed in `optimizeDeps.include` by the
+      // `linked:client-dep-includes` plugin above, once the app's excludes are final.
       ...(workspaces.length > 0
         ? {optimizeDeps: {exclude: workspaces.map((w) => w.name)}}
         : isStandalone && linkedDeps.length > 0

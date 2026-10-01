@@ -253,4 +253,26 @@ describe('the package template follows the standard', () => {
     );
     expect(pkg.sideEffects).toBeUndefined();
   });
+
+  // ESM-only, lib-only: a CJS build of anything importing @_linked/core cannot load
+  // (core is ESM-only), and src/ is not published, so neither `require` nor a
+  // `development` -> src condition belongs in the map.
+  test('package.json is ESM-only and points only at lib/esm', () => {
+    const root = path.join(cliRoot, 'defaults', 'package');
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    expect(pkg.type).toBe('module');
+    expect(pkg.main).toBe('lib/esm/index.js');
+    expect(pkg.module).toBe('lib/esm/index.js');
+    expect(pkg.types).toBe('index.d.ts');
+    expect(pkg.typesVersions).toEqual({'*': {'*': ['lib/esm/*']}});
+    expect(pkg.exports).toEqual({
+      '.': {types: './lib/esm/index.d.ts', import: './lib/esm/index.js'},
+      './*.js': {types: './lib/esm/*.d.ts', import: './lib/esm/*.js'},
+      './*': {types: './lib/esm/*.d.ts', import: './lib/esm/*.js'},
+    });
+    expect(Object.keys(pkg.scripts).sort()).toEqual(['build', 'build-esm', 'copy-to-lib', 'start']);
+    expect(JSON.stringify(pkg.scripts)).not.toMatch(/cjs|dual-package/);
+    expect(pkg.devDependencies['tsconfig-to-dual-package']).toBeUndefined();
+    expect(fs.existsSync(path.join(root, 'tsconfig-cjs.json'))).toBe(false);
+  });
 });

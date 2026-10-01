@@ -6,7 +6,6 @@ import * as path from 'path';
 import ts from 'typescript';
 import type {PackageDetails} from './interfaces.js';
 
-import * as crypto from 'crypto';
 import {findNearestPackageJsonSync} from 'find-nearest-package-json';
 import * as glob from 'glob';
 
@@ -531,17 +530,7 @@ export function execPromise(
   });
 }
 
-export function generateScopedNameProduction(cssClassName, filepath, css?) {
-  //for app development we can use short unique hashes
-  //but for bundles of lincd modules, we need to ensure unique class names across bundles of many packages
-  //generate a short unique hash based on cssClassName and filepath
-  let hash = crypto
-    .createHash('md5')
-    .update(cssClassName + filepath)
-    .digest('hex')
-    .substring(0, 6);
-  return hash;
-}
+export {generateScopedNameProduction} from './css-module-names.js';
 export function generateScopedName(cssClassName, filepath, css?) {
   // Strip any Vite-style query suffix (?inline, ?raw, ?direct) before
   // computing the filename. Without this, dev-mode SSR CSS collection
