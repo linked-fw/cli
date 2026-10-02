@@ -357,3 +357,21 @@ Finding B is held for the user.
 **Validation:** localize `npm test` 48/48; CLI rebuilt; a fresh
 `create-package @probe/epsilon --location packages-local` recorded `"branch": "main"`, committed
 `feat: scaffold @probe/epsilon`, and printed no Gruntfile warning.
+
+## Iteration 2 — the pruned checkout (finding B)
+
+**Decision (user, 2026-10-02):** relink runs `npm install` inside a checkout whose dependencies
+are gone. Rejected: moving checkouts out of the app root (build-all discovery, Vite and the how-to
+all assume `packages-local/` under it).
+
+### Phase 6 — done (localize `1d69164`)
+- `relink` checks each recorded checkout's declared `dependencies` + `devDependencies` against
+  its own `node_modules`; any missing → `npm install` in the checkout (never the root), a
+  failure only warns, the hook still exits 0. The rule is now "never runs npm at the root".
+- Validation: localize `npm test` 49/49. In the scratch app, a root `npm install`:
+  `[localize] @probe/alpha: 6 of its dependencies are gone … — npm install in packages-local/probe-alpha`,
+  then `probe-alpha/node_modules` back to 331 entries with `typescript`, all four links in place,
+  and `linked build` in the checkout exits 0.
+- Known cost, documented: npm prunes the checkout again on every root install, so the reinstall
+  repeats each time (~12 s for three checkouts here).
+- Docs: localize README and the CN how-to's postinstall contract.
