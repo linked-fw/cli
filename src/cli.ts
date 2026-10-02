@@ -445,6 +445,10 @@ program
   )
   .option('--list', 'Report what is localized rather than localizing anything.')
   .option(
+    '--adopt',
+    'Link a checkout that is already in packages-local under its localize name (e.g. packages-local/_linked-foo for @_linked/foo): install, build, link and record it, without cloning or asking the registry. For a package created locally, or a clone put there by hand.',
+  )
+  .option(
     '--check',
     'With --list: exit 1 when something recorded is not actually linked.',
   )
@@ -455,7 +459,7 @@ program
   .option('--dir <path>', 'Where checkouts live (default: packages-local).')
   .option(
     '--repo <git-url>',
-    'Clone this instead of the published repository, and record it.',
+    "Clone this instead of the published repository, and record it. With --adopt: record this instead of the checkout's origin.",
   )
   .option(
     '--subdir <path>',

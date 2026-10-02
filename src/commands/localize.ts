@@ -25,6 +25,7 @@ import process from 'node:process';
 export const DEFAULT_BUILD_COMMAND = 'linked build';
 
 export interface LocalizeCommandOptions {
+  adopt?: boolean;
   list?: boolean;
   check?: boolean;
   relink?: boolean;
@@ -45,7 +46,7 @@ export async function runLocalize(
   packages: string[] = [],
   options: LocalizeCommandOptions = {},
 ): Promise<void> {
-  const {defaultDeps, localize, list, relink} =
+  const {defaultDeps, localize, adopt, list, relink} =
     await import('@_linked/localize');
   const deps = defaultDeps(process.cwd());
 
@@ -57,6 +58,17 @@ export async function runLocalize(
     process.exitCode = list({check: options.check}, deps);
     return;
   }
+  // `--build ''` is how you ask for no build at all.
+  const build =
+    options.build === undefined ? DEFAULT_BUILD_COMMAND : options.build;
+  if (options.adopt) {
+    process.exitCode = adopt(
+      packages,
+      {force: options.force, dir: options.dir, repo: options.repo, build},
+      deps,
+    );
+    return;
+  }
   process.exitCode = localize(
     packages,
     {
@@ -64,11 +76,29 @@ export async function runLocalize(
       dir: options.dir,
       repo: options.repo,
       subdir: options.subdir,
-      // `--build ''` is how you ask for no build at all.
-      build:
-        options.build === undefined ? DEFAULT_BUILD_COMMAND : options.build,
+      build,
     },
     deps,
+  );
+}
+
+/**
+ * Adopt one checkout that already sits in `packages-local/` under its localize
+ * name: install inside it, build it, link it and record it. This is how
+ * `create-package` hands a new package with its own repository to localize.
+ *
+ * @returns localize's exit code, rather than setting `process.exitCode`, so the
+ *   caller decides what a failure means.
+ */
+export async function adoptPackage(
+  name: string,
+  options: {appRoot: string; build: string; repo?: string},
+): Promise<number> {
+  const {defaultDeps, adopt} = await import('@_linked/localize');
+  return adopt(
+    [name],
+    {build: options.build, repo: options.repo},
+    defaultDeps(options.appRoot),
   );
 }
 

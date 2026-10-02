@@ -171,4 +171,30 @@ describe('build-all package discovery', () => {
       '@w/unflagged',
     ]);
   });
+
+  it('builds a localized package the app does not declare yet', () => {
+    // A package made with `create-package --location packages-local` is linked
+    // and recorded, but cannot be in `dependencies` until it is published.
+    makeTree();
+    writeJson(path.join(tmp, 'local-packages.json'), {
+      version: 1,
+      packages: {
+        '@local/unrelated': {path: 'packages-local/unrelated', branch: 'main'},
+      },
+    });
+    const plan = planBuildAll(tmp, tmp);
+    expect([...plan.build.keys()]).toContain('@local/unrelated');
+    expect(plan.skipped.map((s) => s.packageName)).not.toContain(
+      '@local/unrelated',
+    );
+  });
+
+  it('treats an unreadable local-packages.json as nothing localized', () => {
+    makeTree();
+    fs.writeFileSync(path.join(tmp, 'local-packages.json'), '{not json');
+    const plan = planBuildAll(tmp, tmp);
+    expect(
+      plan.skipped.find((s) => s.packageName === '@local/unrelated')?.reason,
+    ).toMatch(/dependency tree/);
+  });
 });

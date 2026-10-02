@@ -16,6 +16,10 @@ jest.mock(
       calls.push({fn: 'localize', args});
       return 0;
     },
+    adopt: (...args: any[]) => {
+      calls.push({fn: 'adopt', args});
+      return 0;
+    },
     delocalize: (...args: any[]) => {
       calls.push({fn: 'delocalize', args});
       return 0;
@@ -33,6 +37,7 @@ jest.mock(
 );
 
 import {
+  adoptPackage,
   DEFAULT_BUILD_COMMAND,
   runDelocalize,
   runLocalize,
@@ -112,5 +117,31 @@ describe('linked delocalize', () => {
   it('passes --purge and --force through', async () => {
     await runDelocalize(['@_linked/rdfs'], {purge: true, force: true});
     expect(calls[0].args[1]).toEqual({purge: true, force: true});
+  });
+
+  it('--adopt reaches adopt, with the same build seam and no subdir', async () => {
+    await runLocalize(['@_linked/foo'], {adopt: true, repo: 'https://x/foo.git'});
+    expect(calls.map((c) => c.fn)).toEqual(['adopt']);
+    expect(calls[0].args[0]).toEqual(['@_linked/foo']);
+    expect(calls[0].args[1]).toEqual({
+      force: undefined,
+      dir: undefined,
+      repo: 'https://x/foo.git',
+      build: DEFAULT_BUILD_COMMAND,
+    });
+  });
+
+  it('adoptPackage returns the exit code instead of setting it', async () => {
+    const code = await adoptPackage('@_linked/foo', {
+      appRoot: '/app',
+      build: 'node launch.js build',
+    });
+    expect(code).toBe(0);
+    expect(process.exitCode).toBeUndefined();
+    expect(calls[0].args[1]).toEqual({
+      build: 'node launch.js build',
+      repo: undefined,
+    });
+    expect(calls[0].args[2]).toEqual({appRoot: '/app'});
   });
 });
