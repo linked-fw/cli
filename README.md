@@ -185,11 +185,10 @@ linked setup-publish --scope community      # use NPM_AUTH_TOKEN_CM instead of N
 linked start                      # run the dev server (app)
 linked start --api-only           # run only the backend API (no page rendering, no vite.config needed)
 linked dev                        # file-watch rebuild (package)
-linked yarn <args>                # safe-yarn: run yarn at the workspace root, forwarding all args
 ```
 
 ```bash
-linked doctor                     # check optimizeDeps.include and React peer ranges of linked packages' deps
+linked app-doctor                 # in an app: check optimizeDeps.include and React peer ranges of linked packages' deps
 ```
 
 `createViteConfig()` takes care of two things apps used to configure by hand:

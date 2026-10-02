@@ -1,5 +1,5 @@
 // Locating installed packages the way Node does, shared by the Vite config
-// helper and `linked doctor`.
+// helper and `linked app-doctor`.
 import fsExtra from 'fs-extra';
 import path from 'node:path';
 

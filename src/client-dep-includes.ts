@@ -907,7 +907,7 @@ export interface RecordedClientDepScan {
 
 /**
  * The most recent scan the plugin ran in this process, with the app's own
- * include list — `linked doctor` loads the app's config and reads this, so it
+ * include list — `linked app-doctor` loads the app's config and reads this, so it
  * checks exactly what the dev server would use.
  */
 export const lastClientDepScan: {current: RecordedClientDepScan | null} = ((
@@ -943,7 +943,7 @@ export function linkedClientDepIncludesPlugin(
   opts: ClientDepIncludesPluginOptions = {},
 ): Plugin[] {
   // What the app itself lists, before other plugins add theirs
-  // (@vitejs/plugin-react adds `react`, `react/jsx-runtime`…): `linked doctor`
+  // (@vitejs/plugin-react adds `react`, `react/jsx-runtime`…): `linked app-doctor`
   // must not tell anyone to delete an entry they never wrote.
   let appInclude: string[] = [];
   const snapshot: Plugin = {

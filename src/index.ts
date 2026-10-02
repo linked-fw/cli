@@ -5,7 +5,6 @@ export {defineConfig} from './defineConfig.js';
 export type {LinkedConfig, LinkedServerConfig} from './interfaces.js';
 
 export {buildPackageByPath} from './commands/build-package.js';
-export {safeYarn} from './commands/safe-yarn.js';
 export {setupPublish} from './commands/setup-publish.js';
 export {resolveBuildTarget} from './app-release/resolve-build-target.js';
 export {

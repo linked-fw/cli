@@ -487,25 +487,13 @@ program
   });
 
 program
-  .command('doctor')
+  .command('app-doctor')
   .description(
-    "Check the app's dev dependency setup: optimizeDeps.include entries that do not resolve, and linked packages whose dependencies' React peer range excludes the app's React. Exits 1 on a warning.",
+    "Run in an app. Checks how the app uses linked packages: Vite pre-bundle entries that don't resolve (and the fix), linked packages whose dependencies don't support the app's React version (and which to bump), and hand-written entries that are now generated and can be removed. Exits 1 if anything needs fixing.",
   )
   .action(async () => {
-    const {runDoctor} = await import('./commands/doctor.js');
-    return runDoctor();
-  });
-
-program
-  .command('yarn')
-  .description(
-    'Run yarn at the workspace root. Forwards all extra args to yarn.',
-  )
-  .allowUnknownOption(true)
-  .action(async () => {
-    const yarnArgs = program.args.slice(1); // drop 'yarn' itself
-    const {safeYarn} = await import('./commands/safe-yarn.js');
-    return safeYarn(yarnArgs);
+    const {runAppDoctor} = await import('./commands/app-doctor.js');
+    return runAppDoctor();
   });
 
 program
