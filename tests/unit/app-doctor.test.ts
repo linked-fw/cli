@@ -2,9 +2,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {scanLinkedClientDeps} from '../../src/client-dep-includes';
-import {diagnose, resolveIncludeEntry} from '../../src/commands/doctor';
+import {
+  diagnose,
+  notAnAppReason,
+  resolveIncludeEntry,
+  runAppDoctor,
+} from '../../src/commands/app-doctor';
 
-// `linked doctor` warns about what otherwise only fails in the browser: an
+// `linked app-doctor` warns about what otherwise only fails in the browser: an
 // include entry that resolves to nothing, and the React peer mismatch that makes
 // npm nest a framework package's dependency in the first place.
 
@@ -16,13 +21,13 @@ function write(file: string, content: string | object) {
   );
 }
 
-describe('linked doctor', () => {
+describe('linked app-doctor', () => {
   let app: string;
   const nm = (...p: string[]) => path.join(app, 'node_modules', ...p);
 
   beforeEach(() => {
     app = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'linked-doctor-')),
+      fs.mkdtempSync(path.join(os.tmpdir(), 'linked-app-doctor-')),
     );
     write(path.join(app, 'package.json'), {
       name: 'app',
@@ -167,5 +172,28 @@ describe('linked doctor', () => {
     expect(
       findings.filter((f) => f.message.includes('does not resolve')),
     ).toEqual([]);
+  });
+
+  test('outside an app it says so and exits 1, instead of reporting 0 warnings', async () => {
+    // The fixture has a package.json and node_modules but no vite.config: a package, not an app.
+    expect(notAnAppReason(app)).toMatch(/is not an app — no vite\.config/);
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const exitCode = process.exitCode;
+    try {
+      await runAppDoctor({cwd: app});
+      expect(process.exitCode).toBe(1);
+      expect(errSpy.mock.calls.join('\n')).toMatch(/is not an app/);
+      expect(logSpy.mock.calls.join('\n')).not.toMatch(/0 warnings/);
+    } finally {
+      process.exitCode = exitCode;
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
+  test('a directory with a vite.config is an app', () => {
+    write(path.join(app, 'vite.config.ts'), 'export default {};\n');
+    expect(notAnAppReason(app)).toBeNull();
   });
 });

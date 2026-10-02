@@ -1,5 +1,5 @@
 /**
- * `linked doctor` — check an app's dev dependency setup for the problems that
+ * `linked app-doctor` — check an app's dev dependency setup for the problems that
  * otherwise only show up in the browser.
  *
  * It loads the app's Vite config the way the dev server does, runs the same
@@ -17,6 +17,7 @@
  * Hand-written include entries that the scan now generates are listed too, as
  * safe to delete.
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import semver from 'semver';
 import {readInstalledPkg} from '../installed-packages.js';
@@ -28,7 +29,7 @@ import {
   type ClientDepScan,
 } from '../client-dep-includes.js';
 
-export interface DoctorFinding {
+export interface AppDoctorFinding {
   level: 'warn' | 'info';
   message: string;
 }
@@ -70,8 +71,8 @@ export async function diagnose({
   cwd,
   appInclude,
   scan,
-}: DiagnoseInput): Promise<DoctorFinding[]> {
-  const findings: DoctorFinding[] = [];
+}: DiagnoseInput): Promise<AppDoctorFinding[]> {
+  const findings: AppDoctorFinding[] = [];
   const generated = new Map(scan.entries.map((e) => [e.entry, e]));
 
   // 1. Include entries that do not resolve.
@@ -147,7 +148,7 @@ export async function diagnose({
   return findings;
 }
 
-export interface DoctorOptions {
+export interface AppDoctorOptions {
   cwd?: string;
 }
 
@@ -179,8 +180,33 @@ async function loadAppScan(
   };
 }
 
-export async function runDoctor(options: DoctorOptions = {}): Promise<void> {
+/** The config names `linked start` and `linked build-app` accept as "this is an app". */
+const APP_VITE_CONFIGS = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs'];
+
+/**
+ * Why `cwd` is not an app, or null when it is. Without this, Vite resolves an
+ * empty default config, the scan finds nothing, and the report says
+ * "0 warnings" — a clean bill of health for a directory that was never checked.
+ */
+export function notAnAppReason(cwd: string): string | null {
+  if (APP_VITE_CONFIGS.some((f) => fs.existsSync(path.join(cwd, f)))) {
+    return null;
+  }
+  return (
+    `linked app-doctor: ${cwd} is not an app — no vite.config.{ts,js,mjs} found. ` +
+    'Run it from the root of an app (the directory with its vite.config); ' +
+    'it checks how the app uses linked packages, so there is nothing to check in a package.'
+  );
+}
+
+export async function runAppDoctor(options: AppDoctorOptions = {}): Promise<void> {
   const cwd = path.resolve(options.cwd ?? process.cwd());
+  const notAnApp = notAnAppReason(cwd);
+  if (notAnApp) {
+    console.error(notAnApp);
+    process.exitCode = 1;
+    return;
+  }
   const started = performance.now();
   const {appInclude, scan} = await loadAppScan(cwd);
   const findings = await diagnose({cwd, appInclude, scan});
@@ -191,7 +217,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<void> {
   }
   const warnings = findings.filter((f) => f.level === 'warn').length;
   console.log(
-    `linked doctor: ${warnings} warning${warnings === 1 ? '' : 's'}; ` +
+    `linked app-doctor: ${warnings} warning${warnings === 1 ? '' : 's'}; ` +
       `${scan.entries.length} client dependencies of ${scan.frameworkPackages.length} linked packages ` +
       `generated for optimizeDeps.include (${Math.round(performance.now() - started)}ms)`,
   );
