@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.39.0
+
+### Minor Changes
+
+- [#199](https://github.com/linked-fw/cli/pull/199) [`dfdb1c5`](https://github.com/linked-fw/cli/commit/dfdb1c50547bab428540db149afb4b106c9f0c5c) Thanks [@flyon](https://github.com/flyon)! - `create-package` chooses where a package lives inside an app: `packages/` (part of the app's repository: a workspace member, added to its dependencies and installed at the app root) or `packages-local/` (its own git repository, under `linked localize`'s name for it, with `git init`, a first commit, an optional `--remote` and `--push`, then installed, built, linked and recorded by `linked localize --adopt`). Choose with `--location`, `--remote` and `--push`; with none of them you are asked, on a terminal only. An existing target folder is refused. Outside an app nothing changes.
+
+  `linked localize --adopt` links a checkout already in `packages-local/` without cloning it, and `build-all` builds packages recorded in `local-packages.json` even when the app does not declare them yet. Needs `@_linked/localize` 0.2.0.
+
 ## 1.38.0
 
 ### Minor Changes
