@@ -422,6 +422,13 @@ function filterPackagesByDependencyTree(
 }
 
 /**
+ * localize's manifest filename (`MANIFEST_FILENAME` in `@_linked/localize`).
+ * Repeated rather than imported: that package is ESM-only and loaded lazily,
+ * and this runs synchronously while planning a build.
+ */
+const LOCALIZE_MANIFEST = 'local-packages.json';
+
+/**
  * The package names recorded in the app's `local-packages.json` — what
  * `linked localize` has linked. Read tolerantly: localize owns that file and
  * refuses a malformed one loudly, so here a missing or unreadable file is
@@ -430,7 +437,7 @@ function filterPackagesByDependencyTree(
 export function localizedPackageNames(appRootPath: string): string[] {
   try {
     const manifest = JSON.parse(
-      fs.readFileSync(path.join(appRootPath, 'local-packages.json'), 'utf8'),
+      fs.readFileSync(path.join(appRootPath, LOCALIZE_MANIFEST), 'utf8'),
     );
     const packages = manifest?.packages;
     return packages && typeof packages === 'object' && !Array.isArray(packages)

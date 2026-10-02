@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-
 /**
  * Where `linked create-package` puts a new package, decided without touching
  * anything — the IO lives in `createPackage`.
@@ -14,23 +11,30 @@ import path from 'path';
  *   it (`@_linked/foo` → `packages-local/_linked-foo`), and is handed to
  *   localize's `adopt`, so the two can never disagree about it.
  */
+import fs from 'fs';
+import path from 'path';
 
 export const PACKAGE_LOCATIONS = ['packages', 'packages-local'] as const;
 export type PackageLocation = (typeof PACKAGE_LOCATIONS)[number];
 
 export interface CreatePackageOptions {
-  location?: string;
+  /** Validated at runtime too, since the command line passes any string. */
+  location?: PackageLocation;
   /** A git URL. Implies `packages-local`. */
   remote?: string;
   /** Push the initial commit. Needs `remote`. */
   push?: boolean;
 }
 
+/**
+ * - `outside`: no app above us — the old behaviour, unchanged.
+ * - `resolved`: the flags (or the prompt's answers) settle it.
+ * - `ask`: inside an app, no flags, on a terminal.
+ * - `refuse`: a contradiction, or no answer and no terminal to ask.
+ */
 export type TargetDecision =
-  /** No app above us: the old behaviour, unchanged. */
   | {kind: 'outside'}
   | {kind: 'resolved'; location: PackageLocation; remote?: string; push: boolean}
-  /** Inside an app, no flags, on a terminal: ask. */
   | {kind: 'ask'}
   | {kind: 'refuse'; message: string};
 
@@ -79,7 +83,8 @@ export function decideCreatePackageTarget({
   options: CreatePackageOptions;
   isTTY: boolean;
 }): TargetDecision {
-  const {location, remote, push = false} = options;
+  const {remote, push = false} = options;
+  const location: string | undefined = options.location;
   const given = location !== undefined || remote !== undefined || push;
 
   if (location !== undefined && !isPackageLocation(location)) {
@@ -129,7 +134,11 @@ function refuse(message: string): TargetDecision {
 
 /** `@scope/foo-bar` → `foo-bar`: the folder name under `packages/`. */
 export function bareName(name: string): string {
-  return name.match(/(@[\w\-]+\/)?([\w\-]+)/)[2];
+  const match = name.match(/(@[\w\-]+\/)?([\w\-]+)/);
+  if (!match) {
+    throw new CreatePackageError(`"${name}" is not a usable package name.`);
+  }
+  return match[2];
 }
 
 /**

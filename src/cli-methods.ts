@@ -2453,20 +2453,13 @@ export const createPackage = async (
   }
   setVariable('uri_base', uriBase + '/');
 
-  //find @scope and the next part between 2 slashes after
-  //so @dacore/some-mod/lib/file.js
-  // --> match[0] = @dacore/some-mod
-  // --> match[1] = @dacore
-  // --> match[2] = some-mod
-
-  //but save full scoped package name under ${package_name}
+  //save the full scoped package name under ${package_name}
   setVariable('package_name', name);
 
   //extra variable for clarity (will be same as 'name')
   setVariable('output_file_name', name);
 
-  let {hyphenName, camelCaseName, underscoreName} =
-    setNameVariables(cleanPackageName);
+  const {hyphenName} = setNameVariables(cleanPackageName);
 
   log("Creating new linked package '" + name + "'");
   fs.mkdirSync(targetFolder, {recursive: true});
@@ -2580,16 +2573,23 @@ async function packageSetupFor(installRoot: string) {
   );
 }
 
-/** Install `cwd` with `setup`, then build `targetFolder`. Failures set the exit code. */
+/**
+ * Install `cwd` with `setup`, then build `targetFolder`. Failures set the exit
+ * code; `installFailedHint` says what was already changed when the install fails.
+ */
 async function installThenBuild(
   setup: Awaited<ReturnType<typeof packageSetupFor>>,
   cwd: string,
   targetFolder: string,
+  installFailedHint = '',
 ) {
   const installed = await execp(setup.installCommand, true, false, {cwd})
     .then(() => true)
     .catch(() => {
-      console.warn(`Could not install dependencies (${setup.installCommand})`);
+      console.warn(
+        `Could not install dependencies (${setup.installCommand})` +
+          (installFailedHint ? `. ${installFailedHint}` : ''),
+      );
       process.exitCode = 1;
       return false;
     });
@@ -2645,7 +2645,12 @@ async function installWorkspacePackage(
   );
 
   const setup = await packageSetupFor(appRoot);
-  await installThenBuild(setup, appRoot, targetFolder);
+  await installThenBuild(
+    setup,
+    appRoot,
+    targetFolder,
+    `The app's package.json already declares ${name}; run the install again at the app root once it is fixed.`,
+  );
   log(
     `Prepared a new linked package in ${chalk.magenta(targetFolder)}, part of this app's repository`,
     `Run ${chalk.blueBright(
@@ -2679,7 +2684,9 @@ async function installOwnRepoPackage(
     return fail(`git init failed in ${rel}; the package is scaffolded but not linked.`);
   }
   if (remote) {
-    git(['remote', 'add', 'origin', remote], targetFolder);
+    if (!git(['remote', 'add', 'origin', remote], targetFolder)) {
+      return fail(`git remote add origin ${remote} failed in ${rel}; nothing was linked.`);
+    }
     const pkg = fs.readJsonSync(pkgPath);
     pkg.repository = {type: 'git', url: repositoryUrlFor(remote)};
     fs.writeJsonSync(pkgPath, pkg, {spaces: 2});
@@ -2697,11 +2704,24 @@ async function installOwnRepoPackage(
   }
 
   const {adoptPackage} = await import('./commands/localize.js');
-  const setup = await packageSetupFor(targetFolder);
-  const code = await adoptPackage(name, {appRoot, build: setup.buildCommand});
-  // 5 is localize's "warned": here, a failed first build. The package is linked.
-  if (code === 5) fail('The package is linked, but its initial build failed');
-  else if (code !== 0) return fail(`Linking ${name} failed (localize exit ${code}).`);
+  const {EXIT_WARNED} = await import('@_linked/localize');
+  // Only the build command matters here: adopt always installs with npm, so
+  // the package-manager half of the plan does not apply.
+  const {buildCommand} = planPackageSetup(
+    '',
+    path.join(getScriptDir(), 'launch.js'),
+    process.execPath,
+  );
+  const code = await adoptPackage(name, {appRoot, build: buildCommand});
+  if (code === EXIT_WARNED) {
+    fail('The package is linked, but its initial build failed');
+  } else if (code !== 0) {
+    return fail(
+      `Linking ${name} failed (localize exit ${code}). ${rel} is scaffolded with an uncommitted ` +
+        `git init, and the app's postinstall relinks localized packages. Fix the cause and retry ` +
+        `with: linked localize ${name} --adopt`,
+    );
+  }
 
   const committed =
     git(['add', '-A'], targetFolder) &&

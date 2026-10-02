@@ -144,4 +144,16 @@ describe('linked delocalize', () => {
     });
     expect(calls[0].args[2]).toEqual({appRoot: '/app'});
   });
+
+  it('--adopt refuses no names and --subdir instead of falling through', async () => {
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await runLocalize([], {adopt: true});
+    expect(calls).toEqual([]);
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
+    await runLocalize(['@_linked/foo'], {adopt: true, subdir: 'x'});
+    expect(calls).toEqual([]);
+    expect(process.exitCode).toBe(2);
+    err.mockRestore();
+  });
 });

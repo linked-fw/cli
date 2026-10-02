@@ -18,6 +18,11 @@
  * There is no short-name expansion and no org probing: the repository comes
  * from the registry's `repository` field, so a name that npm cannot resolve is
  * an error rather than a guess.
+ *
+ * `--adopt` is the exception to "clone from the registry": it links a git
+ * checkout that is already in `packages-local/` under its localize name, with
+ * no clone and no lookup — a package created locally, or a clone put there by
+ * hand. It takes no `--subdir`: an adopted checkout is the package itself.
  */
 import process from 'node:process';
 
@@ -52,6 +57,18 @@ export async function runLocalize(
 
   if (options.relink) {
     process.exitCode = relink(deps);
+    return;
+  }
+  if (options.adopt && packages.length === 0) {
+    console.error('[localize] --adopt needs at least one package name.');
+    process.exitCode = 2;
+    return;
+  }
+  if (options.adopt && options.subdir) {
+    console.error(
+      '[localize] --adopt takes no --subdir: an adopted checkout is the package itself.',
+    );
+    process.exitCode = 2;
     return;
   }
   if (options.list || packages.length === 0) {
@@ -95,6 +112,8 @@ export async function adoptPackage(
   options: {appRoot: string; build: string; repo?: string},
 ): Promise<number> {
   const {defaultDeps, adopt} = await import('@_linked/localize');
+  // Exit codes are localize's public contract; EXIT_WARNED (5) is the one a
+  // caller usually tolerates, meaning the build failed but the link is in place.
   return adopt(
     [name],
     {build: options.build, repo: options.repo},
