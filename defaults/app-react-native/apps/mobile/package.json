@@ -16,8 +16,8 @@
     "@_linked/schema": "1.1.2",
     "@_linked/server": "2.3.0",
     "app-shapes": "*",
-    "expo": "57.0.22",
-    "expo-constants": "57.0.18",
+    "expo": "57.0.25",
+    "expo-constants": "57.0.19",
     "expo-dev-client": "57.0.19",
     "react": "19.2.3",
     "react-native": "0.86.3"
