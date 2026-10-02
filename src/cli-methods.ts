@@ -45,6 +45,7 @@ import {glob} from 'glob';
 import ora, {Ora} from 'ora';
 import stagedGitFiles from 'staged-git-files';
 import {packagePublishesCjs} from './package-manifest.js';
+import {asNamespace, defaultOntologyNamespace} from './utils/ontologyNamespace.js';
 
 let dirname__ =
   typeof __dirname !== 'undefined'
@@ -1360,9 +1361,9 @@ export const createOntology = async (
   let targetFolder = ensureFolderExists(sourceFolder, 'ontologies');
 
   if (!uriBase) {
-    uriBase = 'http://lincd.org/ont/' + prefix + '/';
+    uriBase = defaultOntologyNamespace(prefix);
   }
-  setVariable('uri_base', uriBase);
+  setVariable('uri_base', asNamespace(uriBase));
 
   let {hyphenName, camelCaseName, underscoreName} = setNameVariables(prefix);
 
@@ -2412,9 +2413,9 @@ export const createPackage = async (
   let targetFolder = ensureFolderExists(basePath, cleanPackageName);
 
   if (!uriBase) {
-    uriBase = 'http://lincd.org/ont/' + name;
+    uriBase = defaultOntologyNamespace(name);
   }
-  setVariable('uri_base', uriBase + '/');
+  setVariable('uri_base', asNamespace(uriBase));
 
   //find @scope and the next part between 2 slashes after
   //so @dacore/some-mod/lib/file.js
