@@ -273,3 +273,24 @@ Phase 1 and could run beside it; kept sequential since it is small.
 - Validation: `npm test` — 47 tests, 47 pass, including the slow real-clone tests. Nine new:
   seven in `test/adopt.test.js`, two in `test/manifest.test.js`.
 - The README's uncommitted wording edits (not part of this work) were left unstaged.
+
+### Phase 2 — done (cli `2810b76`, branch `feat/create-package-location`)
+
+- `linked localize --adopt`; `adoptPackage(name, {appRoot, build, repo})` returns the code.
+- `localizedPackageNames()` in `lifecycle.ts` seeds `build-all`'s dependency tree; the stale
+  "`semantu localize`" wording on `LOCAL_PACKAGES_DIR` is corrected.
+- Dev setup: `cli/node_modules/@_linked/localize` is symlinked to `../../../localize`; the
+  registry 0.1.0 copy was moved to the session scratchpad. `npm install` in the CLI restores it.
+- Validation: `jest buildAllDiscovery localizeCommand` — 19 passed (4 new); `npm run build`
+  compiles; `linked localize --help` lists `--adopt`.
+
+### Phase 3 — done
+
+- `utils/createPackageLocation.ts` (pure decisions) and the rewritten `createPackage` with
+  `installStandalonePackage` / `installWorkspacePackage` / `installOwnRepoPackage`. A refusal
+  is a `CreatePackageError`; the command prints its message and exits 1, a function caller
+  gets the throw.
+- `@_linked/localize` is bumped to `^0.2.0` in `package.json` only. **`package-lock.json` is
+  not updated**: 0.2.0 is unpublished, so the lock can only follow once localize is released.
+- Validation: `createPackageLocation.test.ts` 14 passed; full unit suite 461/461 in 40 suites;
+  `npm run build` compiles; `create-package --help` shows the three options.

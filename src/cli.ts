@@ -33,6 +33,7 @@ import {
 } from './cli-methods.js';
 // import {buildMetadata} from './metadata';
 import {program} from 'commander';
+import {CreatePackageError} from './utils/createPackageLocation.js';
 import fs from 'fs-extra';
 import path from 'path';
 import 'require-extensions';
@@ -148,12 +149,27 @@ program
 
 program
   .command('create-package')
-  .action((name, uriBase) => {
-    return createPackage(name, uriBase);
+  .action(async (name, uriBase, options) => {
+    try {
+      await createPackage(name, uriBase, process.cwd(), options);
+    } catch (e) {
+      if (!(e instanceof CreatePackageError)) throw e;
+      console.error(chalk.red(e.message));
+      process.exitCode = 1;
+    }
   })
   .description(
-    'Create a new folder with all the required files for a new Linked package',
+    "Create a new folder with all the required files for a new Linked package. Inside an app, it goes in packages/ (part of the app's repository) or packages-local/ (its own git repository, linked with `linked localize`); without --location, --remote or --push you are asked, on a terminal.",
   )
+  .option(
+    '--location <where>',
+    "packages: part of this app's repository, a workspace member added to its dependencies. packages-local: its own git repository (git init + a first commit), linked and recorded by `linked localize` and not added to the app's dependencies until it is published.",
+  )
+  .option(
+    '--remote <git-url>',
+    "The new repository's origin; also written to repository.url. Implies --location packages-local.",
+  )
+  .option('--push', 'Push the first commit to --remote.')
   .argument(
     '<name>',
     'The name of the package. Will be used as package name in package.json',
