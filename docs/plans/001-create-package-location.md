@@ -294,3 +294,66 @@ Phase 1 and could run beside it; kept sequential since it is small.
   not updated**: 0.2.0 is unpublished, so the lock can only follow once localize is released.
 - Validation: `createPackageLocation.test.ts` 14 passed; full unit suite 461/461 in 40 suites;
   `npm run build` compiles; `create-package --help` shows the three options.
+
+### Phase 4 — done, with findings
+
+End to end in a scratch app (`linkedApp: true`, no workspaces, like the template), with the built
+CLI and localize 0.2.0:
+
+| Scenario | Result |
+|---|---|
+| `--remote <bare repo> --push` | exit 0; `packages-local/probe-alpha`; `feat: scaffold @probe/alpha` pushed to the bare remote; `repository.url` set; link and manifest entry; postinstall hook added; no app dependency; clean tree |
+| app-root `npm install` afterwards | the postinstall relinked it — **but the checkout's `node_modules` was emptied** (finding B) |
+| `--location packages-local`, no remote | entry recorded with no `repo`; "no remote yet" hint |
+| `--location packages` | `workspaces: ["packages/*"]`, `"@probe/gamma": "^1.0.0"`, lock entry `resolved: packages/gamma`, link, `lib/` |
+| existing target, non-TTY no flags, `--push` alone, `--location packages --remote`, bad location | all exit 1 with their message; nothing written, manifests byte-identical |
+| outside an app | unchanged behaviour; `--location` refused |
+| `build-all` | built `@probe/alpha` and `@probe/beta` (localized, undeclared) beside `@probe/gamma` |
+
+## Review
+
+1. **A — branch recorded as `HEAD`** (medium). Adopt runs before the first commit; on an unborn
+   branch `git rev-parse --abbrev-ref HEAD` fails. → fixed in iteration 1.
+2. **B — a root `npm install` empties the `node_modules` of every checkout inside the app root**
+   (high, **pre-existing in localize**). Measured on npm 11.19.1: npm counts a linked checkout
+   under the root as part of the root's tree (`npm ls` marks its deps `extraneous`) and prunes
+   them; it happens for a localized *published* dependency too (declared, registry range), with
+   or without workspaces, relative or absolute link. A checkout *outside* the app root keeps its
+   `node_modules` (only the link goes). `npm ci` does not do it. The relink restores the link,
+   never the deps, so the checkout's own build breaks until `npm install` is run in it again.
+   Fixing it means relaxing "relink never invokes npm", or moving checkouts out of the app root,
+   or something else — **a localize design decision for the user**, not taken here.
+3. **C — version skew on the manifest** (medium). A localize older than 0.2.0 skips a repo-less
+   entry as malformed, and the app's postinstall runs whichever `linked` npm hoisted. Release
+   order handles it: publish localize 0.2.0, then the CLI that requires it. → noted in the
+   changeset; nothing to build.
+4. Low: every scaffold printed `Could not read file …/Gruntfile.js` (the template has none) →
+   fixed in iteration 1.
+5. Low, pre-existing, left: the four absolute-path `rename` log lines; standalone mode advises
+   "build once" after it already built; build-all's progress text runs into its Info lines; the
+   new repo's first lockfile once carried an `extraneous` entry.
+
+## Iteration 1 — Ideation
+
+### Gap 1 of 3: branch on an unborn repository
+Commit before adopting (loses the lockfile from the first commit) vs. ask git differently.
+**Chosen:** `git symbolic-ref --short -q HEAD` first, `rev-parse` as the detached fallback, in
+localize's `currentBranch` — correct for every caller, not only create-package.
+
+### Gap 2 of 3: manifest version skew
+**Chosen:** no code. The changeset says the CLI needs localize 0.2.0; release localize first.
+
+### Gap 3 of 3: the Gruntfile warning
+**Chosen:** drop `Gruntfile.js` from the substitution list.
+
+Finding B is held for the user.
+
+## Iteration 1 — Plan and phases
+
+### Phase 5 — fixes
+- localize `currentBranch` (commit `4ac6be3`), with a real-git test of an unborn branch.
+- CLI: `Gruntfile.js` out of the substitution list.
+
+**Validation:** localize `npm test` 48/48; CLI rebuilt; a fresh
+`create-package @probe/epsilon --location packages-local` recorded `"branch": "main"`, committed
+`feat: scaffold @probe/epsilon`, and printed no Gruntfile warning.

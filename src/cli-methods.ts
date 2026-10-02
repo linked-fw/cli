@@ -2481,7 +2481,6 @@ export const createPackage = async (
     [
       'src/index.ts',
       'package.json',
-      'Gruntfile.js',
       'src/package.ts',
       'src/ontologies/example-ontology.ts',
       'src/ontologies/example-ontology.register.ts',
