@@ -36,6 +36,7 @@ import {program} from 'commander';
 import fs from 'fs-extra';
 import path from 'path';
 import 'require-extensions';
+import {unknownCommandError} from './unknown-command.js';
 
 /**
  * Run an async command action and report a failure the way the rest of this
@@ -605,4 +606,9 @@ program.command('enable-capacitor').action(() => {
   addCapacitor();
 });
 
+const unknownCommand = unknownCommandError(program, process.argv.slice(2));
+if (unknownCommand) {
+  console.error(chalk.red(unknownCommand));
+  process.exit(1);
+}
 program.parse(process.argv);
