@@ -20,6 +20,20 @@ import {
 import {renameShippedDotfiles} from './utils/shippedDotfiles.js';
 import {planPackageSetup} from './utils/packageSetup.js';
 import {
+  bareName,
+  CreatePackageError,
+  decideCreatePackageTarget,
+  ensureRelinkPostinstall,
+  ensureWorkspaceGlob,
+  findLinkedAppRoot,
+  RELINK_COMMAND,
+  repositoryUrlFor,
+} from './utils/createPackageLocation.js';
+import type {
+  CreatePackageOptions,
+  TargetDecision,
+} from './utils/createPackageLocation.js';
+import {
   detectPackageManager,
   execBinCommand,
   runScriptCommand,
@@ -33,7 +47,7 @@ import {
 } from './utils/shapeReferences.js';
 import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
 
-import {spawn as spawnChild} from 'child_process';
+import {spawn as spawnChild, spawnSync} from 'child_process';
 import {findNearestPackageJson} from 'find-nearest-package-json';
 import {statSync} from 'fs';
 import {LinkedFileStorage} from '@_linked/core/utils/LinkedFileStorage';
@@ -2389,50 +2403,67 @@ export const createPackage = async (
   name,
   uriBase?,
   basePath = process.cwd(),
+  options: CreatePackageOptions = {},
 ) => {
   if (!name) {
     console.warn('Please provide a name as the first argument');
     return;
   }
 
-  //if ran with npx, basePath will be the root directory of the repository, even if we're executing from a sub folder (the root directory is where node_modules lives and package.json with workspaces)
-  //so we manually find a packages folder, if it exists we go into that.
-  if (fs.existsSync(path.join(basePath, 'packages'))) {
-    basePath = path.join(basePath, 'packages');
-  }
-  //for lincd.org currently packages are stored in the modules folder
-  else if (fs.existsSync(path.join(basePath, 'modules'))) {
-    basePath = path.join(basePath, 'modules');
-  }
+  const appRoot = findLinkedAppRoot(basePath);
+  const decided = decideCreatePackageTarget({
+    appRoot,
+    options,
+    isTTY: !!(process.stdin.isTTY && process.stdout.isTTY),
+  });
+  if (decided.kind === 'refuse') throw new CreatePackageError(decided.message);
+  const decision =
+    decided.kind === 'ask' ? await askPackageLocation(name) : decided;
 
   //let's remove scope for variable names
-  let [packageName, scope, cleanPackageName] = name.match(
-    /(@[\w\-]+\/)?([\w\-]+)/,
-  );
+  const cleanPackageName = bareName(name);
 
-  let targetFolder = ensureFolderExists(basePath, cleanPackageName);
+  let targetFolder: string;
+  if (decision.kind === 'outside') {
+    //if ran with npx, basePath will be the root directory of the repository, even if we're executing from a sub folder (the root directory is where node_modules lives and package.json with workspaces)
+    //so we manually find a packages folder, if it exists we go into that.
+    if (fs.existsSync(path.join(basePath, 'packages'))) {
+      basePath = path.join(basePath, 'packages');
+    }
+    //for lincd.org currently packages are stored in the modules folder
+    else if (fs.existsSync(path.join(basePath, 'modules'))) {
+      basePath = path.join(basePath, 'modules');
+    }
+    targetFolder = path.join(basePath, cleanPackageName);
+  } else if (decision.location === 'packages') {
+    targetFolder = path.join(appRoot, 'packages', cleanPackageName);
+  } else {
+    // localize's own naming, so `linked localize` and this command can never
+    // disagree about where a package lives.
+    const {checkoutNameFor, DEFAULT_DIR} = await import('@_linked/localize');
+    targetFolder = path.join(appRoot, DEFAULT_DIR, checkoutNameFor(name));
+  }
+  if (fs.existsSync(targetFolder)) {
+    throw new CreatePackageError(
+      `${targetFolder} already exists. Refusing to write a new package over it.`,
+    );
+  }
 
   if (!uriBase) {
     uriBase = defaultOntologyNamespace(name);
   }
   setVariable('uri_base', asNamespace(uriBase));
 
-  //find @scope and the next part between 2 slashes after
-  //so @dacore/some-mod/lib/file.js
-  // --> match[0] = @dacore/some-mod
-  // --> match[1] = @dacore
-  // --> match[2] = some-mod
-
-  //but save full scoped package name under ${package_name}
+  //save the full scoped package name under ${package_name}
   setVariable('package_name', name);
 
   //extra variable for clarity (will be same as 'name')
   setVariable('output_file_name', name);
 
-  let {hyphenName, camelCaseName, underscoreName} =
-    setNameVariables(cleanPackageName);
+  const {hyphenName} = setNameVariables(cleanPackageName);
 
   log("Creating new linked package '" + name + "'");
+  fs.mkdirSync(targetFolder, {recursive: true});
   fs.copySync(
     path.join(getScriptDir(), '..', '..', 'defaults', 'package'),
     targetFolder,
@@ -2444,7 +2475,6 @@ export const createPackage = async (
     [
       'src/index.ts',
       'package.json',
-      'Gruntfile.js',
       'src/package.ts',
       'src/ontologies/example-ontology.ts',
       'src/ontologies/example-ontology.register.ts',
@@ -2481,32 +2511,86 @@ export const createPackage = async (
     );
   });
 
+  if (decision.kind === 'outside') {
+    await installStandalonePackage(targetFolder);
+  } else if (decision.location === 'packages') {
+    await installWorkspacePackage(name, targetFolder, appRoot);
+  } else {
+    await installOwnRepoPackage(name, targetFolder, appRoot, decision);
+  }
+};
+
+/**
+ * Ask where a new package goes — only ever on a terminal, and only when no
+ * flag said so already.
+ */
+async function askPackageLocation(
+  name: string,
+): Promise<Extract<TargetDecision, {kind: 'resolved'}>> {
+  console.log(
+    `\nWhere should ${chalk.magenta(name)} live?\n` +
+      `  1) packages/        part of this app's repository\n` +
+      `  2) packages-local/  its own git repository, linked into this app\n`,
+  );
+  let answer = '';
+  while (answer !== '1' && answer !== '2') {
+    answer = await promptUser('Choose 1 or 2: ');
+  }
+  if (answer === '1') return {kind: 'resolved', location: 'packages', push: false};
+
+  const remote = await promptUser(
+    'Remote git URL for its repository (optional, Enter to skip): ',
+  );
+  const push =
+    !!remote &&
+    /^y(es)?$/i.test(
+      await promptUser(`Push the first commit to ${remote}? (y/N): `),
+    );
+  return {
+    kind: 'resolved',
+    location: 'packages-local',
+    ...(remote ? {remote} : {}),
+    push,
+  };
+}
+
+/** The install + first build plan for a package, given where it installs from. */
+async function packageSetupFor(installRoot: string) {
   // npm is the default for a new package. yarn is only consulted when the new
   // package lands inside an existing yarn project (a yarn-3 monorepo),
   // where adding an npm lockfile would break the workspace.
-  const insideYarnProject =
-    detectPackageManager(path.dirname(path.resolve(targetFolder))) === 'yarn';
+  const insideYarnProject = detectPackageManager(installRoot) === 'yarn';
   let version = insideYarnProject
     ? ((await execPromise('yarn --version').catch(() => {
         console.log('yarn probably not working');
         return '';
       })) as string)
     : '';
-  const setup = planPackageSetup(
+  return planPackageSetup(
     version.toString(),
     path.join(getScriptDir(), 'launch.js'),
     process.execPath,
     insideYarnProject,
   );
-  if (setup.yarnrc) {
-    fs.writeFileSync(path.join(targetFolder, '.yarnrc.yml'), setup.yarnrc);
-  }
-  const installed = await execp(setup.installCommand, true, false, {
-    cwd: targetFolder,
-  })
+}
+
+/**
+ * Install `cwd` with `setup`, then build `targetFolder`. Failures set the exit
+ * code; `installFailedHint` says what was already changed when the install fails.
+ */
+async function installThenBuild(
+  setup: Awaited<ReturnType<typeof packageSetupFor>>,
+  cwd: string,
+  targetFolder: string,
+  installFailedHint = '',
+) {
+  const installed = await execp(setup.installCommand, true, false, {cwd})
     .then(() => true)
     .catch(() => {
-      console.warn(`Could not install dependencies (${setup.installCommand})`);
+      console.warn(
+        `Could not install dependencies (${setup.installCommand})` +
+          (installFailedHint ? `. ${installFailedHint}` : ''),
+      );
       process.exitCode = 1;
       return false;
     });
@@ -2518,7 +2602,15 @@ export const createPackage = async (
       },
     );
   }
+}
 
+/** Outside an app: install inside the package itself, as this command always has. */
+async function installStandalonePackage(targetFolder: string) {
+  const setup = await packageSetupFor(path.dirname(path.resolve(targetFolder)));
+  if (setup.yarnrc) {
+    fs.writeFileSync(path.join(targetFolder, '.yarnrc.yml'), setup.yarnrc);
+  }
+  await installThenBuild(setup, targetFolder, targetFolder);
   log(
     `Prepared a new linked package in ${chalk.magenta(targetFolder)}`,
     `Run ${chalk.blueBright(
@@ -2528,7 +2620,150 @@ export const createPackage = async (
       runScriptCommand(setup.packageManager, 'start'),
     )} to continuously rebuild on file changes`,
   );
-};
+}
+
+/**
+ * packages/: a workspace member of the app's own repository. The app's
+ * workspaces must cover it and its dependencies declare it — npm links a
+ * workspace member by name, and `build-all` builds what the app depends on —
+ * and the install runs at the app root, where the workspace is.
+ */
+async function installWorkspacePackage(
+  name: string,
+  targetFolder: string,
+  appRoot: string,
+) {
+  const appPkgPath = path.join(appRoot, 'package.json');
+  const appPkg = fs.readJsonSync(appPkgPath);
+  const workspaces = ensureWorkspaceGlob(appPkg);
+  if (workspaces.warning) console.warn(chalk.yellow(workspaces.warning));
+  const version = fs.readJsonSync(path.join(targetFolder, 'package.json')).version;
+  appPkg.dependencies = {...appPkg.dependencies, [name]: `^${version}`};
+  fs.writeJsonSync(appPkgPath, appPkg, {spaces: 2});
+  log(
+    `Added ${name}@^${version} to ${path.relative(process.cwd(), appPkgPath) || 'package.json'}` +
+      (workspaces.changed ? ' and packages/* to its workspaces' : ''),
+  );
+
+  const setup = await packageSetupFor(appRoot);
+  await installThenBuild(
+    setup,
+    appRoot,
+    targetFolder,
+    `The app's package.json already declares ${name}; run the install again at the app root once it is fixed.`,
+  );
+  log(
+    `Prepared a new linked package in ${chalk.magenta(targetFolder)}, part of this app's repository`,
+    `Run ${chalk.blueBright(
+      runScriptCommand(setup.packageManager, 'start'),
+    )} in it to continuously rebuild on file changes`,
+  );
+}
+
+/**
+ * packages-local/: a repository of its own. Its git history starts here, and
+ * localize's `adopt` installs, builds, links and records it. The app's
+ * dependencies are NOT touched: until the package is published a version range
+ * fails `npm install` (E404 once a lockfile exists), and a `file:` path would
+ * install cleanly for a teammate without the checkout and fail at runtime.
+ */
+async function installOwnRepoPackage(
+  name: string,
+  targetFolder: string,
+  appRoot: string,
+  decision: Extract<TargetDecision, {kind: 'resolved'}>,
+) {
+  const {remote, push} = decision;
+  const rel = path.relative(appRoot, targetFolder);
+  const pkgPath = path.join(targetFolder, 'package.json');
+  const fail = (message: string) => {
+    console.warn(chalk.yellow(message));
+    process.exitCode = 1;
+  };
+
+  if (!git(['init', '--quiet'], targetFolder)) {
+    return fail(`git init failed in ${rel}; the package is scaffolded but not linked.`);
+  }
+  if (remote) {
+    if (!git(['remote', 'add', 'origin', remote], targetFolder)) {
+      return fail(`git remote add origin ${remote} failed in ${rel}; nothing was linked.`);
+    }
+    const pkg = fs.readJsonSync(pkgPath);
+    pkg.repository = {type: 'git', url: repositoryUrlFor(remote)};
+    fs.writeJsonSync(pkgPath, pkg, {spaces: 2});
+  }
+
+  // Before adopt, never during it: adopt asserts the app's package.json did not
+  // change while it ran.
+  const appPkgPath = path.join(appRoot, 'package.json');
+  const appPkg = fs.readJsonSync(appPkgPath);
+  if (ensureRelinkPostinstall(appPkg)) {
+    fs.writeJsonSync(appPkgPath, appPkg, {spaces: 2});
+    log(
+      `Added \`${RELINK_COMMAND}\` to the app's postinstall, so npm install keeps the link`,
+    );
+  }
+
+  const {adoptPackage} = await import('./commands/localize.js');
+  const {EXIT_WARNED} = await import('@_linked/localize');
+  // Only the build command matters here: adopt always installs with npm, so
+  // the package-manager half of the plan does not apply.
+  const {buildCommand} = planPackageSetup(
+    '',
+    path.join(getScriptDir(), 'launch.js'),
+    process.execPath,
+  );
+  const code = await adoptPackage(name, {appRoot, build: buildCommand});
+  if (code === EXIT_WARNED) {
+    fail('The package is linked, but its initial build failed');
+  } else if (code !== 0) {
+    return fail(
+      `Linking ${name} failed (localize exit ${code}). ${rel} is scaffolded with an uncommitted ` +
+        `git init, and the app's postinstall relinks localized packages. Fix the cause and retry ` +
+        `with: linked localize ${name} --adopt`,
+    );
+  }
+
+  const committed =
+    git(['add', '-A'], targetFolder) &&
+    git(['commit', '--quiet', '-m', `feat: scaffold ${name}`], targetFolder);
+  if (!committed) {
+    fail(
+      `Could not make the first commit in ${rel} (is git's user.name/user.email set?). ` +
+        `The package is linked; commit it yourself.`,
+    );
+  }
+  let pushed = false;
+  if (push && committed) {
+    pushed = git(['push', '--quiet', '-u', 'origin', 'HEAD'], targetFolder);
+    if (!pushed) fail(`Could not push to ${remote}. Push it yourself: git push -u origin HEAD`);
+  }
+
+  const version = fs.readJsonSync(pkgPath).version;
+  log(
+    `Prepared ${name} in ${chalk.magenta(rel)}, in its own git repository` +
+      (remote ? ` (origin ${remote}${pushed ? ', pushed' : ''})` : ' (no remote yet)'),
+    `It is linked into node_modules and recorded in local-packages.json.`,
+    `It is not in the app's dependencies: until it is published a version range would fail npm install.`,
+    `  After publishing: ${chalk.blueBright(`npm install ${name}@^${version}`)}`,
+  );
+  if (!remote) {
+    log(
+      `To add a remote later: ${chalk.blueBright('git remote add origin <url>')} in ${rel}, ` +
+        `then ${chalk.blueBright(`linked localize ${name} --adopt`)} to record it.`,
+    );
+  }
+}
+
+/** Run git with arguments (no shell, so a URL is never re-parsed). Echoes failures. */
+function git(args: string[], cwd: string): boolean {
+  const r = spawnSync('git', args, {cwd, encoding: 'utf8'});
+  if (r.status !== 0) {
+    console.warn((r.stderr || r.stdout || String(r.error ?? '')).trim());
+    return false;
+  }
+  return true;
+}
 
 var getNextVersion = function (version) {
   let parts = version.split('.');

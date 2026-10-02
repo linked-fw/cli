@@ -18,6 +18,11 @@
  * There is no short-name expansion and no org probing: the repository comes
  * from the registry's `repository` field, so a name that npm cannot resolve is
  * an error rather than a guess.
+ *
+ * `--adopt` is the exception to "clone from the registry": it links a git
+ * checkout that is already in `packages-local/` under its localize name, with
+ * no clone and no lookup — a package created locally, or a clone put there by
+ * hand. It takes no `--subdir`: an adopted checkout is the package itself.
  */
 import process from 'node:process';
 
@@ -25,6 +30,7 @@ import process from 'node:process';
 export const DEFAULT_BUILD_COMMAND = 'linked build';
 
 export interface LocalizeCommandOptions {
+  adopt?: boolean;
   list?: boolean;
   check?: boolean;
   relink?: boolean;
@@ -45,7 +51,7 @@ export async function runLocalize(
   packages: string[] = [],
   options: LocalizeCommandOptions = {},
 ): Promise<void> {
-  const {defaultDeps, localize, list, relink} =
+  const {defaultDeps, localize, adopt, list, relink} =
     await import('@_linked/localize');
   const deps = defaultDeps(process.cwd());
 
@@ -53,8 +59,31 @@ export async function runLocalize(
     process.exitCode = relink(deps);
     return;
   }
+  if (options.adopt && packages.length === 0) {
+    console.error('[localize] --adopt needs at least one package name.');
+    process.exitCode = 2;
+    return;
+  }
+  if (options.adopt && options.subdir) {
+    console.error(
+      '[localize] --adopt takes no --subdir: an adopted checkout is the package itself.',
+    );
+    process.exitCode = 2;
+    return;
+  }
   if (options.list || packages.length === 0) {
     process.exitCode = list({check: options.check}, deps);
+    return;
+  }
+  // `--build ''` is how you ask for no build at all.
+  const build =
+    options.build === undefined ? DEFAULT_BUILD_COMMAND : options.build;
+  if (options.adopt) {
+    process.exitCode = adopt(
+      packages,
+      {force: options.force, dir: options.dir, repo: options.repo, build},
+      deps,
+    );
     return;
   }
   process.exitCode = localize(
@@ -64,11 +93,31 @@ export async function runLocalize(
       dir: options.dir,
       repo: options.repo,
       subdir: options.subdir,
-      // `--build ''` is how you ask for no build at all.
-      build:
-        options.build === undefined ? DEFAULT_BUILD_COMMAND : options.build,
+      build,
     },
     deps,
+  );
+}
+
+/**
+ * Adopt one checkout that already sits in `packages-local/` under its localize
+ * name: install inside it, build it, link it and record it. This is how
+ * `create-package` hands a new package with its own repository to localize.
+ *
+ * @returns localize's exit code, rather than setting `process.exitCode`, so the
+ *   caller decides what a failure means.
+ */
+export async function adoptPackage(
+  name: string,
+  options: {appRoot: string; build: string; repo?: string},
+): Promise<number> {
+  const {defaultDeps, adopt} = await import('@_linked/localize');
+  // Exit codes are localize's public contract; EXIT_WARNED (5) is the one a
+  // caller usually tolerates, meaning the build failed but the link is in place.
+  return adopt(
+    [name],
+    {build: options.build, repo: options.repo},
+    defaultDeps(options.appRoot),
   );
 }
 

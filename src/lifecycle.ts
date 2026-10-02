@@ -203,7 +203,7 @@ export interface LocalPackage extends PackageDetails {
 }
 
 /**
- * Directory holding localized checkouts (`semantu localize`). It is
+ * Directory holding localized checkouts (`linked localize`). It is
  * deliberately in NO workspace glob — that is the whole point of the design,
  * since npm learning about these checkouts is what made their predecessor
  * under `packages/` a trap — so any walk of `workspaces` alone cannot see it
@@ -376,14 +376,18 @@ function filterPackagesByDependencyTree(
   const relevantPackages = new Map<string, PackageDetails>();
   const packagesToCheck = new Set<string>();
 
-  // Start with direct dependencies from app root
-  if (appPackageJson.dependencies) {
-    Object.keys(appPackageJson.dependencies).forEach((dep) => {
-      if (allPackages.has(dep)) {
-        packagesToCheck.add(dep);
-      }
-    });
-  }
+  // Start with direct dependencies from app root, plus everything localized:
+  // a package created locally is linked but cannot be declared until it is
+  // published (an unpublished range fails `npm install`), and being localized
+  // already says this app is developed against it.
+  [
+    ...Object.keys(appPackageJson.dependencies || {}),
+    ...localizedPackageNames(appRootPath),
+  ].forEach((dep) => {
+    if (allPackages.has(dep)) {
+      packagesToCheck.add(dep);
+    }
+  });
 
   // Recursively add dependencies
   const processedPackages = new Set<string>();
@@ -415,6 +419,33 @@ function filterPackagesByDependencyTree(
   }
 
   return relevantPackages;
+}
+
+/**
+ * localize's manifest filename (`MANIFEST_FILENAME` in `@_linked/localize`).
+ * Repeated rather than imported: that package is ESM-only and loaded lazily,
+ * and this runs synchronously while planning a build.
+ */
+const LOCALIZE_MANIFEST = 'local-packages.json';
+
+/**
+ * The package names recorded in the app's `local-packages.json` — what
+ * `linked localize` has linked. Read tolerantly: localize owns that file and
+ * refuses a malformed one loudly, so here a missing or unreadable file is
+ * simply "nothing localized".
+ */
+export function localizedPackageNames(appRootPath: string): string[] {
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(appRootPath, LOCALIZE_MANIFEST), 'utf8'),
+    );
+    const packages = manifest?.packages;
+    return packages && typeof packages === 'object' && !Array.isArray(packages)
+      ? Object.keys(packages)
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 /** A package `build-all` found but will not build, and why not. */
@@ -475,8 +506,10 @@ export function planBuildAll(rootPath = './', appRoot?: string): BuildAllPlan {
     const isAppWithLinkedDeps =
       appPackageJson &&
       appPackageJson.lincd !== true &&
-      appPackageJson.dependencies &&
-      Object.keys(appPackageJson.dependencies).some((dep) => build.has(dep));
+      [
+        ...Object.keys(appPackageJson.dependencies || {}),
+        ...localizedPackageNames(appRoot),
+      ].some((dep) => build.has(dep));
 
     if (isAppWithLinkedDeps) {
       const inTree = filterPackagesByDependencyTree(build, appRoot);
