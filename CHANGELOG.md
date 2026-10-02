@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.37.0
+
+### Minor Changes
+
+- [#200](https://github.com/linked-fw/cli/pull/200) [`807c593`](https://github.com/linked-fw/cli/commit/807c593526d6a5028a4f5cf7d9469065aa195ea1) Thanks [@flyon](https://github.com/flyon)! - An unknown command is now an error instead of an argument to `build`.
+
+  `build` is still the default when no command is given (`linked`, `linked --silent`), but
+  `linked doctor`, `linked yarn` or a typo no longer run a build with that word as its target.
+  They print `Unknown command "<x>".`, a suggestion when one is close (`doctor` → `app-doctor`,
+  `yarn` → removed, use npm, or the nearest command by edit distance) and
+  `Run "linked help" for the list.`, and exit 1.
+
 ## 1.36.0
 
 ### Minor Changes
