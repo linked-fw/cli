@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.0
+
+### Minor Changes
+
+- [#196](https://github.com/linked-fw/cli/pull/196) [`dc311f2`](https://github.com/linked-fw/cli/commit/dc311f202784e93cf9357ec51e0c4497fa9cb521) Thanks [@flyon](https://github.com/flyon)! - **Renamed:** `linked doctor` is now `linked app-doctor` (no alias). It checks how an app uses
+  linked packages, so run outside an app (no `vite.config.{ts,js,mjs}`) it now says so and exits 1,
+  instead of reporting "0 warnings" for a directory it never checked.
+
+  **Removed:** the `linked yarn` command and the `safeYarn` export — the workspace is npm-only.
+
 ## 1.35.0
 
 ### Minor Changes
