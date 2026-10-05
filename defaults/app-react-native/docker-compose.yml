@@ -2,7 +2,7 @@
 # `npm run fuseki:up` starts it and waits for the healthcheck; `npm run fuseki:down` stops it (data persists).
 services:
   fuseki:
-    image: secoresearch/fuseki:5.5.0
+    image: secoresearch/fuseki:5.6.0
     ports:
       # Override the host port when 3030 is taken (another project's Fuseki); set FUSEKI_BASE_URL to match.
       - "${FUSEKI_PORT:-3030}:3030"
