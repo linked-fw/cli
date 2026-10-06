@@ -257,10 +257,26 @@ published metadata does not point at the right place, and `--build "<cmd>"`
 replaces `linked build` (an empty string builds nothing). A failing build only
 warns — a package whose build is broken is usually why you localized it.
 
+**One copy of each framework package.** A checkout's own install leaves its own
+`@_linked/core` (pinned by the checkout's lockfile, often older than the app's)
+and a registry copy of any localized sibling in its `node_modules`, and Node
+loads those instead of the app's. So after installing, and on every `--relink`,
+`linked localize` removes from every checkout's `node_modules` its own copy of
+`@_linked/*`, `react` and `react-dom` (plus its peerDependencies) when the app
+has a version that satisfies the checkout's range; a localized sibling always
+counts. A copy the app's version does not satisfy is kept, with a warning naming
+the package, the range and the app's version. Packages with a `bin` (such as this
+CLI in a checkout's devDependencies) are never removed, and the checkout still
+builds and runs its tests, resolving those packages from the app.
+`--no-prune-provided` keeps every checkout's `node_modules` as npm left it. The
+Vite config dedupes every installed `@_linked/*` package plus React as well, so
+the dev server resolves them from the app root whatever a checkout has.
+
 The work is done by [`@_linked/localize`](https://www.npmjs.com/package/@_linked/localize),
-which is dependency-free and framework-agnostic; this CLI only supplies the
-build command. That package's own binary, `linked-localize`, is the same mechanism with
-two differences: it builds nothing unless given `--build "<cmd>"`, and its verbs are subcommands —
+which is dependency-free and framework-agnostic; this CLI supplies the
+build command and the list of what an app provides. That package's own binary, `linked-localize`, is the same mechanism with
+three differences: it builds nothing unless given `--build "<cmd>"`, it prunes nothing unless
+given `--prune-provided`, and its verbs are subcommands —
 `linked-localize adopt <pkg>` and `linked-localize remove <pkg>` where this CLI has
 `linked localize --adopt <pkg>` and `linked delocalize <pkg>`. In a linked app, use
 `linked localize`.

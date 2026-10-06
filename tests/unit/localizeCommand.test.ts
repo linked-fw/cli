@@ -39,6 +39,7 @@ jest.mock(
 import {
   adoptPackage,
   DEFAULT_BUILD_COMMAND,
+  PROVIDED_BY_APP,
   runDelocalize,
   runLocalize,
 } from '../../src/commands/localize';
@@ -107,6 +108,50 @@ describe('linked localize', () => {
   });
 });
 
+// A checkout's own install leaves its own `@_linked/core` and a registry copy
+// of any localized sibling in its node_modules; Node loads those instead of
+// the app's. The CLI turns localize's pruning on for every path that installs
+// or relinks, and names what a linked app provides.
+describe('linked localize --prune-provided (on by default)', () => {
+  const expected = {pruneProvided: true, provided: PROVIDED_BY_APP};
+
+  it('names the framework scope and React as what the app provides', () => {
+    expect(PROVIDED_BY_APP).toEqual(['@_linked/*', 'react', 'react-dom']);
+  });
+
+  it('is on for localize', async () => {
+    await runLocalize(['@_linked/dcmi'], {});
+    expect(calls[0].args[1]).toMatchObject(expected);
+  });
+
+  it('is on for --relink, the postinstall path, so a root install does not bring the copies back', async () => {
+    await runLocalize([], {relink: true});
+    expect(calls[0].fn).toBe('relink');
+    expect(calls[0].args[1]).toEqual(expected);
+  });
+
+  it("is on for --adopt and for create-package's adopt", async () => {
+    await runLocalize(['@_linked/fresh'], {adopt: true});
+    expect(calls[0].args[1]).toMatchObject(expected);
+
+    calls.length = 0;
+    await adoptPackage('@_linked/fresh', {
+      appRoot: '/app',
+      build: 'linked build',
+    });
+    expect(calls[0].args[1]).toMatchObject(expected);
+  });
+
+  it('--no-prune-provided turns it off everywhere', async () => {
+    await runLocalize(['@_linked/dcmi'], {pruneProvided: false});
+    expect(calls[0].args[1].pruneProvided).toBe(false);
+
+    calls.length = 0;
+    await runLocalize([], {relink: true, pruneProvided: false});
+    expect(calls[0].args[1].pruneProvided).toBe(false);
+  });
+});
+
 describe('linked delocalize', () => {
   it('undoes every localized package when given no names', async () => {
     await runDelocalize([], {});
@@ -120,7 +165,10 @@ describe('linked delocalize', () => {
   });
 
   it('--adopt reaches adopt, with the same build seam and no subdir', async () => {
-    await runLocalize(['@_linked/foo'], {adopt: true, repo: 'https://x/foo.git'});
+    await runLocalize(['@_linked/foo'], {
+      adopt: true,
+      repo: 'https://x/foo.git',
+    });
     expect(calls.map((c) => c.fn)).toEqual(['adopt']);
     expect(calls[0].args[0]).toEqual(['@_linked/foo']);
     expect(calls[0].args[1]).toEqual({
@@ -128,6 +176,8 @@ describe('linked delocalize', () => {
       dir: undefined,
       repo: 'https://x/foo.git',
       build: DEFAULT_BUILD_COMMAND,
+      pruneProvided: true,
+      provided: PROVIDED_BY_APP,
     });
   });
 
@@ -141,6 +191,8 @@ describe('linked delocalize', () => {
     expect(calls[0].args[1]).toEqual({
       build: 'node launch.js build',
       repo: undefined,
+      pruneProvided: true,
+      provided: PROVIDED_BY_APP,
     });
     expect(calls[0].args[2]).toEqual({appRoot: '/app'});
   });

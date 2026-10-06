@@ -1,0 +1,5 @@
+---
+'@_linked/cli': minor
+---
+
+`linked localize` now removes a checkout's own copy of what the app provides. A checkout's install leaves its own `@_linked/core` (pinned by the checkout's lockfile, often older than the app's) and a registry copy of any localized sibling in its `node_modules`, and plain Node and `tsx` loaded those: measured with three localized `@_linked/*` packages, three cores in one process, and a localized package that never saw its localized sibling. After installing, and on every `--relink`, every checkout's copies of `@_linked/*`, `react` and `react-dom` are removed when the app's version satisfies the checkout's range (a localized sibling always counts); a copy it does not satisfy is kept with a warning, and packages with a `bin` are never removed. Measured afterwards: one core in Node, `tsx` and Vite SSR, and every checkout still builds and passes its tests. `--no-prune-provided` turns it off. Takes effect with the `@_linked/localize` release that adds `--prune-provided` (unreleased at the time of writing); `@_linked/localize` 0.2.0 ignores the option.

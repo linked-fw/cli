@@ -75,7 +75,8 @@ describe('ssr.noExternal', () => {
       expect(bundled(noExternal, pkg)).toBe(false);
     }
     // Workspace mode keeps Vite's default conditions (`development` → src).
-    expect(config.resolve).toBeUndefined();
+    // (`resolve` itself now carries the dedupe list — see viteDedupe.test.ts.)
+    expect(config.resolve.conditions).toBeUndefined();
     expect(config.ssr.resolve).toBeUndefined();
   });
 

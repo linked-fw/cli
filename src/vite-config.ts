@@ -643,6 +643,54 @@ export function ssrNoExternal(
 }
 
 /**
+ * Packages a STANDALONE app has always deduped, installed or not: the two that
+ * hold React context the SSR tree must agree on. See the standalone `resolve`
+ * block in `createViteConfig`.
+ */
+const STANDALONE_DEDUPE = ['@_linked/server-utils', '@_linked/react'];
+
+/**
+ * `resolve.dedupe` for every mode: every installed `@_linked/*` package, plus
+ * `react` and `react-dom`, each only when it is installed.
+ *
+ * Vite resolves a deduped name from the project root instead of from the
+ * importer, so every importer gets the app's copy. Without it, a localized
+ * checkout's own `node_modules` copy of `@_linked/core` (or of a localized
+ * sibling) was resolved from that checkout, and the dev SSR backend loaded one
+ * core per copy -- measured: three in a scratch app with three localized
+ * `@_linked/*` packages. A framework package registers its shapes on load and
+ * React keeps a module-level dispatcher, so a second copy of either is a bug,
+ * not a cost.
+ *
+ * "Installed" means present in a `node_modules/` at `appRoot` or above it: the
+ * places Node's (and Vite's) search from the root reaches. A deduped name the
+ * root cannot resolve would FAIL to resolve rather than fall back to the
+ * importer, which is why a name is not added just because it is declared.
+ */
+export function linkedDedupe(appRoot: string = process.cwd()): string[] {
+  const names = new Set<string>();
+  const extras = new Set(['react', 'react-dom']);
+  for (let dir = path.resolve(appRoot); ; dir = path.dirname(dir)) {
+    const nm = path.join(dir, 'node_modules');
+    try {
+      for (const entry of fsExtra.readdirSync(path.join(nm, '@_linked'), {withFileTypes: true})) {
+        if (entry.isDirectory() || entry.isSymbolicLink()) names.add(`@_linked/${entry.name}`);
+      }
+    } catch {
+      /* no @_linked scope here */
+    }
+    for (const name of extras) {
+      if (fsExtra.existsSync(path.join(nm, name, 'package.json'))) {
+        names.add(name);
+        extras.delete(name);
+      }
+    }
+    if (path.dirname(dir) === dir) break;
+  }
+  return [...names].sort();
+}
+
+/**
  * The `process.env.*` values inlined into the browser bundle — and only there.
  * See the `environments.client.define` note in `createViteConfig` for why the
  * server environment must not receive them.
@@ -874,18 +922,18 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // ship `src`, and we WANT `development → src` for HMR — so we leave
       // conditions at Vite's defaults there (undefined = untouched), keeping
       // CN dev byte-for-byte unchanged.
-      ...(isStandalone
-        ? {
-            resolve: {
-              conditions: ['module', 'node'],
-              // Dedupe the context-holding packages so the two `ssrLoadModule` loads
-              // (LinkedServer + the app graph) resolve to ONE `server-utils`/`react`
-              // instance — otherwise their `AppContext` objects differ and
-              // `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
-              dedupe: ['@_linked/server-utils', '@_linked/react'],
-            },
-          }
-        : {}),
+      //
+      // DEDUPE, every mode: see `linkedDedupe`. Standalone also keeps its two
+      // context-holding packages even when they are not found on disk, so the two
+      // `ssrLoadModule` loads (LinkedServer + the app graph) resolve to ONE
+      // `server-utils`/`react` instance — otherwise their `AppContext` objects
+      // differ and `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
+      resolve: {
+        ...(isStandalone ? {conditions: ['module', 'node']} : {}),
+        dedupe: [
+          ...new Set([...(isStandalone ? STANDALONE_DEDUPE : []), ...linkedDedupe(process.cwd())]),
+        ],
+      },
       // `ssr.external` is a minimal allowlist of
       // npm deps that genuinely can't (or shouldn't) go through Vite's
       // SSR transform. Workspace packages (`@_linked/*`, `lincd-*`) are
