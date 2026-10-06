@@ -396,34 +396,45 @@ export async function discoverLinkedSourceDependencies(
   const fs = await import('node:fs/promises');
   const out: WorkspaceEntry[] = [];
   const seen = new Set<string>();
+  // Keyed on the installed directory, not the package name, and walked
+  // breadth-first so the app's own dependencies are settled before anything a
+  // dependency installed for itself. A localized checkout has its own
+  // node_modules, which holds a published, lib-only copy of any sibling it
+  // depends on. Keyed on the name and walked depth-first, reaching that copy
+  // through the first checkout marked the name visited, and the app's own
+  // localized checkout of it was never registered — Vite then served it from
+  // lib/ and the importing checkout kept its nested copy.
   const visited = new Set<string>();
-  const walk = async (
-    deps: Record<string, string> | undefined,
-    fromDir: string,
-  ): Promise<void> => {
-    for (const name of Object.keys(deps ?? {})) {
-      if (visited.has(name)) continue;
-      visited.add(name);
-      const resolved = await readInstalledPkg(name, fromDir);
-      if (!resolved) continue;
-      if (resolved.json.linkedPackage !== true) continue;
-      let realRoot = resolved.root;
-      try {
-        realRoot = await fs.realpath(resolved.root);
-      } catch {}
-      const entry = await readSourcePackage(realRoot);
-      if (entry && !seen.has(entry.name)) {
-        seen.add(entry.name);
-        out.push(entry);
-      }
-      // Recurse from the real location, so a symlinked clone resolves its own
-      // dependencies from its source dir.
-      await walk(resolved.json.dependencies, realRoot);
-    }
-  };
   const appPkg = await fsExtra.readJson(pkgPath);
-  await walk(appPkg.dependencies, cwd);
-  await walk(appPkg.devDependencies, cwd);
+  let level: {deps: Record<string, string> | undefined; fromDir: string}[] = [
+    {deps: appPkg.dependencies, fromDir: cwd},
+    {deps: appPkg.devDependencies, fromDir: cwd},
+  ];
+  while (level.length > 0) {
+    const next: typeof level = [];
+    for (const {deps, fromDir} of level) {
+      for (const name of Object.keys(deps ?? {})) {
+        const resolved = await readInstalledPkg(name, fromDir);
+        if (!resolved) continue;
+        if (resolved.json.linkedPackage !== true) continue;
+        let realRoot = resolved.root;
+        try {
+          realRoot = await fs.realpath(resolved.root);
+        } catch {}
+        if (visited.has(realRoot)) continue;
+        visited.add(realRoot);
+        const entry = await readSourcePackage(realRoot);
+        if (entry && !seen.has(entry.name)) {
+          seen.add(entry.name);
+          out.push(entry);
+        }
+        // Recurse from the real location, so a symlinked clone resolves its own
+        // dependencies from its source dir.
+        next.push({deps: resolved.json.dependencies, fromDir: realRoot});
+      }
+    }
+    level = next;
+  }
   return out;
 }
 

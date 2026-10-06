@@ -8,13 +8,16 @@ Command-line tools for the `@_linked/*` packages and apps.
 npm install --save-dev @_linked/cli
 ```
 
-## Binaries
+## Binary
 
-Three executables ship in this package:
+One executable ships in this package: `linked`. (`lnk`, `lincd` and `lincd-cli` were dropped in
+[#40](https://github.com/linked-fw/cli/pull/40).)
 
-- `linked` — primary command
-- `lnk` — short alias for `linked`
-- `lincd` — deprecated alias; prints a warning and forwards to `linked`. Will be removed in a future major release.
+In a project that has `@_linked/cli` installed — any linked app, including Create Now — run it as
+`npx linked <command>`. Everywhere else, name the package: `npx @_linked/cli <command>`.
+A bare `npx linked` outside such a project does **not** reach this CLI: npm resolves it to the
+unrelated `linked` package on the registry, which has no binary, and fails with
+`could not determine executable to run`.
 
 ## Commands
 
@@ -24,10 +27,30 @@ Run `linked --help` for the full list. The commonly used ones:
 
 ```bash
 linked create-app <name>          # scaffold a new app (interactive)
-linked create-package <name>      # scaffold a new linkedPackage
+linked create-package <name>      # scaffold a new linkedPackage (see below for where it goes)
 linked create-shape <name>        # add a shape file to the current package
 linked create-component <name>    # add a React component file
 ```
+
+Inside an app (a `package.json` with `"linkedApp": true` above the current directory),
+`create-package` puts the package in one of two places, and asks which on a terminal:
+
+```bash
+linked create-package @_linked/foo --location packages        # part of the app's repository
+linked create-package @_linked/foo --location packages-local  # a repository of its own
+linked create-package @_linked/foo --remote <git-url> [--push] # the same, with an origin
+```
+
+- `packages/foo` — a workspace member: added to the app's `dependencies` (and `packages/*` to its
+  `workspaces` if missing), installed at the app root.
+- `packages-local/_linked-foo` — the name `linked localize` uses. `git init` and a first commit,
+  `origin` and `repository.url` from `--remote`, pushed with `--push`; then installed, built,
+  linked and recorded by `linked localize --adopt`. It is not added to the app's `dependencies`
+  until it is published. `--remote` or `--push` imply this location.
+
+Any of the three flags skips the question. With none of them and no terminal, it exits 1 and says
+which flag to pass. An existing target folder is refused. Outside an app nothing changes: the
+package goes in `./packages/`, `./modules/` or the current directory, and installs on its own.
 
 ### Building
 
@@ -214,9 +237,17 @@ linked localize @_linked/rdfs     # clone, install, build, symlink into node_mod
 linked localize                   # report what is localized (same as --list)
 linked localize --list --check    # exit 1 when something recorded is not actually linked
 linked localize --relink          # recreate the recorded symlinks — run this from postinstall
+linked localize @_linked/rdfs --adopt  # link a checkout already in packages-local/_linked-rdfs, no clone
 linked delocalize @_linked/rdfs   # unlink and forget, keeping the checkout
 linked delocalize --purge         # undo everything and delete the checkouts
 ```
+
+Checkouts go in `packages-local/` under the npm name with the scope flattened:
+`@_linked/rdfs` → `packages-local/_linked-rdfs`.
+
+`npm install <name>` — with a package name — does not run the app's own `postinstall`, so it
+replaces every localized link with the registry copy and prunes the checkouts' dependencies,
+silently. Run `linked localize --relink` after it (a bare `npm install` runs the hook itself).
 
 Name packages exactly as npm names them (`@_linked/rdfs`, `lodash`): the
 repository is read from the package's published `repository` field, so there is
@@ -228,7 +259,11 @@ warns — a package whose build is broken is usually why you localized it.
 
 The work is done by [`@_linked/localize`](https://www.npmjs.com/package/@_linked/localize),
 which is dependency-free and framework-agnostic; this CLI only supplies the
-build command.
+build command. That package's own binary, `linked-localize`, is the same mechanism with
+two differences: it builds nothing unless given `--build "<cmd>"`, and its verbs are subcommands —
+`linked-localize adopt <pkg>` and `linked-localize remove <pkg>` where this CLI has
+`linked localize --adopt <pkg>` and `linked delocalize <pkg>`. In a linked app, use
+`linked localize`.
 
 ### Registry / dev utilities
 
