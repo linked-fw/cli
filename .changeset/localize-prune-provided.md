@@ -1,5 +1,0 @@
----
-'@_linked/cli': minor
----
-
-`linked localize` now leaves one copy of each framework package. A checkout's install leaves its own `@_linked/core` (pinned by the checkout's lockfile, often older than the app's) and a registry copy of any localized sibling in its `node_modules`, and plain Node and `tsx` loaded those: measured with three localized linked packages, three cores in one process, and a localized package that never saw its localized sibling. `@_linked/localize` 0.3.0 removes a checkout's copies of what the app provides after every install and on every `--relink`; this CLI requires it and tells it what the app provides: the linked packages it has installed (by their `linkedPackage` flag, not their scope), `react` and `react-dom`. A copy is removed only when the app's version satisfies the checkout's range (a localized sibling always counts); otherwise it is kept, with a warning. Measured afterwards: one core in Node, `tsx` and Vite SSR, and every checkout still builds — `npx linked build` in a checkout runs the app's `linked` — and passes its tests. `--no-prune` turns it off.
