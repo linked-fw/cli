@@ -10,6 +10,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
+import {isLinkedPackageJson} from './installed-packages.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import type {PackageDetails} from './interfaces.js';
 
@@ -355,7 +356,7 @@ function addPackage(
     // `lincd: true` is the pre-rename spelling of the same flag and is still
     // honoured by `linked build-package`; honouring it here too keeps the two
     // from disagreeing about what a linked package is.
-    isLinkedPackage: pack.linkedPackage === true || pack.lincd === true,
+    isLinkedPackage: isLinkedPackageJson(pack),
     isApp: pack.linkedApp === true,
     hasBuildScript: !!pack.scripts?.build,
   });

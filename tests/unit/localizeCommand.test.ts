@@ -36,10 +36,22 @@ jest.mock(
   {virtual: true},
 );
 
+// What the app provides is read from its installed packages (see
+// viteDedupe.test.ts for that walk); this suite asserts the CLI passes it on.
+const PROVIDED_BY_APP = [
+  '@acme/widgets',
+  '@_linked/core',
+  'react',
+  'react-dom',
+];
+const mockProvided = jest.fn(async (_appRoot: string) => PROVIDED_BY_APP);
+jest.mock('../../src/installed-packages', () => ({
+  appProvidedPackages: (appRoot: string) => mockProvided(appRoot),
+}));
+
 import {
   adoptPackage,
   DEFAULT_BUILD_COMMAND,
-  PROVIDED_BY_APP,
   runDelocalize,
   runLocalize,
 } from '../../src/commands/localize';
@@ -115,8 +127,17 @@ describe('linked localize', () => {
 describe('linked localize prunes (on by default)', () => {
   const expected = {prune: true, provided: PROVIDED_BY_APP};
 
-  it('names the framework scope and React as what the app provides', () => {
-    expect(PROVIDED_BY_APP).toEqual(['@_linked/*', 'react', 'react-dom']);
+  it("passes the app's installed linked packages and React, read from the app root", async () => {
+    await runLocalize(['@_linked/dcmi'], {});
+    expect(mockProvided).toHaveBeenLastCalledWith(process.cwd());
+    expect(calls[0].args[1].provided).toEqual(PROVIDED_BY_APP);
+
+    calls.length = 0;
+    await adoptPackage('@_linked/fresh', {
+      appRoot: '/app',
+      build: 'linked build',
+    });
+    expect(mockProvided).toHaveBeenLastCalledWith('/app');
   });
 
   it('is on for localize', async () => {

@@ -18,7 +18,12 @@ import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
-import {isFrameworkPkg, readInstalledPkg} from './installed-packages.js';
+import {
+  appProvidedPackages,
+  discoverInstalledLinkedPackages,
+  isLinkedPackageJson,
+  readInstalledPkg,
+} from './installed-packages.js';
 import {
   linkedClientDepIncludesPlugin,
   resolveExportsSubpath,
@@ -391,49 +396,16 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
 export async function discoverLinkedSourceDependencies(
   cwd: string = process.cwd(),
 ): Promise<WorkspaceEntry[]> {
-  const pkgPath = path.join(cwd, 'package.json');
-  if (!(await fsExtra.pathExists(pkgPath))) return [];
-  const fs = await import('node:fs/promises');
   const out: WorkspaceEntry[] = [];
   const seen = new Set<string>();
-  // Keyed on the installed directory, not the package name, and walked
-  // breadth-first so the app's own dependencies are settled before anything a
-  // dependency installed for itself. A localized checkout has its own
-  // node_modules, which holds a published, lib-only copy of any sibling it
-  // depends on. Keyed on the name and walked depth-first, reaching that copy
-  // through the first checkout marked the name visited, and the app's own
-  // localized checkout of it was never registered — Vite then served it from
-  // lib/ and the importing checkout kept its nested copy.
-  const visited = new Set<string>();
-  const appPkg = await fsExtra.readJson(pkgPath);
-  let level: {deps: Record<string, string> | undefined; fromDir: string}[] = [
-    {deps: appPkg.dependencies, fromDir: cwd},
-    {deps: appPkg.devDependencies, fromDir: cwd},
-  ];
-  while (level.length > 0) {
-    const next: typeof level = [];
-    for (const {deps, fromDir} of level) {
-      for (const name of Object.keys(deps ?? {})) {
-        const resolved = await readInstalledPkg(name, fromDir);
-        if (!resolved) continue;
-        if (resolved.json.linkedPackage !== true) continue;
-        let realRoot = resolved.root;
-        try {
-          realRoot = await fs.realpath(resolved.root);
-        } catch {}
-        if (visited.has(realRoot)) continue;
-        visited.add(realRoot);
-        const entry = await readSourcePackage(realRoot);
-        if (entry && !seen.has(entry.name)) {
-          seen.add(entry.name);
-          out.push(entry);
-        }
-        // Recurse from the real location, so a symlinked clone resolves its own
-        // dependencies from its source dir.
-        next.push({deps: resolved.json.dependencies, fromDir: realRoot});
-      }
+  // The walk (breadth-first, keyed on the installed directory) is shared with
+  // `resolve.dedupe` and `linked localize`; see discoverInstalledLinkedPackages.
+  for (const pkg of await discoverInstalledLinkedPackages(cwd)) {
+    const entry = await readSourcePackage(pkg.realRoot);
+    if (entry && !seen.has(entry.name)) {
+      seen.add(entry.name);
+      out.push(entry);
     }
-    level = next;
   }
   return out;
 }
@@ -650,44 +622,24 @@ export function ssrNoExternal(
 const STANDALONE_DEDUPE = ['@_linked/server-utils', '@_linked/react'];
 
 /**
- * `resolve.dedupe` for every mode: every installed `@_linked/*` package, plus
- * `react` and `react-dom`, each only when it is installed.
+ * `resolve.dedupe` for every mode: every linked package the app provides, plus
+ * `react` and `react-dom` — see `appProvidedPackages`. A linked package is one
+ * whose `package.json` says `"linkedPackage": true`, whatever its npm scope.
  *
  * Vite resolves a deduped name from the project root instead of from the
  * importer, so every importer gets the app's copy. Without it, a localized
  * checkout's own `node_modules` copy of `@_linked/core` (or of a localized
  * sibling) was resolved from that checkout, and the dev SSR backend loaded one
  * core per copy -- measured: three in a scratch app with three localized
- * `@_linked/*` packages. A framework package registers its shapes on load and
- * React keeps a module-level dispatcher, so a second copy of either is a bug,
- * not a cost.
+ * linked packages. A linked package registers its shapes on load and React
+ * keeps a module-level dispatcher, so a second copy of either is a bug, not a
+ * cost.
  *
- * "Installed" means present in a `node_modules/` at `appRoot` or above it: the
- * places Node's (and Vite's) search from the root reaches. A deduped name the
- * root cannot resolve would FAIL to resolve rather than fall back to the
- * importer, which is why a name is not added just because it is declared.
+ * Only names the app root resolves are listed: a deduped name the root cannot
+ * resolve would FAIL to resolve rather than fall back to the importer.
  */
-export function linkedDedupe(appRoot: string = process.cwd()): string[] {
-  const names = new Set<string>();
-  const extras = new Set(['react', 'react-dom']);
-  for (let dir = path.resolve(appRoot); ; dir = path.dirname(dir)) {
-    const nm = path.join(dir, 'node_modules');
-    try {
-      for (const entry of fsExtra.readdirSync(path.join(nm, '@_linked'), {withFileTypes: true})) {
-        if (entry.isDirectory() || entry.isSymbolicLink()) names.add(`@_linked/${entry.name}`);
-      }
-    } catch {
-      /* no @_linked scope here */
-    }
-    for (const name of extras) {
-      if (fsExtra.existsSync(path.join(nm, name, 'package.json'))) {
-        names.add(name);
-        extras.delete(name);
-      }
-    }
-    if (path.dirname(dir) === dir) break;
-  }
-  return [...names].sort();
+export async function linkedDedupe(appRoot: string = process.cwd()): Promise<string[]> {
+  return appProvidedPackages(appRoot);
 }
 
 /**
@@ -739,8 +691,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       try {
         const appPkg = await fsExtra.readJson(path.join(process.cwd(), 'package.json'));
         const allDeps = {...appPkg.dependencies, ...appPkg.devDependencies};
+        // A linked package by its own `linkedPackage` flag, not its scope.
         for (const name of Object.keys(allDeps)) {
-          if (isFrameworkPkg(name)) linkedDeps.push(name);
+          const installed = await readInstalledPkg(name, process.cwd());
+          if (installed && isLinkedPackageJson(installed.json)) linkedDeps.push(name);
         }
       } catch {
         /* best-effort — no package.json is fine */
@@ -931,7 +885,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       resolve: {
         ...(isStandalone ? {conditions: ['module', 'node']} : {}),
         dedupe: [
-          ...new Set([...(isStandalone ? STANDALONE_DEDUPE : []), ...linkedDedupe(process.cwd())]),
+          ...new Set([...(isStandalone ? STANDALONE_DEDUPE : []), ...(await linkedDedupe(process.cwd()))]),
         ],
       },
       // `ssr.external` is a minimal allowlist of
@@ -1063,7 +1017,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // `linked:resolve-workspace-ts` plugin; in a workspace-member CLONE they'd
       // otherwise resolve via `node_modules` SYMLINKS and esbuild fails on their
       // subpath `exports` ("No known conditions for ./shapes/SHACL …").
-      // STANDALONE mode: exclude the published `@_linked/*` / `lincd-*` deps from
+      // STANDALONE mode: exclude the app's published linked deps (by their
+      // `linkedPackage` flag; see `linkedDeps` above) from
       // esbuild's pre-bundler so the browser's native ESM graph loads ONE copy of
       // `@_linked/core` (no per-subpath duplication → stable class names → shape URIs
       // match the backend — see `linkedDeps` above). These packages are ESM with no

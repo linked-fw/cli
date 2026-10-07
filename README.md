@@ -262,22 +262,24 @@ warns — a package whose build is broken is usually why you localized it.
 and a registry copy of any localized sibling in its `node_modules`, and Node
 loads those instead of the app's. So after installing, and on every `--relink`,
 `linked localize` removes from every checkout's `node_modules` its own copy of
-`@_linked/*`, `react` and `react-dom` (plus its peerDependencies) when the app
-has a version that satisfies the checkout's range; a localized sibling always
+a linked package the app has installed, `react` and `react-dom` (plus its
+peerDependencies) when the app has a version that satisfies the checkout's range; a localized sibling always
 counts. A copy the app's version does not satisfy is kept, with a warning naming
 the package, the range and the app's version. The checkout still builds and runs
 its tests, resolving those packages from the app — this CLI included: npm puts
 every ancestor's `node_modules/.bin` on the `PATH`, so `npx linked build` in a
 checkout runs the app's `linked`. `--no-prune` keeps every checkout's
 `node_modules` as npm left it. The
-Vite config dedupes every installed `@_linked/*` package plus React as well, so
-the dev server resolves them from the app root whatever a checkout has.
+Vite config dedupes the same list, so the dev server resolves them from the app
+root whatever a checkout has. A linked package is one whose `package.json` says
+`"linkedPackage": true` — the definition `build-all` and `linked build` use —
+whatever its npm scope; `@_linked/localize`, a plain tool, is not one.
 
 The work is done by [`@_linked/localize`](https://www.npmjs.com/package/@_linked/localize),
 which is dependency-free and framework-agnostic; this CLI supplies the
 build command and the list of what an app provides. That package's own binary, `linked-localize`, is the same mechanism with
 three differences: it builds nothing unless given `--build "<cmd>"`, it treats only localized
-siblings and peerDependencies as provided unless given `--provided "@_linked/*,react,react-dom"`,
+siblings and peerDependencies as provided unless given `--provided "<name>,…"`,
 and its verbs are subcommands —
 `linked-localize adopt <pkg>` and `linked-localize remove <pkg>` where this CLI has
 `linked localize --adopt <pkg>` and `linked delocalize <pkg>`. In a linked app, use
