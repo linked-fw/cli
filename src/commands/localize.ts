@@ -43,9 +43,10 @@ export const DEFAULT_BUILD_COMMAND = 'linked build';
  * their scope — plus `react` and `react-dom`. Each one either holds
  * module-level state that must exist once (core's shape registry, React's
  * dispatcher, the context objects in server-utils and react) or is a localized
- * sibling the checkout should reach live. The same list is Vite's
- * `resolve.dedupe` (see `appProvidedPackages`). localize itself already treats
- * every localized sibling and a checkout's peerDependencies as provided.
+ * sibling the checkout should reach live (see `appProvidedPackages`). localize
+ * itself already treats every localized sibling and a checkout's
+ * peerDependencies as provided. Vite's `resolve.dedupe` is derived separately,
+ * from what is localized (`localized-dedupe.ts`).
  */
 export async function providedByApp(appRoot: string): Promise<string[]> {
   const {appProvidedPackages} = await import('../installed-packages.js');

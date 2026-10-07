@@ -2,17 +2,19 @@ import {execFileSync} from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {createViteConfig, linkedDedupe} from '../../src/vite-config';
+import {createViteConfig, localizedDedupe} from '../../src/vite-config';
+import {describeSkipped} from '../../src/localized-dedupe';
 
 // A localized checkout (`packages-local/<pkg>`, installed by `linked localize`)
 // carries its own `node_modules`, pinned by ITS lockfile: its own
 // `@_linked/core`, often older than the app's. Vite resolves a bare import from
 // the importer, so without a dedupe the dev SSR backend loaded the checkout's
 // core next to the app's — measured: three cores in one process with three
-// localized packages. `createViteConfig` dedupes every linked package the app
-// provides plus React, in every mode, which collapses them to the app's copy.
-// A linked package is one whose package.json says `"linkedPackage": true` —
-// the definition `build-all` and `linked build` use — not its npm scope.
+// localized packages.
+//
+// The duplicates come from LOCALIZATION, so that is what `createViteConfig`
+// detects: it dedupes the localized packages, what their checkouts import that
+// the app has at a version they accept, and React.
 
 function writeJson(file: string, json: unknown) {
   fs.mkdirSync(path.dirname(file), {recursive: true});
@@ -21,18 +23,12 @@ function writeJson(file: string, json: unknown) {
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, 'utf8'));
 
-/** An ESM linked package whose `which` export says which copy it is. */
-function fakeCore(
-  dir: string,
-  version: string,
-  which: string,
-  name = '@_linked/core',
-) {
+/** An ESM package whose `which` export says which copy it is. */
+function fakePkg(dir: string, name: string, version: string, which: string) {
   writeJson(path.join(dir, 'package.json'), {
     name,
     version,
     type: 'module',
-    linkedPackage: true,
     exports: {'.': './index.js'},
   });
   fs.writeFileSync(
@@ -55,6 +51,12 @@ describe('resolve.dedupe', () => {
   let checkout: string;
   const cwd = process.cwd();
 
+  const editJson = (file: string, edit: (json: any) => void) => {
+    const json = readJson(file);
+    edit(json);
+    writeJson(file, json);
+  };
+
   beforeEach(() => {
     tmp = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), 'linked-dedupe-')),
@@ -64,11 +66,22 @@ describe('resolve.dedupe', () => {
       name: 'app',
       private: true,
       type: 'module',
-      dependencies: {'@_linked/core': '^2.25.0', '@_linked/a': '^1.0.0'},
+      dependencies: {
+        '@_linked/core': '^2.25.0',
+        '@_linked/a': '^1.0.0',
+        lodash: '^4.0.0',
+      },
     });
-    fakeCore(
+    fakePkg(
       path.join(app, 'node_modules', '@_linked', 'core'),
+      '@_linked/core',
       '2.25.0',
+      'app',
+    );
+    fakePkg(
+      path.join(app, 'node_modules', 'lodash'),
+      'lodash',
+      '4.17.21',
       'app',
     );
     writeJson(path.join(app, 'node_modules', 'react', 'package.json'), {
@@ -76,7 +89,7 @@ describe('resolve.dedupe', () => {
       version: '19.0.0',
     });
 
-    // The localized checkout, linked in, with the older core its own install left.
+    // The localized checkout, linked in and recorded, with the older core its own install left.
     checkout = path.join(app, 'packages-local', '_linked-a');
     writeJson(path.join(checkout, 'package.json'), {
       name: '@_linked/a',
@@ -91,8 +104,9 @@ describe('resolve.dedupe', () => {
       path.join(checkout, 'src', 'index.js'),
       "import {which} from '@_linked/core';\nexport const core = which;\n",
     );
-    fakeCore(
+    fakePkg(
       path.join(checkout, 'node_modules', '@_linked', 'core'),
+      '@_linked/core',
       '2.22.8',
       'checkout',
     );
@@ -101,6 +115,12 @@ describe('resolve.dedupe', () => {
       path.join(app, 'node_modules', '@_linked', 'a'),
       'dir',
     );
+    writeJson(path.join(app, 'local-packages.json'), {
+      version: 1,
+      packages: {
+        '@_linked/a': {path: 'packages-local/_linked-a', branch: 'main'},
+      },
+    });
   });
 
   afterEach(() => {
@@ -114,73 +134,79 @@ describe('resolve.dedupe', () => {
     return factory({mode, command: mode === 'development' ? 'serve' : 'build'});
   }
 
-  it('lists every linked package the app provides and React, and nothing that is not installed', async () => {
-    expect(await linkedDedupe(app)).toEqual([
+  it('lists the localized packages, what their checkouts import that the app has, and React', async () => {
+    expect((await localizedDedupe(app)).names).toEqual([
       '@_linked/a',
       '@_linked/core',
       'react',
     ]);
   });
 
-  it('finds packages hoisted to a node_modules above the app', async () => {
-    fakeCore(
-      path.join(tmp, 'node_modules', '@_linked', 'hoisted'),
-      '1.0.0',
-      'hoisted',
-      '@_linked/hoisted',
-    );
-    writeJson(path.join(tmp, 'node_modules', 'react-dom', 'package.json'), {
-      name: 'react-dom',
-      version: '19.0.0',
+  it('dedupes by what is localized, not by package flag or scope', async () => {
+    // A checkout's runtime dependency with no linked flag and no @_linked scope.
+    editJson(path.join(checkout, 'package.json'), (pkg) => {
+      pkg.dependencies.lodash = '^4.17.0';
     });
-    const appPkg = readJson(path.join(app, 'package.json'));
-    appPkg.dependencies['@_linked/hoisted'] = '^1.0.0';
-    writeJson(path.join(app, 'package.json'), appPkg);
-    expect(await linkedDedupe(app)).toEqual([
-      '@_linked/a',
-      '@_linked/core',
-      '@_linked/hoisted',
-      'react',
-      'react-dom',
+    expect((await localizedDedupe(app)).names).toContain('lodash');
+    // ...and nothing when nothing is localized: the app's own packages are not duplicated.
+    fs.rmSync(path.join(app, 'local-packages.json'));
+    expect((await localizedDedupe(app)).names).toEqual(['react']);
+  });
+
+  it('leaves out a dependency whose range the app does not satisfy, and says so', async () => {
+    editJson(path.join(checkout, 'package.json'), (pkg) => {
+      pkg.peerDependencies = {lodash: '^5.0.0'};
+    });
+    const {names, skipped} = await localizedDedupe(app);
+    expect(names).not.toContain('lodash');
+    expect(describeSkipped(skipped)).toBe(
+      "[linked] dedupe: 1 package a localized checkout keeps its own copy of, because the app's " +
+        'version is outside its range: lodash (@_linked/a asks ^5.0.0; app 4.17.21)',
+    );
+  });
+
+  it('leaves out a name a registry install nests its own copy of: deduping would hand it the wrong version', async () => {
+    editJson(path.join(checkout, 'package.json'), (pkg) => {
+      pkg.dependencies.lodash = '^4.17.0';
+    });
+    fakePkg(
+      path.join(app, 'node_modules', 'old-tool', 'node_modules', 'lodash'),
+      'lodash',
+      '3.10.1',
+      'old',
+    );
+    const {names, skipped} = await localizedDedupe(app);
+    expect(names).not.toContain('lodash');
+    expect(skipped).toEqual([
+      {
+        name: 'lodash',
+        reason: 'nested',
+        nestedAt: path.join(
+          'node_modules',
+          'old-tool',
+          'node_modules',
+          'lodash',
+        ),
+      },
     ]);
   });
 
-  it('knows a linked package by its linkedPackage flag, not by the @_linked scope', async () => {
-    // Linked under another scope, reached through a linked package's own dependencies.
-    fakeCore(
-      path.join(app, 'node_modules', '@acme', 'widgets'),
-      '1.0.0',
-      'widgets',
-      '@acme/widgets',
+  it('always dedupes a localized package, which every importer should reach live', async () => {
+    // A registry install with its own copy of the localized package does not stop it.
+    fakePkg(
+      path.join(
+        app,
+        'node_modules',
+        'old-tool',
+        'node_modules',
+        '@_linked',
+        'a',
+      ),
+      '@_linked/a',
+      '0.9.0',
+      'old',
     );
-    const checkoutPkg = readJson(path.join(checkout, 'package.json'));
-    checkoutPkg.dependencies['@acme/widgets'] = '^1.0.0';
-    writeJson(path.join(checkout, 'package.json'), checkoutPkg);
-    // Under @_linked, but a plain tool with no flag.
-    writeJson(
-      path.join(app, 'node_modules', '@_linked', 'tool', 'package.json'),
-      {name: '@_linked/tool', version: '1.0.0'},
-    );
-    const appPkg = readJson(path.join(app, 'package.json'));
-    appPkg.devDependencies = {'@_linked/tool': '^1.0.0'};
-    writeJson(path.join(app, 'package.json'), appPkg);
-
-    const names = await linkedDedupe(app);
-    expect(names).toContain('@acme/widgets');
-    expect(names).not.toContain('@_linked/tool');
-  });
-
-  it('leaves out a linked package only a dependency has installed: the root cannot resolve it', async () => {
-    fakeCore(
-      path.join(checkout, 'node_modules', '@acme', 'private'),
-      '1.0.0',
-      'private',
-      '@acme/private',
-    );
-    const checkoutPkg = readJson(path.join(checkout, 'package.json'));
-    checkoutPkg.dependencies['@acme/private'] = '^1.0.0';
-    writeJson(path.join(checkout, 'package.json'), checkoutPkg);
-    expect(await linkedDedupe(app)).not.toContain('@acme/private');
+    expect((await localizedDedupe(app)).names).toContain('@_linked/a');
   });
 
   it('is set in workspace mode — a localized checkout makes this app a workspace app', async () => {
@@ -206,12 +232,12 @@ describe('resolve.dedupe', () => {
   it('keeps the standalone pair even when they are not installed', async () => {
     fs.rmSync(path.join(app, 'packages-local'), {recursive: true, force: true});
     fs.rmSync(path.join(app, 'node_modules', '@_linked', 'a'));
+    fs.rmSync(path.join(app, 'local-packages.json'));
     const config = await resolvedConfig('development');
     expect(config.resolve.conditions).toEqual(['module', 'node']);
     expect(config.resolve.dedupe).toEqual([
       '@_linked/server-utils',
       '@_linked/react',
-      '@_linked/core',
       'react',
     ]);
   });
@@ -219,26 +245,43 @@ describe('resolve.dedupe', () => {
   it('standalone: keeps linked packages out of the dep optimizer by flag, not by scope', async () => {
     fs.rmSync(path.join(app, 'packages-local'), {recursive: true, force: true});
     fs.rmSync(path.join(app, 'node_modules', '@_linked', 'a'));
-    fakeCore(
-      path.join(app, 'node_modules', '@acme', 'widgets'),
-      '1.0.0',
-      'widgets',
-      '@acme/widgets',
-    );
-    writeJson(
-      path.join(app, 'node_modules', '@_linked', 'tool', 'package.json'),
-      {
-        name: '@_linked/tool',
-        version: '1.0.0',
+    fs.rmSync(path.join(app, 'local-packages.json'));
+    editJson(
+      path.join(app, 'node_modules', '@_linked', 'core', 'package.json'),
+      (pkg) => {
+        pkg.linkedPackage = true;
       },
     );
-    const appPkg = readJson(path.join(app, 'package.json'));
-    appPkg.dependencies = {
-      '@_linked/core': '^2.25.0',
-      '@acme/widgets': '^1.0.0',
-      '@_linked/tool': '^1.0.0',
-    };
-    writeJson(path.join(app, 'package.json'), appPkg);
+    fakePkg(
+      path.join(app, 'node_modules', '@acme', 'widgets'),
+      '@acme/widgets',
+      '1.0.0',
+      'widgets',
+    );
+    editJson(
+      path.join(app, 'node_modules', '@acme', 'widgets', 'package.json'),
+      (pkg) => {
+        pkg.linkedPackage = true;
+      },
+    );
+    // Under @_linked, but a plain tool with no flag; and one still carrying only the old `lincd` flag.
+    writeJson(
+      path.join(app, 'node_modules', '@_linked', 'tool', 'package.json'),
+      {name: '@_linked/tool', version: '1.0.0'},
+    );
+    writeJson(path.join(app, 'node_modules', 'lincd-old', 'package.json'), {
+      name: 'lincd-old',
+      version: '1.0.0',
+      lincd: true,
+    });
+    editJson(path.join(app, 'package.json'), (pkg) => {
+      pkg.dependencies = {
+        '@_linked/core': '^2.25.0',
+        '@acme/widgets': '^1.0.0',
+        '@_linked/tool': '^1.0.0',
+        'lincd-old': '^1.0.0',
+      };
+    });
 
     const config = await resolvedConfig('development');
     expect(config.optimizeDeps.exclude).toEqual([
@@ -259,7 +302,10 @@ describe('resolve.dedupe', () => {
             path.join(checkout, 'src', 'index.js'),
             JSON.stringify(resolve),
           ],
-          {cwd: path.join(__dirname, '..', '..'), encoding: 'utf8'},
+          {
+            cwd: path.join(__dirname, '..', '..'),
+            encoding: 'utf8',
+          },
         ),
       );
     // The control: what the checkout got before.

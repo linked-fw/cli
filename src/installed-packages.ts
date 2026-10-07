@@ -11,7 +11,7 @@ import path from 'node:path';
  *
  * A NAME check, used only by `client-dep-includes` (alongside the flag). Deciding
  * whether an installed package is linked goes by its `package.json` instead —
- * {@link isLinkedPackageJson} — which is what `resolve.dedupe`, the standalone
+ * {@link isLinkedPackageJson} — which is what the source walk, the standalone
  * `optimizeDeps.exclude` and `linked localize` use.
  */
 export const FRAMEWORK_PKG_PATTERNS: RegExp[] = [/^@_linked\//, /^lincd-/];
@@ -57,15 +57,16 @@ export async function readInstalledPkg(
 }
 
 /**
- * THE definition of a linked package: its own `package.json` says so, with
- * `"linkedPackage": true` (or the pre-rename `"lincd": true`). Not its npm
- * scope — a linked package can be published under any scope, and not
- * everything under `@_linked/` is one (`@_linked/localize` is a plain tool).
- * `lifecycle.ts` (`build-all`, `getLincdPackages`) and `linked build-package`
- * read the same two fields.
+ * THE definition of a linked package: its own `package.json` says
+ * `"linkedPackage": true`. Not its npm scope — a linked package can be
+ * published under any scope, and not everything under `@_linked/` is one
+ * (`@_linked/localize` is a plain tool). The pre-rename `"lincd": true` is not
+ * read: the packages that still carry it are the old `lincd-*` framework,
+ * which cannot share a runtime with `@_linked/core`. `lifecycle.ts`
+ * (`build-all`, `getLincdPackages`) and `linked build-package` use this too.
  */
 export const isLinkedPackageJson = (json: any): boolean =>
-  json?.linkedPackage === true || json?.lincd === true;
+  json?.linkedPackage === true;
 
 /** An installed linked package, as {@link discoverInstalledLinkedPackages} finds it. */
 export interface InstalledLinkedPackage {
@@ -126,9 +127,9 @@ export async function discoverInstalledLinkedPackages(
  * The names of the linked packages an app itself provides: those
  * {@link discoverInstalledLinkedPackages} finds that resolve from the app root
  * (not only from inside some dependency's own `node_modules`), plus `react` and
- * `react-dom` when they do. These are what must load once per runtime; shared
- * by Vite's `resolve.dedupe` and what `linked localize` tells localize the app
- * provides.
+ * `react-dom` when they do. These are what must load once per runtime: what
+ * `linked localize` tells localize the app provides, so a checkout's own copy of
+ * one is removed.
  */
 export async function appProvidedPackages(
   cwd: string = process.cwd(),

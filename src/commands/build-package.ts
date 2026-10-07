@@ -10,7 +10,7 @@ import {isLinkedPackageJson} from '../installed-packages.js';
  * and run `linked build` in that package's directory. This is the editor-hook
  * variant of build: the caller knows a file path, we figure out the package.
  *
- * Only rebuilds packages flagged `linkedPackage: true` (or legacy `lincd: true`).
+ * Only rebuilds packages flagged `linkedPackage: true`.
  */
 export async function buildPackageByPath(filePath: string): Promise<void> {
   let currentPath = path.isAbsolute(filePath)

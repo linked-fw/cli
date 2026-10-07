@@ -270,10 +270,19 @@ its tests, resolving those packages from the app — this CLI included: npm puts
 every ancestor's `node_modules/.bin` on the `PATH`, so `npx linked build` in a
 checkout runs the app's `linked`. `--no-prune` keeps every checkout's
 `node_modules` as npm left it. The
-Vite config dedupes the same list, so the dev server resolves them from the app
-root whatever a checkout has. A linked package is one whose `package.json` says
-`"linkedPackage": true` — the definition `build-all` and `linked build` use —
-whatever its npm scope; `@_linked/localize`, a plain tool, is not one.
+A linked package is one whose `package.json` says `"linkedPackage": true` — the
+definition `build-all` and `linked build` use — whatever its npm scope;
+`@_linked/localize`, a plain tool, is not one.
+
+The dev server gets the same guarantee from Vite's `resolve.dedupe`, which
+`createViteConfig` derives from what is localized: the localized packages
+themselves, plus every runtime dependency a localized checkout declares that the
+app has at a version satisfying the checkout's range, plus React. A dependency
+whose range the app does not satisfy keeps the checkout's own copy (the dev log
+says which), and so does a name some registry install nests its own copy of —
+a dedupe hands every importer the app's copy without checking versions. With
+nothing localized, only React is deduped. The dedupe covers what Vite loads; the
+removal on disk covers plain Node, `tsx` and test runners, which never read it.
 
 The work is done by [`@_linked/localize`](https://www.npmjs.com/package/@_linked/localize),
 which is dependency-free and framework-agnostic; this CLI supplies the
