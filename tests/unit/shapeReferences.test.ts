@@ -6,12 +6,12 @@ import {
   findShapeModules,
   inspectShapeReferences,
 } from '../../src/utils/shapeReferences';
+import {fixtureNodeModules} from '../fixtureNodeModules';
 
 // Each fixture is a compiled package: lib/esm written the way tsc emits it, loaded
 // by a real `node` child against this repo's @_linked/core (reached through a
 // node_modules symlink), exactly as the build step loads a package's output.
 
-const cliNodeModules = path.resolve(__dirname, '..', '..', 'node_modules');
 
 const PKG = `import { linkedPackage } from '@_linked/core/utils/Package';
 export const { linkedShape, packageName } = linkedPackage('@test/fixture');
@@ -73,7 +73,7 @@ const fixture = (files: Record<string, string>, pkgJson: object = {}) => {
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-shape-refs-'));
-  fs.symlinkSync(cliNodeModules, path.join(dir, 'node_modules'), 'dir');
+  fixtureNodeModules(dir);
 });
 afterEach(() => fs.rmSync(dir, {recursive: true, force: true}));
 

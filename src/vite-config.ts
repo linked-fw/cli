@@ -18,7 +18,12 @@ import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
-import {isFrameworkPkg, readInstalledPkg} from './installed-packages.js';
+import {describeSkipped, localizedDedupe} from './localized-dedupe.js';
+import {
+  discoverInstalledLinkedPackages,
+  isLinkedPackageJson,
+  readInstalledPkg,
+} from './installed-packages.js';
 import {
   linkedClientDepIncludesPlugin,
   resolveExportsSubpath,
@@ -391,39 +396,17 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
 export async function discoverLinkedSourceDependencies(
   cwd: string = process.cwd(),
 ): Promise<WorkspaceEntry[]> {
-  const pkgPath = path.join(cwd, 'package.json');
-  if (!(await fsExtra.pathExists(pkgPath))) return [];
-  const fs = await import('node:fs/promises');
   const out: WorkspaceEntry[] = [];
   const seen = new Set<string>();
-  const visited = new Set<string>();
-  const walk = async (
-    deps: Record<string, string> | undefined,
-    fromDir: string,
-  ): Promise<void> => {
-    for (const name of Object.keys(deps ?? {})) {
-      if (visited.has(name)) continue;
-      visited.add(name);
-      const resolved = await readInstalledPkg(name, fromDir);
-      if (!resolved) continue;
-      if (resolved.json.linkedPackage !== true) continue;
-      let realRoot = resolved.root;
-      try {
-        realRoot = await fs.realpath(resolved.root);
-      } catch {}
-      const entry = await readSourcePackage(realRoot);
-      if (entry && !seen.has(entry.name)) {
-        seen.add(entry.name);
-        out.push(entry);
-      }
-      // Recurse from the real location, so a symlinked clone resolves its own
-      // dependencies from its source dir.
-      await walk(resolved.json.dependencies, realRoot);
+  // The walk (breadth-first, keyed on the installed directory) is shared with
+  // `resolve.dedupe` and `linked localize`; see discoverInstalledLinkedPackages.
+  for (const pkg of await discoverInstalledLinkedPackages(cwd)) {
+    const entry = await readSourcePackage(pkg.realRoot);
+    if (entry && !seen.has(entry.name)) {
+      seen.add(entry.name);
+      out.push(entry);
     }
-  };
-  const appPkg = await fsExtra.readJson(pkgPath);
-  await walk(appPkg.dependencies, cwd);
-  await walk(appPkg.devDependencies, cwd);
+  }
   return out;
 }
 
@@ -632,6 +615,22 @@ export function ssrNoExternal(
 }
 
 /**
+ * Packages a STANDALONE app has always deduped, installed or not: the two that
+ * hold React context the SSR tree must agree on. See the standalone `resolve`
+ * block in `createViteConfig`.
+ */
+const STANDALONE_DEDUPE = ['@_linked/server-utils', '@_linked/react'];
+
+/**
+ * `resolve.dedupe` for every mode: the localized packages, what their checkouts
+ * import that the app has at a version they accept, and React — see
+ * `localizedDedupe`. Duplicates come from localization (a checkout's own
+ * `node_modules`), so that is what is detected; an app with nothing localized
+ * dedupes only React.
+ */
+export {localizedDedupe} from './localized-dedupe.js';
+
+/**
  * The `process.env.*` values inlined into the browser bundle — and only there.
  * See the `environments.client.define` note in `createViteConfig` for why the
  * server environment must not receive them.
@@ -665,6 +664,11 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     // (CN monorepo or its workspace-member clones) this is false and none
     // of the standalone-gated branches below apply.
     const isStandalone = isDev && workspaces.length === 0;
+    const dedupe = await localizedDedupe(process.cwd());
+    if (isDev) {
+      const skippedLine = describeSkipped(dedupe.skipped);
+      if (skippedLine) console.warn(skippedLine);
+    }
 
     // The app's published framework deps — excluded from Vite's dep-optimizer below
     // (`optimizeDeps.exclude`) so the browser's native ESM graph loads ONE copy of each.
@@ -680,8 +684,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       try {
         const appPkg = await fsExtra.readJson(path.join(process.cwd(), 'package.json'));
         const allDeps = {...appPkg.dependencies, ...appPkg.devDependencies};
+        // A linked package by its own `linkedPackage` flag, not its scope.
         for (const name of Object.keys(allDeps)) {
-          if (isFrameworkPkg(name)) linkedDeps.push(name);
+          const installed = await readInstalledPkg(name, process.cwd());
+          if (installed && isLinkedPackageJson(installed.json)) linkedDeps.push(name);
         }
       } catch {
         /* best-effort — no package.json is fine */
@@ -863,18 +869,18 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // ship `src`, and we WANT `development → src` for HMR — so we leave
       // conditions at Vite's defaults there (undefined = untouched), keeping
       // CN dev byte-for-byte unchanged.
-      ...(isStandalone
-        ? {
-            resolve: {
-              conditions: ['module', 'node'],
-              // Dedupe the context-holding packages so the two `ssrLoadModule` loads
-              // (LinkedServer + the app graph) resolve to ONE `server-utils`/`react`
-              // instance — otherwise their `AppContext` objects differ and
-              // `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
-              dedupe: ['@_linked/server-utils', '@_linked/react'],
-            },
-          }
-        : {}),
+      //
+      // DEDUPE, every mode: see `localizedDedupe`. Standalone also keeps its two
+      // context-holding packages even when they are not found on disk, so the two
+      // `ssrLoadModule` loads (LinkedServer + the app graph) resolve to ONE
+      // `server-utils`/`react` instance — otherwise their `AppContext` objects
+      // differ and `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
+      resolve: {
+        ...(isStandalone ? {conditions: ['module', 'node']} : {}),
+        dedupe: [
+          ...new Set([...(isStandalone ? STANDALONE_DEDUPE : []), ...dedupe.names]),
+        ],
+      },
       // `ssr.external` is a minimal allowlist of
       // npm deps that genuinely can't (or shouldn't) go through Vite's
       // SSR transform. Workspace packages (`@_linked/*`, `lincd-*`) are
@@ -1004,7 +1010,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // `linked:resolve-workspace-ts` plugin; in a workspace-member CLONE they'd
       // otherwise resolve via `node_modules` SYMLINKS and esbuild fails on their
       // subpath `exports` ("No known conditions for ./shapes/SHACL …").
-      // STANDALONE mode: exclude the published `@_linked/*` / `lincd-*` deps from
+      // STANDALONE mode: exclude the app's published linked deps (by their
+      // `linkedPackage` flag; see `linkedDeps` above) from
       // esbuild's pre-bundler so the browser's native ESM graph loads ONE copy of
       // `@_linked/core` (no per-subpath duplication → stable class names → shape URIs
       // match the backend — see `linkedDeps` above). These packages are ESM with no

@@ -36,6 +36,19 @@ jest.mock(
   {virtual: true},
 );
 
+// What the app provides is read from its installed packages (see
+// viteDedupe.test.ts for that walk); this suite asserts the CLI passes it on.
+const PROVIDED_BY_APP = [
+  '@acme/widgets',
+  '@_linked/core',
+  'react',
+  'react-dom',
+];
+const mockProvided = jest.fn(async (_appRoot: string) => PROVIDED_BY_APP);
+jest.mock('../../src/installed-packages', () => ({
+  appProvidedPackages: (appRoot: string) => mockProvided(appRoot),
+}));
+
 import {
   adoptPackage,
   DEFAULT_BUILD_COMMAND,
@@ -107,6 +120,59 @@ describe('linked localize', () => {
   });
 });
 
+// A checkout's own install leaves its own `@_linked/core` and a registry copy
+// of any localized sibling in its node_modules; Node loads those instead of
+// the app's. The CLI turns localize's pruning on for every path that installs
+// or relinks, and names what a linked app provides.
+describe('linked localize prunes (on by default)', () => {
+  const expected = {prune: true, provided: PROVIDED_BY_APP};
+
+  it("passes the app's installed linked packages and React, read from the app root", async () => {
+    await runLocalize(['@_linked/dcmi'], {});
+    expect(mockProvided).toHaveBeenLastCalledWith(process.cwd());
+    expect(calls[0].args[1].provided).toEqual(PROVIDED_BY_APP);
+
+    calls.length = 0;
+    await adoptPackage('@_linked/fresh', {
+      appRoot: '/app',
+      build: 'linked build',
+    });
+    expect(mockProvided).toHaveBeenLastCalledWith('/app');
+  });
+
+  it('is on for localize', async () => {
+    await runLocalize(['@_linked/dcmi'], {});
+    expect(calls[0].args[1]).toMatchObject(expected);
+  });
+
+  it('is on for --relink, the postinstall path, so a root install does not bring the copies back', async () => {
+    await runLocalize([], {relink: true});
+    expect(calls[0].fn).toBe('relink');
+    expect(calls[0].args[1]).toEqual(expected);
+  });
+
+  it("is on for --adopt and for create-package's adopt", async () => {
+    await runLocalize(['@_linked/fresh'], {adopt: true});
+    expect(calls[0].args[1]).toMatchObject(expected);
+
+    calls.length = 0;
+    await adoptPackage('@_linked/fresh', {
+      appRoot: '/app',
+      build: 'linked build',
+    });
+    expect(calls[0].args[1]).toMatchObject(expected);
+  });
+
+  it('--no-prune turns it off everywhere', async () => {
+    await runLocalize(['@_linked/dcmi'], {prune: false});
+    expect(calls[0].args[1].prune).toBe(false);
+
+    calls.length = 0;
+    await runLocalize([], {relink: true, prune: false});
+    expect(calls[0].args[1].prune).toBe(false);
+  });
+});
+
 describe('linked delocalize', () => {
   it('undoes every localized package when given no names', async () => {
     await runDelocalize([], {});
@@ -120,7 +186,10 @@ describe('linked delocalize', () => {
   });
 
   it('--adopt reaches adopt, with the same build seam and no subdir', async () => {
-    await runLocalize(['@_linked/foo'], {adopt: true, repo: 'https://x/foo.git'});
+    await runLocalize(['@_linked/foo'], {
+      adopt: true,
+      repo: 'https://x/foo.git',
+    });
     expect(calls.map((c) => c.fn)).toEqual(['adopt']);
     expect(calls[0].args[0]).toEqual(['@_linked/foo']);
     expect(calls[0].args[1]).toEqual({
@@ -128,6 +197,8 @@ describe('linked delocalize', () => {
       dir: undefined,
       repo: 'https://x/foo.git',
       build: DEFAULT_BUILD_COMMAND,
+      prune: true,
+      provided: PROVIDED_BY_APP,
     });
   });
 
@@ -141,6 +212,8 @@ describe('linked delocalize', () => {
     expect(calls[0].args[1]).toEqual({
       build: 'node launch.js build',
       repo: undefined,
+      prune: true,
+      provided: PROVIDED_BY_APP,
     });
     expect(calls[0].args[2]).toEqual({appRoot: '/app'});
   });

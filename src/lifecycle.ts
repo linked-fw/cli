@@ -10,6 +10,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
+import {isLinkedPackageJson} from './installed-packages.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import type {PackageDetails} from './interfaces.js';
 
@@ -194,7 +195,7 @@ export async function loadBackendStorageConfig(): Promise<any> {
 export interface LocalPackage extends PackageDetails {
   /** Where the walk found it. */
   source: 'workspace' | 'local-packages-dir';
-  /** `linkedPackage: true`, or the legacy `lincd: true`. */
+  /** `linkedPackage: true` — see `isLinkedPackageJson`. */
   isLinkedPackage: boolean;
   /** `linkedApp: true` — built by `linked build-app`, not `linked build`. */
   isApp: boolean;
@@ -352,10 +353,8 @@ function addPackage(
     path: packagePath,
     packageName: pack.name,
     source,
-    // `lincd: true` is the pre-rename spelling of the same flag and is still
-    // honoured by `linked build-package`; honouring it here too keeps the two
-    // from disagreeing about what a linked package is.
-    isLinkedPackage: pack.linkedPackage === true || pack.lincd === true,
+    // The one definition, shared with `linked build-package`.
+    isLinkedPackage: isLinkedPackageJson(pack),
     isApp: pack.linkedApp === true,
     hasBuildScript: !!pack.scripts?.build,
   });
@@ -505,7 +504,7 @@ export function planBuildAll(rootPath = './', appRoot?: string): BuildAllPlan {
     const appPackageJson = getPackageJSON(appRoot);
     const isAppWithLinkedDeps =
       appPackageJson &&
-      appPackageJson.lincd !== true &&
+      !isLinkedPackageJson(appPackageJson) &&
       [
         ...Object.keys(appPackageJson.dependencies || {}),
         ...localizedPackageNames(appRoot),

@@ -8,12 +8,12 @@ import {
 // cli-methods pulls in ora, which is ESM-only.
 jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
 import {addShapeToBarrel} from '../../src/cli-methods';
+import {fixtureNodeModules} from '../fixtureNodeModules';
 
 // Fixtures are compiled packages, loaded by real `node` children against this repo's
-// @_linked/core (through a node_modules symlink), as the build step loads them.
+// @_linked/core (through a node_modules symlink; see ../fixtureNodeModules), as the build step loads them.
 
 const cliRoot = path.resolve(__dirname, '..', '..');
-const cliNodeModules = path.join(cliRoot, 'node_modules');
 
 const PKG = `import { linkedPackage } from '@_linked/core/utils/Package';
 export const { linkedShape, packageName } = linkedPackage('@test/fixture');
@@ -57,7 +57,7 @@ const fixture = (files: Record<string, string>, pkgJson: object = {}) => {
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-shapes-index-'));
-  fs.symlinkSync(cliNodeModules, path.join(dir, 'node_modules'), 'dir');
+  fixtureNodeModules(dir);
 });
 afterEach(() => fs.rmSync(dir, {recursive: true, force: true}));
 

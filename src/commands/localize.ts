@@ -19,6 +19,14 @@
  * from the registry's `repository` field, so a name that npm cannot resolve is
  * an error rather than a guess.
  *
+ * The other framework knowledge it supplies is what an app PROVIDES. A
+ * checkout's own install leaves its own copies of `@_linked/core`, React and
+ * any localized sibling in its `node_modules`, and Node loads those instead of
+ * the app's: a localized package then never sees a localized sibling, and core
+ * loads once per copy. localize removes those copies by default wherever the
+ * app's version satisfies the checkout's range (`--no-prune` turns it off);
+ * this CLI tells localize what the app provides: `providedByApp`.
+ *
  * `--adopt` is the exception to "clone from the registry": it links a git
  * checkout that is already in `packages-local/` under its localize name, with
  * no clone and no lookup — a package created locally, or a clone put there by
@@ -28,6 +36,22 @@ import process from 'node:process';
 
 /** The build command `localize` runs inside a fresh checkout by default. */
 export const DEFAULT_BUILD_COMMAND = 'linked build';
+
+/**
+ * What a linked app provides to its localized checkouts: the names of the
+ * linked packages it has installed — by their `linkedPackage` flag, whatever
+ * their scope — plus `react` and `react-dom`. Each one either holds
+ * module-level state that must exist once (core's shape registry, React's
+ * dispatcher, the context objects in server-utils and react) or is a localized
+ * sibling the checkout should reach live (see `appProvidedPackages`). localize
+ * itself already treats every localized sibling and a checkout's
+ * peerDependencies as provided. Vite's `resolve.dedupe` is derived separately,
+ * from what is localized (`localized-dedupe.ts`).
+ */
+export async function providedByApp(appRoot: string): Promise<string[]> {
+  const {appProvidedPackages} = await import('../installed-packages.js');
+  return appProvidedPackages(appRoot);
+}
 
 export interface LocalizeCommandOptions {
   adopt?: boolean;
@@ -40,6 +64,16 @@ export interface LocalizeCommandOptions {
   build?: string;
   force?: boolean;
   purge?: boolean;
+  /** Commander's `--no-prune` sets this to false; absent means on. */
+  prune?: boolean;
+}
+
+/** localize's prune options for a run: on unless explicitly turned off. */
+export async function pruneOptions(
+  appRoot: string,
+  prune: boolean | undefined = true,
+): Promise<{prune: boolean; provided: string[]}> {
+  return {prune: prune !== false, provided: await providedByApp(appRoot)};
 }
 
 /**
@@ -54,9 +88,10 @@ export async function runLocalize(
   const {defaultDeps, localize, adopt, list, relink} =
     await import('@_linked/localize');
   const deps = defaultDeps(process.cwd());
+  const prune = await pruneOptions(process.cwd(), options.prune);
 
   if (options.relink) {
-    process.exitCode = relink(deps);
+    process.exitCode = relink(deps, prune);
     return;
   }
   if (options.adopt && packages.length === 0) {
@@ -81,7 +116,13 @@ export async function runLocalize(
   if (options.adopt) {
     process.exitCode = adopt(
       packages,
-      {force: options.force, dir: options.dir, repo: options.repo, build},
+      {
+        force: options.force,
+        dir: options.dir,
+        repo: options.repo,
+        build,
+        ...prune,
+      },
       deps,
     );
     return;
@@ -94,6 +135,7 @@ export async function runLocalize(
       repo: options.repo,
       subdir: options.subdir,
       build,
+      ...prune,
     },
     deps,
   );
@@ -116,7 +158,11 @@ export async function adoptPackage(
   // caller usually tolerates, meaning the build failed but the link is in place.
   return adopt(
     [name],
-    {build: options.build, repo: options.repo},
+    {
+      build: options.build,
+      repo: options.repo,
+      ...(await pruneOptions(options.appRoot)),
+    },
     defaultDeps(options.appRoot),
   );
 }

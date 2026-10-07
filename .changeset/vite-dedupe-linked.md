@@ -1,0 +1,5 @@
+---
+'@_linked/cli': patch
+---
+
+`createViteConfig` dedupes what localization can duplicate, in every mode: every localized package (from `local-packages.json`), every runtime dependency a localized checkout declares that the app has at a version satisfying that checkout's range, and `react`/`react-dom`. Before, it deduped only `@_linked/server-utils` and `@_linked/react`, and only in a standalone app, so an app with a localized package had Vite resolve `@_linked/core` from that checkout's own `node_modules`: its dev SSR backend loaded one core per copy (three, measured). A dependency whose range the app does not satisfy is left out and reported in the dev log, and so is a name a registry install nests its own copy of, because a dedupe hands every importer the app's copy without checking versions. A standalone app's `optimizeDeps.exclude` now picks linked packages by their `linkedPackage` flag rather than the `@_linked/` scope, and the legacy `lincd: true` flag is no longer read anywhere.
