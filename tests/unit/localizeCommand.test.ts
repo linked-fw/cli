@@ -112,8 +112,8 @@ describe('linked localize', () => {
 // of any localized sibling in its node_modules; Node loads those instead of
 // the app's. The CLI turns localize's pruning on for every path that installs
 // or relinks, and names what a linked app provides.
-describe('linked localize --prune-provided (on by default)', () => {
-  const expected = {pruneProvided: true, provided: PROVIDED_BY_APP};
+describe('linked localize prunes (on by default)', () => {
+  const expected = {prune: true, provided: PROVIDED_BY_APP};
 
   it('names the framework scope and React as what the app provides', () => {
     expect(PROVIDED_BY_APP).toEqual(['@_linked/*', 'react', 'react-dom']);
@@ -142,13 +142,13 @@ describe('linked localize --prune-provided (on by default)', () => {
     expect(calls[0].args[1]).toMatchObject(expected);
   });
 
-  it('--no-prune-provided turns it off everywhere', async () => {
-    await runLocalize(['@_linked/dcmi'], {pruneProvided: false});
-    expect(calls[0].args[1].pruneProvided).toBe(false);
+  it('--no-prune turns it off everywhere', async () => {
+    await runLocalize(['@_linked/dcmi'], {prune: false});
+    expect(calls[0].args[1].prune).toBe(false);
 
     calls.length = 0;
-    await runLocalize([], {relink: true, pruneProvided: false});
-    expect(calls[0].args[1].pruneProvided).toBe(false);
+    await runLocalize([], {relink: true, prune: false});
+    expect(calls[0].args[1].prune).toBe(false);
   });
 });
 
@@ -176,7 +176,7 @@ describe('linked delocalize', () => {
       dir: undefined,
       repo: 'https://x/foo.git',
       build: DEFAULT_BUILD_COMMAND,
-      pruneProvided: true,
+      prune: true,
       provided: PROVIDED_BY_APP,
     });
   });
@@ -191,7 +191,7 @@ describe('linked delocalize', () => {
     expect(calls[0].args[1]).toEqual({
       build: 'node launch.js build',
       repo: undefined,
-      pruneProvided: true,
+      prune: true,
       provided: PROVIDED_BY_APP,
     });
     expect(calls[0].args[2]).toEqual({appRoot: '/app'});

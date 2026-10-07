@@ -491,7 +491,7 @@ program
     'Overwrite a symlink pointing outside the checkout directory.',
   )
   .option(
-    '--no-prune-provided',
+    '--no-prune',
     "Keep every checkout's node_modules as npm installed it. By default, after installing (and on --relink) a checkout's own copy of @_linked/*, react or react-dom is removed when the app has a version that satisfies the checkout's range, so the checkout loads the app's copy (and a localized sibling) instead of a second one. A copy the app's version does not satisfy is kept, with a warning.",
   )
   .action(async (packages: string[], options) => {

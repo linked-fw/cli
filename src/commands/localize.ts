@@ -23,9 +23,9 @@
  * checkout's own install leaves its own copies of `@_linked/core`, React and
  * any localized sibling in its `node_modules`, and Node loads those instead of
  * the app's: a localized package then never sees a localized sibling, and core
- * loads once per copy. `pruneProvided` (on by default here, `--no-prune-provided`
- * turns it off) has localize remove those copies wherever the app's version
- * satisfies the checkout's range; see `PROVIDED_BY_APP`.
+ * loads once per copy. localize removes those copies by default wherever the
+ * app's version satisfies the checkout's range (`--no-prune` turns it off);
+ * this CLI widens what counts as provided to `PROVIDED_BY_APP`.
  *
  * `--adopt` is the exception to "clone from the registry": it links a git
  * checkout that is already in `packages-local/` under its localize name, with
@@ -42,9 +42,8 @@ export const DEFAULT_BUILD_COMMAND = 'linked build';
  * package, and React. Each one either holds module-level state that must
  * exist once (core's shape registry, React's dispatcher, the context objects
  * in server-utils and react) or is a localized sibling the checkout should
- * reach live. localize itself also treats every localized sibling and a
- * checkout's peerDependencies as provided, and never removes a package that
- * declares a `bin`, so `@_linked/cli` in a checkout's devDependencies stays.
+ * reach live. localize itself already treats every localized sibling and a
+ * checkout's peerDependencies as provided.
  */
 export const PROVIDED_BY_APP = ['@_linked/*', 'react', 'react-dom'];
 
@@ -59,16 +58,16 @@ export interface LocalizeCommandOptions {
   build?: string;
   force?: boolean;
   purge?: boolean;
-  /** Commander's `--no-prune-provided` sets this to false; absent means on. */
-  pruneProvided?: boolean;
+  /** Commander's `--no-prune` sets this to false; absent means on. */
+  prune?: boolean;
 }
 
 /** localize's prune options for a run: on unless explicitly turned off. */
-export function pruneOptions(pruneProvided: boolean | undefined = true): {
-  pruneProvided: boolean;
+export function pruneOptions(prune: boolean | undefined = true): {
+  prune: boolean;
   provided: string[];
 } {
-  return {pruneProvided: pruneProvided !== false, provided: PROVIDED_BY_APP};
+  return {prune: prune !== false, provided: PROVIDED_BY_APP};
 }
 
 /**
@@ -83,7 +82,7 @@ export async function runLocalize(
   const {defaultDeps, localize, adopt, list, relink} =
     await import('@_linked/localize');
   const deps = defaultDeps(process.cwd());
-  const prune = pruneOptions(options.pruneProvided);
+  const prune = pruneOptions(options.prune);
 
   if (options.relink) {
     process.exitCode = relink(deps, prune);
