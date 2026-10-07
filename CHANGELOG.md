@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.40.0
+
+### Minor Changes
+
+- [#211](https://github.com/linked-fw/cli/pull/211) [`c268b22`](https://github.com/linked-fw/cli/commit/c268b22efc68384470e90dc391729dcf5911d185) Thanks [@flyon](https://github.com/flyon)! - `linked localize` now leaves one copy of each framework package. A checkout's install leaves its own `@_linked/core` (pinned by the checkout's lockfile, often older than the app's) and a registry copy of any localized sibling in its `node_modules`, and plain Node and `tsx` loaded those: measured with three localized linked packages, three cores in one process, and a localized package that never saw its localized sibling. `@_linked/localize` 0.3.0 removes a checkout's copies of what the app provides after every install and on every `--relink`; this CLI requires it and tells it what the app provides: the linked packages it has installed (by their `linkedPackage` flag, not their scope), `react` and `react-dom`. A copy is removed only when the app's version satisfies the checkout's range (a localized sibling always counts); otherwise it is kept, with a warning. Measured afterwards: one core in Node, `tsx` and Vite SSR, and every checkout still builds — `npx linked build` in a checkout runs the app's `linked` — and passes its tests. `--no-prune` turns it off.
+
+### Patch Changes
+
+- [#211](https://github.com/linked-fw/cli/pull/211) [`01d3dc0`](https://github.com/linked-fw/cli/commit/01d3dc02b68245b79e1bb2855e96f969d5942026) Thanks [@flyon](https://github.com/flyon)! - The dev resolver registers every localized package as source, including one that another localized package depends on. The dependency walk used to key "visited" on the package name and go depth-first, so reaching a checkout's own `node_modules` copy of a sibling (a lib-only registry install) first hid the app's localized checkout of that sibling: Vite served it from `lib/`, and the depending checkout's imports went to its nested copy. The walk is now breadth-first and keyed on the installed directory.
+
+- [#211](https://github.com/linked-fw/cli/pull/211) [`c268b22`](https://github.com/linked-fw/cli/commit/c268b22efc68384470e90dc391729dcf5911d185) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` dedupes what localization can duplicate, in every mode: every localized package (from `local-packages.json`), every runtime dependency a localized checkout declares that the app has at a version satisfying that checkout's range, and `react`/`react-dom`. Before, it deduped only `@_linked/server-utils` and `@_linked/react`, and only in a standalone app, so an app with a localized package had Vite resolve `@_linked/core` from that checkout's own `node_modules`: its dev SSR backend loaded one core per copy (three, measured). A dependency whose range the app does not satisfy is left out and reported in the dev log, and so is a name a registry install nests its own copy of, because a dedupe hands every importer the app's copy without checking versions. A standalone app's `optimizeDeps.exclude` now picks linked packages by their `linkedPackage` flag rather than the `@_linked/` scope, and the legacy `lincd: true` flag is no longer read anywhere.
+
 ## 1.39.0
 
 ### Minor Changes
