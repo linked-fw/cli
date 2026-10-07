@@ -16,9 +16,9 @@
     "build": "linked build"
   },
   "dependencies": {
-    "@_linked/core": "2.18.1"
+    "@_linked/core": "2.26.0"
   },
   "devDependencies": {
-    "@_linked/cli": "1.13.0"
+    "@_linked/cli": "1.40.0"
   }
 }
