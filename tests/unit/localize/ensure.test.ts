@@ -420,10 +420,11 @@ test('checkOneCopy removes a planted duplicate, says so in ONE line, and never r
   assert.equal(has(b, 'react'), false);
   assert.ok(has(a, 'tool'), 'not provided by the app: untouched');
   assert.equal(fs.existsSync(path.join(bin, 'core')), false);
-  assert.equal(deps.logs.length, 1, deps.output());
-  assert.equal(deps.warns.length + deps.errors.length, 0, deps.output());
+  // On stderr: it precedes a run command's own output, which may be piped.
+  assert.equal(deps.warns.length, 1, deps.output());
+  assert.equal(deps.logs.length + deps.errors.length, 0, deps.output());
   assert.match(
-    deps.logs[0],
+    deps.warns[0],
     /^\[localize\] one copy: removed .*fw-a\/node_modules\/@fw\/core@2\.22\.8.* — the app provides them\.$/,
   );
   assert.equal(deps.calls.length, 0);

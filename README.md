@@ -239,7 +239,7 @@ linked localize --list --check    # exit 1 when something recorded is not actual
 linked localize --relink          # recreate the recorded symlinks — run this from postinstall
 linked localize @_linked/rdfs --adopt  # link a checkout already in packages-local/_linked-rdfs, no clone
 linked localize --reinstall @_linked/rdfs  # npm install inside the checkout, then prune it
-linked localize --ensure          # remove checkouts' own copies of what the app provides; exit 0
+linked localize --ensure          # remove checkouts' own copies of what the app provides; exit 0 (no names)
 linked delocalize @_linked/rdfs   # unlink and forget, keeping the checkout
 linked delocalize --purge         # undo everything and delete the checkouts
 ```
@@ -253,13 +253,16 @@ what it depends on, and Node loads those instead of the app's. One rule says wha
 the localized packages, plus every runtime dependency (`dependencies`, `peerDependencies`,
 `optionalDependencies`) a localized checkout declares that the app has at a version satisfying
 every localized range, plus `react` and `react-dom`. After every install in a checkout and on every
-`--relink`, the checkouts' own copies of those are removed; `linked start`, `script`, `call` and
-`build-all` re-check first (stat-only, one line of output when it removes something), and
-`createViteConfig` derives Vite's `resolve.dedupe` from the same rule. `--no-prune` keeps every
-checkout's `node_modules` as npm left it.
+`--relink`, each checkout's own copies of its siblings, of react/react-dom and of its own runtime
+dependencies in that set are removed — unless a range that loads the copy misses the app's version,
+or removing it would change what its own dependencies resolve to (kept copies are summarised per
+checkout; `--list` says why). `linked start`, `script`, `call` and `build-all` re-check first (tens
+of milliseconds; one line on stderr when it removes something), and `createViteConfig` derives
+Vite's `resolve.dedupe` from the same rule. `--no-prune` at localize/adopt is recorded
+(`"prune": false`) and leaves that checkout's `node_modules` as npm left them from then on.
 
-Localize used to be the separate `@_linked/localize` package (binary `linked-localize`), now
-deprecated; `linked localize` replaces it.
+Localize used to be the separate `@_linked/localize` package (binary `linked-localize`), which is
+being retired; `linked localize` replaces it.
 
 ### Registry / dev utilities
 

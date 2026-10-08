@@ -3,7 +3,7 @@ summary: >
   Make "one copy of every package the app provides" an invariant that localize owns and that holds
   whenever the app runs — not only right after a localize command. Fixes nested duplicate copies in
   localized checkouts (core, React, siblings, localize itself) for every tool, not just Vite.
-status: Implementation
+status: Review
 repos: [cli, localize, create-now]
 ---
 
@@ -319,3 +319,156 @@ Dependency graph: `1 → 2 → 3 → 4 (release) → {5 localize retire, 6 CN} �
   `'linked-localize --relink'` on purpose (an existing postinstall is recognised).
 - `npm run test:unit`: `Test Suites: 51 passed, 51 total` / `Tests: 609 passed, 609 total`.
 - `npx linked build`: `✔ Build successful`.
+
+### Phase 4 — done
+- PR linked-fw/cli#222 merged as `98ae545`; release bot published **@_linked/cli 1.42.0** (tarball has
+  `lib/esm/localize/ensure.js`, no `@_linked/localize` dependency). 1.43.0 (another session's PR #224)
+  includes it too.
+
+### Phase 5 — blocked
+- Retiring `@_linked/localize` (0.4.0 pointer release, `npm deprecate`, archive the repo) was refused by
+  the permission classifier. Left for the architect.
+
+### Phases 6–7 — done (Create Now `507a34ac`, `2d3482d0`)
+- Create Now on `@_linked/cli ^1.42.0`; `@_linked/localize` delocalized and gone from the lock; hand
+  `resolve.dedupe` deleted; `pretest:unit` / `pretypecheck` / `pretypecheck:gate` run
+  `linked localize --ensure`; how-to and agents.md updated.
+- Adopted 20 checkouts (auth, core, css, dcat, dcmi, fuseki, icons, org, owl, primitives, rdfs, react,
+  s3, schema, sentry, server, server-utils, shape-ui, sioc, xsd). Skipped: translation (main 0.8.0 vs
+  Create Now `^0.7.0`), semantu-cli (yarn.lock, npm would write an untracked lock); localize retired.
+- Adopting `@_linked/react` broke boot (react-native from the checkout's devDeps entered the client dep
+  scan) — worked around in Create Now with `clientDepIncludes: {deny: ['react-native']}`.
+- Validation: build-all 27 built; typecheck gate clean; unit 1850 passed; integration 178 passed / 13
+  skipped; e2e relation-fields 2 passed; no "installed N times"; one `@_linked/core`.
+
+### Phase 8 — done
+
+**Changes**
+
+- `prune.ts`: one per-copy decision, `planPrune(entries, deps, scope?, cache?)` → `{remove, keep,
+  outside}` without touching disk; `pruneProvided` = plan + apply, repeated until a pass removes
+  nothing (`MAX_PRUNE_PASSES` 5) with one `PruneCache` per call. Candidates are per owner (R6): the
+  rule's names ∩ (siblings ∪ react/react-dom ∪ the owner's own runtime fields), plus skipped names the
+  owner declares, each looked up directly (no `node_modules` listing). The guard first checks the
+  owner's own range (no index needed), then a requirement index per `node_modules` built once per call
+  (R1); then the context check (R3, `contextChange`): keep D when any of D's
+  dependencies/peer/optional — or its `@types/` companion — resolves from D's place in the checkout to
+  a different version than from the app's copy (or to nothing from the app). Entries with
+  `prune: false` are skipped. Kept copies are reported as one summary line per checkout;
+  `explainKept` gives the full reason.
+- `ensure.ts`: `checkOneCopy` runs `planPrune` and calls `pruneProvided` only when the plan removes
+  something (scoped to those owners/deps, sharing the cache); one line on stderr (`warn`). `ensure`
+  honours `entry.prune === false`.
+- `manifest.ts`: optional `prune?: false` (read and preserved; schema stays 1); `installLinkAndRecord`
+  records it for `--no-prune` and drops it otherwise. `relink` neither prunes nor excuses missing deps
+  for such an entry; `isProvidedByApp` takes the owner's `package.json` (per-owner excuse).
+- `commands/localize.ts`: `--ensure` with names → exit 2 with a pointer to `--reinstall`;
+  `--ensure --no-prune` → no-op. `cli.ts` help updated; the preAction moved to
+  `localize/one-copy-hook.ts` (`ONE_COPY_COMMANDS`, `installOneCopyHook`) so it is testable.
+- `list.ts`: linked rows show `kept N own copies` / `prune: off`, reasons follow the table, summary
+  counts kept copies.
+- `client-dep-includes.ts`: `DEFAULT_DENY` = `['typescript', 'react-native']` (R4).
+- Tests: `tests/unit/localize/one-copy.test.ts` (10): preAction fires for exactly
+  start/script/call/build-all (not localize/build/publish/help) and cli.ts installs it; a symlinked
+  sibling/app copy is no hit; kept copies never reach `pruneProvided` (spy count 0), read ≤3 dirs and
+  <40 files over a 400-package tree with a hidden lockfile, <500 ms; without a lockfile the index is
+  built once and only when a range must be read; R3 keep (peer react 18 vs 19, listed reason); the
+  `@types/` companion counts, same version at another path does not; per-owner candidates; one call
+  converges (one `pruneProvided` call removes react then react-dom); `--no-prune` recorded, honoured by
+  check/relink/reinstall/`--list`, cleared by re-adopt; a `prune: false` checkout is still a sibling.
+  `localizeCommand.test.ts`: `--ensure --no-prune` no-op, `--ensure <names>` exit 2.
+  `clientDepIncludes.test.ts`: react-native never listed. `real-localize` and the fixture's `npm pack`
+  run with `scrubbedNpmEnv()` (drop `npm_config_*`, `npm_config_userconfig=/dev/null`).
+- Docs: `docs/localize.md` / README — per-owner candidates, the context rule, convergence, the kept
+  summary, `--list` reasons, `prune: false` (schema example), measured timing, `--ensure` takes no
+  names, `@_linked/localize` "being retired (not yet deprecated on npm)".
+- `.changeset/localize-one-copy-review.md`: minor (new manifest field and `--no-prune`/`--ensure`
+  semantics).
+
+**Deviations**
+
+- R1: the index is read from npm's hidden lockfile (`node_modules/.package-lock.json`) rather than a
+  walk — measured over 21 Create Now checkouts, a full walk of 16,824 package.json files took 0.77 s
+  warm / 3.4 s cold, all 21 lockfiles 45 ms. A tree without one is walked once. Requirers are checked
+  against disk when asked (pruned ones ask nothing).
+- R3: a dependency at another real path but the same `name@version` is not a context change
+  (otherwise nearly every copy with a dependency would be kept, as checkouts hold their own copies of
+  every transitive package); the `@types/` companion is compared too (the measured failure was types).
+- R6: `react`/`react-dom` stay candidates in every checkout (P3), guarded as before.
+- `--ensure` with names errors (exit 2) rather than honouring them.
+
+**Validation**
+
+- Re-verified first: dry probe of the old `checkOneCopy` on Create Now → `ms 6583.3 would-remove 0`
+  (R1); `packages-local/_linked-schema` had no `prism-react-renderer`, its `npx linked build` →
+  `Found 1 error in src/components/CodeView.tsx:53` / `✖ Build failed` (R3).
+- Mutation checks (each reverted): check always pruning, no context check, no `@types/` companion,
+  pooled candidates, one pass, ignoring `prune: false`, walk instead of lockfile, comparing paths
+  without realpath, `DEFAULT_DENY` without react-native — each fails at least one test.
+- `npm run test:unit`: `Test Suites: 52 passed, 52 total` / `Tests: 629 passed, 629 total`.
+- `npx linked build`: `✔ Build successful`.
+- Create Now: `planPrune` 37–41 ms warm, `checkOneCopy` 51.6 / 43.0 / 39.2 ms in a fresh process
+  (`remove 0 keep 53 index builds 5`). `time npx linked localize --ensure` twice: silent, exit 0,
+  `1.720 total` / `1.349 total`; via the bin, `linked --version` 0.96 s vs `localize --ensure`
+  1.01–1.03 s (the rest is cli startup; npx adds ~0.3 s).
+- `npx linked localize --reinstall @_linked/schema` → `kept 4 own copies the app's cannot replace:
+  prism-react-renderer@2.4.1 (its react would change), react@18.3.1 (app 19.3.0), react-dom@18.3.1
+  (app 19.3.0), typescript@5.9.3 (app 5.4.5)`; then `--ensure` silent; schema `npx linked build` →
+  `✔ Build successful with warnings` (depcheck: `@types/node` undeclared).
+- `npx linked localize --list` → `21 linked · 0 not linked · 6 untracked link · 54 kept copies · 3
+  unrecorded directories`.
+- Create Now `npm run typecheck:gate` → `No new type errors. 0 pre-existing errors still in the baseline.`
+
+## Review
+
+| # | Sev | Finding |
+|---|---|---|
+| R1 | high | The run-time check is not stat-only in practice: detection ignores prune's guard, so every copy prune *keeps* (94 in Create Now: React 18 in several checkouts, rimraf 6, …) triggers `pruneProvided`, which walks whole `node_modules` trees per dependency — 3.7–6.4 s on every `start`/`script`/`call`/`build-all` and `pre*` hook, removing nothing, silently. Docs claim "a few ms". |
+| R2 | high | `--no-prune` can't be kept: `checkOneCopy` (preAction, `--ensure`) always prunes. |
+| R3 | high | Pruning a dependency D moves D's own transitive/type resolution into the app's context while the checkout keeps its own copies of what failed the guard → schema's in-checkout build fails (mixed `@types/react` 18/19); `build-all` re-applies the prune each time. |
+| R4 | medium | The client dependency scan includes `react-native` from a localized checkout's devDeps (esbuild can't parse its Flow source); belongs in the cli's `DEFAULT_DENY`. |
+| R5 | medium | `--ensure` needs several runs to converge (a removal brings the removed copy's deps into the rule). |
+| R6 | medium | "devDependencies are no longer candidates" is false across checkouts: candidates are pooled across owners, so one checkout's runtime dep makes another's devDependency copy a candidate. |
+| R7 | medium | Untested: the preAction wiring (which commands), the realpath comparison for symlinked siblings, and "kept copies don't re-walk". |
+| R8 | medium | Docs: Create Now how-to tells users to look for `kept …` after `--ensure` (which silences it); cli docs/README say `@_linked/localize` "is deprecated" (not yet); agents.md says every `packages-local` dir is localized (3 aren't); adopt prints 253 `kept …` lines (needs a summary). |
+
+Low (left for the pause): preAction prunes the running cli's own checkout (narrow ENOENT risk); install-time
+prune reads the registry copy of the package being localized (corrected by the later pass);
+`providedPackages` vs `appCopy` root disagree for apps nested in a workspace; Create Now's dedupe safety net
+for non-localized builds is now React-only; removed `appProvidedPackages`/`providedByApp` exports in a
+minor; `pretest:unit` doesn't cover watch mode; schema's own React types should align to 19 regardless.
+
+## Iteration 1 — Ideation
+
+### Gap 1 of 6: a cheap check (R1)
+A: detection mirrors the guard via one requirement index per `node_modules` built in a single walk, and
+skips owners outside the app root; `pruneProvided` only runs for real candidates. B: cache the kept set in
+a stamp. **Chosen A** — no cache to invalidate; correct by construction.
+### Gap 2 of 6: honour `--no-prune` (R2, L7)
+**Chosen**: `--no-prune` at localize/adopt time records `prune: false` on the manifest entry; `checkOneCopy`,
+`--ensure` and relink skip such entries; `--ensure --no-prune` is a no-op; documented.
+### Gap 3 of 6: don't prune what would change resolution (R3)
+A: in `pruneOne`, keep D when any of D's dependencies/peers resolves to a different real path from the
+checkout than from the app root (D's context would change). B: special-case types. **Chosen A** — general.
+### Gap 4 of 6: per-owner candidates + convergence (R5, R6)
+Candidates per owner = the owner's runtime fields (dependencies/peer/optional) + localized siblings, each
+still subject to the guard; prune iterates to a fixed point (bounded) in one call.
+### Gap 5 of 6: react-native (R4)
+Add `react-native` to the client scan's `DEFAULT_DENY`; Create Now drops its deny line after the release.
+### Gap 6 of 6: tests and docs (R7, R8)
+Tests for preAction wiring (exactly the four commands), a symlinked-sibling fixture (no hit), and "kept
+copies don't re-walk" (count `pruneProvided` calls); a cost assertion. Adopt/relink print a per-checkout
+summary of kept copies instead of one line each. Docs: cli docs/README say "deprecated once retired"
+accurately; Create Now how-to points at `--relink` for kept copies; agents.md lists the exceptions. Also:
+one-copy line on stderr; `real-localize` with a scrubbed npm env.
+
+## Iteration 1 — Phases
+
+### Phase 8: cli fixes (Gaps 1–6, cli side) → release
+- **Validation:** `npm run test:unit` incl. new tests; `npx linked build`; on Create Now (cli localized):
+  `time npx linked localize --ensure` < ~1 s total with kept copies present (check itself well under
+  100 ms), converges in one run; schema `npx linked build` in its checkout passes after `--ensure`; PR →
+  merge → release.
+### Phase 9: Create Now follow-up
+- Bump to the new cli, drop the react-native deny line, docs fixes; build-all, typecheck gate,
+  test:unit, integration boot.

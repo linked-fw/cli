@@ -12,6 +12,11 @@
  * localized, and one that is not loads nobody's code while looking as if it
  * did.
  *
+ * For a linked checkout it also says what pruning would keep in that
+ * checkout's `node_modules` and why (prune.ts `planPrune`, nothing removed),
+ * or that pruning is off for it (`prune: false`): localize, adopt and
+ * `--relink` only summarise kept copies, and this is where the reasons are.
+ *
  * Never writes. Exits 0, unless `--check` and something recorded is not
  * actually linked.
  */
@@ -21,6 +26,7 @@ import path from 'node:path';
 import {MANIFEST_FILENAME, readManifest} from './manifest.js';
 import {isInside, linkTarget, readJson, scanLinks} from './fsops.js';
 import {reportError} from './localize.js';
+import {explainKept, planPrune, prunesEntry} from './prune.js';
 import type {Deps} from './run.js';
 
 /** One row of `--list`: a recorded package, or a link the manifest does not know. */
@@ -36,6 +42,8 @@ export interface ListRow {
   path: string;
   branch: string;
   note: string;
+  /** A linked checkout: the copies pruning keeps in it, each with its reason. */
+  kept?: string[];
 }
 
 /** @returns {{rows: object[], notLinked: number}} */
@@ -54,7 +62,7 @@ export function collect(deps: Deps): {rows: ListRow[]; notLinked: number} {
         state: 'linked',
         path: entry.path,
         branch: entry.branch,
-        note: '',
+        note: prunesEntry(entry) ? '' : 'prune: off',
       });
     } else if (!fs.existsSync(checkout)) {
       // Recorded, but nothing on disk. `localize <name>` re-clones it when the
@@ -123,6 +131,21 @@ export function collect(deps: Deps): {rows: ListRow[]; notLinked: number} {
     });
   }
 
+  // What pruning keeps, per linked checkout. Informational: a failure here
+  // must not cost the listing.
+  try {
+    const plan = planPrune(manifest.entries, deps);
+    for (const row of rows) {
+      if (row.state !== 'linked') continue;
+      const kept = plan.keep.filter((k) => k.ownerName === row.name);
+      if (!kept.length) continue;
+      row.kept = kept.map(explainKept);
+      row.note = `kept ${kept.length} own ${kept.length === 1 ? 'copy' : 'copies'}`;
+    }
+  } catch {
+    /* listed without it */
+  }
+
   const notLinked = rows.filter(
     (r) => r.state === 'not-linked' || r.state === 'checkout-missing',
   ).length;
@@ -159,10 +182,22 @@ export function list(opts: {check?: boolean}, deps: Deps): number {
     );
   }
 
+  const withKept = rows.filter((r) => r.kept?.length);
+  if (withKept.length) {
+    deps.log('');
+    deps.log(
+      "Kept in a checkout's own node_modules (the app's copy cannot replace them, so the app loads two):",
+    );
+    for (const r of withKept) for (const k of r.kept!) deps.log(`  ${k}`);
+  }
+
   const count = (s) => rows.filter((r) => r.state === s).length;
   const parts = [`${count('linked')} linked`, `${notLinked} not linked`];
   if (count('untracked')) parts.push(`${count('untracked')} untracked link`);
   if (count('malformed')) parts.push(`${count('malformed')} malformed entry`);
+  const keptTotal = withKept.reduce((n, r) => n + r.kept!.length, 0);
+  if (keptTotal)
+    parts.push(`${keptTotal} kept ${keptTotal === 1 ? 'copy' : 'copies'}`);
   if (count('unrecorded'))
     parts.push(
       `${count('unrecorded')} unrecorded ${count('unrecorded') === 1 ? 'directory' : 'directories'}`,

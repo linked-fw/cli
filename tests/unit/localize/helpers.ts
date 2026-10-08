@@ -58,14 +58,37 @@ export function makeConsumer({pkg} = {}) {
   return appRoot;
 }
 
-/** Deps with a REAL subprocess runner. Used by the real-localize test. */
+/**
+ * The environment for a real `npm` in a test: the developer's own npm
+ * settings stay out. Run as `npm run test:unit`, npm hands its children its
+ * whole configuration as `npm_config_*` (registry, cache, `install-links`,
+ * `legacy-peer-deps`, …), and the user's `~/.npmrc` would apply on top -- so
+ * the same test could install differently on two machines. Every
+ * `npm_config_*` is dropped and the user config is pointed at /dev/null.
+ */
+export function scrubbedNpmEnv(
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (/^npm_config_/i.test(key)) continue;
+    env[key] = value;
+  }
+  env.npm_config_userconfig = '/dev/null';
+  return env;
+}
+
+/** Deps with a REAL subprocess runner, in a scrubbed npm environment. Used by the real-localize test. */
 export function realDeps(appRoot) {
   const logs = [];
   const warns = [];
   const errors = [];
+  const env = scrubbedNpmEnv();
+  const run = makeRun(appRoot);
   return {
     appRoot,
-    run: makeRun(appRoot),
+    run: (cmd, args, opts = {}) =>
+      run(cmd, args, {...opts, env: opts.env ?? env}),
     log: (m) => logs.push(m),
     warn: (m) => warns.push(m),
     error: (m) => errors.push(m),
