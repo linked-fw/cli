@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.41.0
+
+### Minor Changes
+
+- [#218](https://github.com/linked-fw/cli/pull/218) [`b8cdfbd`](https://github.com/linked-fw/cli/commit/b8cdfbd6b3312b81f1c913fbf12d7c7c4e50e1d2) Thanks [@flyon](https://github.com/flyon)! - `linked setup-publish` now writes `require-tests: true` into `pr.yml` when package.json has a `test` script, matching how every linked-cm package repo is set up. A package without one (a fresh `create-package` scaffold) still gets `false`, with a warning to flip it once a suite exists. Previously the stub always said `false`, so a package's tests could disappear without CI noticing.
+
 ## 1.40.1
 
 ### Patch Changes
