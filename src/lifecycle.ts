@@ -13,6 +13,8 @@ import {getPackageJSON} from './utils.js';
 import {isLinkedPackageJson} from './installed-packages.js';
 import {readManifest} from './localize/manifest.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
+// Shared with the CSS loader's mode resolution, which must pick the same profiles.
+import {readEnvNamesFromArgv} from './loader-mode.js';
 import type {PackageDetails} from './interfaces.js';
 
 /**
@@ -141,13 +143,6 @@ const loadEnvCmdrc = async (
     process.env = {...process.env, ...vars.development};
     console.log('No environment specified, using development');
   }
-};
-
-const readEnvNamesFromArgv = (): string[] => {
-  const args = process.argv.slice(2);
-  const envIndex = args.indexOf('--env');
-  if (envIndex === -1) return [];
-  return (args[envIndex + 1] || '').split(',').filter(Boolean);
 };
 
 /**

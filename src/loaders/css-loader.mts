@@ -2,6 +2,20 @@ import createLoader from 'create-esm-loader';
 // import parseCSS from 'css-parse';
 import {generateScopedName} from '../utils.js';
 import {cssModuleExports, generateScopedNameProduction} from '../css-module-names.js';
+import {cssNamingModeFor, type CssNamingMode} from '../loader-mode.js';
+
+// Which names to produce. NOT read from `process.env` at transform time: this
+// file runs on the module-hooks thread, whose env is a copy taken when the hooks
+// were registered — before the CLI loads the app's `.env`. `launch.ts` resolves
+// the mode up front and passes it in through `initialize`. The env fallback only
+// serves someone registering this loader by hand without `data`.
+let namingMode: CssNamingMode = cssNamingModeFor(process.env.NODE_ENV);
+
+export async function initialize(data?: {mode?: CssNamingMode}) {
+  if (data?.mode === 'development' || data?.mode === 'production') {
+    namingMode = data.mode;
+  }
+}
 
 const cssLoader = {
   resolve(specifier, opts) {
@@ -47,10 +61,11 @@ function parseCssToObject(rawSource: string, filename) {
   // is written with Vite's. Anything but a development run serves compiled
   // output (see startServer), so only 'development' gets the dev names — a
   // `staging` or unset NODE_ENV must still match the production stylesheet.
+  // `namingMode` carries that decision (see `initialize` above).
   const output = cssModuleExports(
     rawSource,
     filename,
-    process.env.NODE_ENV === 'development' ? generateScopedName : generateScopedNameProduction,
+    namingMode === 'development' ? generateScopedName : generateScopedNameProduction,
   );
   // console.log(myResults);
   // for (const rule of parseCSS(rawSource).stylesheet.rules) {

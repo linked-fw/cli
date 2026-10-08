@@ -8,10 +8,13 @@
 // ships legacy-signature property decorators and tsx/esbuild's default
 // otherwise emits TC39 standard decorators, breaking property
 // registration in user scripts.
-import {register} from 'node:module';
+//
+// The hooks run on their own thread, which never sees the app's `.env`: the CLI
+// loads it later. So the CSS loader is told its naming mode here, resolved
+// before anything loads — see loader-mode.ts.
+import {registerLoaders} from './loaders/register.js';
 
-register(new URL('./loaders/css-loader.mjs', import.meta.url));
-register(new URL('./loaders/ts-loader.mjs', import.meta.url));
+registerLoaders();
 
 import('./cli.js').catch((err) => {
   console.error(err);
