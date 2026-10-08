@@ -419,6 +419,37 @@ Dependency graph: `1 → 2 → 3 → 4 (release) → {5 localize retire, 6 CN} �
   unrecorded directories`.
 - Create Now `npm run typecheck:gate` → `No new type errors. 0 pre-existing errors still in the baseline.`
 
+### Phase 9 — done (Create Now `17c17c0a`)
+
+- Create Now on `@_linked/cli ^1.44.0` (root + access, documents, execution-gateway, my-app); the
+  lockfile diff is the cli bump only; the cli stays localized (`node_modules/@_linked/cli ->
+  ../../packages-local/_linked-cli`, relinked by the postinstall). The root `npm install` printed one
+  `kept N own copies …` summary per checkout instead of one line per copy (R8).
+- `vite.config.ts`: `clientDepIncludes: {deny: ['react-native']}` removed (R4 — `DEFAULT_DENY` has it).
+  Boot verified by the integration run and the relation-fields e2e (browser loads the client).
+- Docs (R8): the how-to points at `npx linked localize --list` for kept copies and their reasons and
+  at `--relink` / `--reinstall` to re-apply the prune (not `--ensure`, which is silent about them);
+  documents the context rule, `--no-prune` / `"prune": false`, `--ensure` taking no names and the
+  measured timing; `@_linked/localize` "being retired (not yet deprecated on npm)". agents.md lists
+  the three `packages-local` directories that are not localized (`_linked-localize`,
+  `_linked-translation`, `semantu-cli`).
+
+**Validation**
+
+- `npm run typecheck:gate` → `No new type errors. 0 pre-existing errors still in the baseline.`
+- `npm run test:unit` → `Test Files  235 passed (235)` / `Tests  1850 passed | 1 skipped (1851)`.
+- `npx linked build-all` → `Successfully built:` 27 packages (exit 0, no failures).
+- `CN_TEST_PORT=4063 npx playwright test --project=integration --retries=0` → `16 skipped` /
+  `175 passed (1.2m)` (191 total, as in phase 7).
+- `CN_TEST_PORT=4064 npx playwright test tests/e2e/relation-fields.spec.ts --retries=0` →
+  `2 passed (27.3s)`.
+- No `installed N times` / `copies of @_linked/core` in either run's log; no react-native error.
+- `npx linked localize --list` → `21 linked · 0 not linked · 6 untracked link · 72 kept copies · 3
+  unrecorded directories` (72 vs phase 8's 54: the root install reinstalled every checkout fresh).
+- `time npx linked localize --ensure` (idle machine) → silent, exit 0, `1.813 total` / `1.476 total`;
+  `node_modules/.bin/linked localize --ensure` `1.067 total` vs a bare `linked` invocation `0.991
+  total` — the check is a small fraction; the rest is cli startup and npx.
+
 ## Review
 
 | # | Sev | Finding |
