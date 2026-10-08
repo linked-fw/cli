@@ -1,40 +1,36 @@
 /**
- * `linked localize` is a thin adapter over `@_linked/localize`. The only
- * behaviour it owns is which of that package's four entry points a given set
- * of flags reaches, and the build seam — `@_linked/localize` deliberately has
- * no opinion about how to build a checkout, and this CLI supplies
- * `linked build`. Those are what is asserted here; the cloning, symlinking and
- * manifest handling are covered by localize's own suite.
+ * `linked localize` is a thin commander adapter over `src/localize/`. The only
+ * behaviour it owns is which of localize's four entry points a given set of
+ * flags reaches, and the build seam — localize deliberately has no opinion
+ * about how to build a checkout, and this CLI supplies `linked build`. Those
+ * are what is asserted here; the cloning, symlinking and manifest handling are
+ * covered by localize's own suites in `tests/unit/localize/`.
  */
 const calls: {fn: string; args: any[]}[] = [];
 
-jest.mock(
-  '@_linked/localize',
-  () => ({
-    defaultDeps: (appRoot: string) => ({appRoot}),
-    localize: (...args: any[]) => {
-      calls.push({fn: 'localize', args});
-      return 0;
-    },
-    adopt: (...args: any[]) => {
-      calls.push({fn: 'adopt', args});
-      return 0;
-    },
-    delocalize: (...args: any[]) => {
-      calls.push({fn: 'delocalize', args});
-      return 0;
-    },
-    list: (...args: any[]) => {
-      calls.push({fn: 'list', args});
-      return 0;
-    },
-    relink: (...args: any[]) => {
-      calls.push({fn: 'relink', args});
-      return 0;
-    },
-  }),
-  {virtual: true},
-);
+jest.mock('../../src/localize/index', () => ({
+  defaultDeps: (appRoot: string) => ({appRoot}),
+  localize: (...args: any[]) => {
+    calls.push({fn: 'localize', args});
+    return 0;
+  },
+  adopt: (...args: any[]) => {
+    calls.push({fn: 'adopt', args});
+    return 0;
+  },
+  delocalize: (...args: any[]) => {
+    calls.push({fn: 'delocalize', args});
+    return 0;
+  },
+  list: (...args: any[]) => {
+    calls.push({fn: 'list', args});
+    return 0;
+  },
+  relink: (...args: any[]) => {
+    calls.push({fn: 'relink', args});
+    return 0;
+  },
+}));
 
 // What the app provides is read from its installed packages (see
 // viteDedupe.test.ts for that walk); this suite asserts the CLI passes it on.

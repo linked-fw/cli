@@ -11,6 +11,7 @@ import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
 import {isLinkedPackageJson} from './installed-packages.js';
+import {readManifest} from './localize/manifest.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import type {PackageDetails} from './interfaces.js';
 
@@ -421,27 +422,15 @@ function filterPackagesByDependencyTree(
 }
 
 /**
- * localize's manifest filename (`MANIFEST_FILENAME` in `@_linked/localize`).
- * Repeated rather than imported: that package is ESM-only and loaded lazily,
- * and this runs synchronously while planning a build.
- */
-const LOCALIZE_MANIFEST = 'local-packages.json';
-
-/**
  * The package names recorded in the app's `local-packages.json` — what
- * `linked localize` has linked. Read tolerantly: localize owns that file and
- * refuses a malformed one loudly, so here a missing or unreadable file is
- * simply "nothing localized".
+ * `linked localize` has linked — read with localize's own reader. Read
+ * tolerantly: `linked localize` refuses a malformed file (and warns about a
+ * malformed entry) loudly, so here a missing or unusable file is simply
+ * "nothing localized", and a malformed entry is skipped without a word.
  */
 export function localizedPackageNames(appRootPath: string): string[] {
   try {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(appRootPath, LOCALIZE_MANIFEST), 'utf8'),
-    );
-    const packages = manifest?.packages;
-    return packages && typeof packages === 'object' && !Array.isArray(packages)
-      ? Object.keys(packages)
-      : [];
+    return Object.keys(readManifest(appRootPath, {warn: () => {}}).entries);
   } catch {
     return [];
   }

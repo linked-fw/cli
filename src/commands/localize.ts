@@ -2,11 +2,12 @@
  * `linked localize` / `linked delocalize` — develop an npm dependency from a
  * git checkout.
  *
- * All of the work lives in `@_linked/localize`, which is dependency-free and
- * knows nothing about this framework on purpose: it resolves a package's
- * repository from the registry, clones it, installs inside the checkout and
- * symlinks it into `node_modules`, without touching `package.json` or
- * `package-lock.json`.
+ * All of the work lives in `../localize/` (once the separate
+ * `@_linked/localize` package), which knows nothing about this framework on
+ * purpose: it resolves a package's repository from the registry, clones it,
+ * installs inside the checkout and symlinks it into `node_modules`, without
+ * touching `package.json` or `package-lock.json`. This module is the commander
+ * adapter over it.
  *
  * The one thing it deliberately does not know is how to build what it cloned.
  * That is the seam this module fills: `@_linked/cli` passes `build: 'linked
@@ -33,6 +34,15 @@
  * hand. It takes no `--subdir`: an adopted checkout is the package itself.
  */
 import process from 'node:process';
+
+import {
+  adopt,
+  defaultDeps,
+  delocalize,
+  list,
+  localize,
+  relink,
+} from '../localize/index.js';
 
 /** The build command `localize` runs inside a fresh checkout by default. */
 export const DEFAULT_BUILD_COMMAND = 'linked build';
@@ -85,8 +95,6 @@ export async function runLocalize(
   packages: string[] = [],
   options: LocalizeCommandOptions = {},
 ): Promise<void> {
-  const {defaultDeps, localize, adopt, list, relink} =
-    await import('@_linked/localize');
   const deps = defaultDeps(process.cwd());
   const prune = await pruneOptions(process.cwd(), options.prune);
 
@@ -153,7 +161,6 @@ export async function adoptPackage(
   name: string,
   options: {appRoot: string; build: string; repo?: string},
 ): Promise<number> {
-  const {defaultDeps, adopt} = await import('@_linked/localize');
   // Exit codes are localize's public contract; EXIT_WARNED (5) is the one a
   // caller usually tolerates, meaning the build failed but the link is in place.
   return adopt(
@@ -172,7 +179,6 @@ export async function runDelocalize(
   packages: string[] = [],
   options: Pick<LocalizeCommandOptions, 'purge' | 'force'> = {},
 ): Promise<void> {
-  const {defaultDeps, delocalize} = await import('@_linked/localize');
   const deps = defaultDeps(process.cwd());
   process.exitCode = delocalize(
     packages,

@@ -3,7 +3,7 @@ summary: >
   Make "one copy of every package the app provides" an invariant that localize owns and that holds
   whenever the app runs — not only right after a localize command. Fixes nested duplicate copies in
   localized checkouts (core, React, siblings, localize itself) for every tool, not just Vite.
-status: Tasks
+status: Implementation
 repos: [cli, localize, create-now]
 ---
 
@@ -127,3 +127,60 @@ Dependency graph: `1 → 2 → 3 → 4 (release) → {5 localize retire, 6 CN} �
 - **Validation:** typecheck gate, `npm run test:unit`, integration boot with no "installed N times", `npm ls @_linked/localize` empty.
 ### Phase 7 — adopt every checkout (D5, P11) + full validation
 - **Validation:** `linked localize --list` shows every directory recorded, none unrecorded; `npx linked build-all`; typecheck gate; `test:unit`; full integration; e2e relation-fields; no "installed N times".
+
+## Implementation log
+
+### Phase 1 — done
+
+**Changes**
+
+- `src/localize/{localize,adopt,delocalize,list,relink,prune,resolve,manifest,fsops,run,errors,index}.ts`:
+  localize 0.3.1's `src/` ported as-is, with loose types (`Deps`, `ManifestEntry`, `Manifest`,
+  `LocalizeOptions`, `PruneOptions`, `Resolved`, `ListRow`, exported from `index.ts`). Behaviour,
+  exit codes 3–8, the `deps` seam and the `local-packages.json` schema are unchanged.
+  `provided.ts` / `ensure.ts` are phase 2 and do not exist yet.
+- `semver.js` is gone: `satisfies()` now lives in `prune.ts` over the npm `semver` package (already
+  a cli dependency, 7.8.5), returning `null` ("cannot tell → keep the copy") when the version is not
+  valid or `validRange` is null. All 47 rows of localize's semver table give the same answer.
+- `commands/localize.ts` imports `../localize/index.js`; `cli-methods.ts` (`create-package`'s
+  checkout naming and `EXIT_WARNED`) imports `./localize/index.js`; `lifecycle.localizedPackageNames`
+  reads through `localize/manifest.readManifest` (the hand-copied manifest filename is gone).
+- User-facing hints now say `linked localize <pkg> …`, `linked localize <pkg> --adopt`,
+  `linked localize --list` instead of `linked-localize …`.
+- `@_linked/localize` removed from `dependencies`; lockfile loses exactly the root dependency and
+  the `node_modules/@_linked/localize` entry (an `npm@11.21.0 install --package-lock-only` — the npm
+  CI pins via `packageManager` — produced a byte-identical lock).
+- Tests: localize's 8 node:test suites + helpers + fixture ported to jest under
+  `tests/unit/localize/`. `helpers.test()` wraps jest's `test` and hands the body a `t` whose
+  `t.after()` collects cleanups run after the body, so bodies stayed as they were.
+  `real-localize` (real clone + real `npm install`) runs in `test:unit` with a 120 s timeout — it
+  takes a few seconds, so no slow/integration split was needed and CI runs it.
+  `localizeCommand.test.ts` now mocks `../../src/localize/index`.
+
+**Deviations**
+
+- `promises.test`: the three assertions on the retired `linked-localize` bin (`--help`/`--version`,
+  unknown option → exit 2) are dropped — `linked localize` is a commander command. Its two
+  behavioural tests (silent `--list`, no-op `--relink` with no manifest) now run through
+  `runLocalize`, the `linked localize` entry. localize: 108 tests; ported: 106.
+- `localizedPackageNames` now skips a malformed manifest entry (one missing `path`/`branch`) the
+  way localize itself does, where the hand-rolled reader listed every key. It warns nothing (a
+  build plan is not the place); `linked localize --list` reports the entry.
+
+**Validation**
+
+- `npm run test:unit`: `Test Suites: 50 passed, 50 total` / `Tests: 595 passed, 595 total`
+  (ported suites alone, with `localizeCommand`: `Test Suites: 9 passed` / `Tests: 123 passed`).
+- `npm run test:e2e`: `1 failed` — `Error: Log message "/Started.*Server/" not received after
+  60000ms` from testcontainers' Fuseki wait, before any cli code runs. CI does not run it
+  (`run-e2e: false`).
+- `npx linked build`: `✔ Build successful`; `lib/esm/localize/*` emitted; `@_linked/localize`
+  appears in `lib/` only in two comments.
+- Create Now (`@_linked/cli` → this checkout), with an ESM resolve hook logging every module URL
+  containing "localize": `npx linked localize --list` → `2 linked · 0 not linked · 6 untracked link`,
+  `npx linked localize --relink` → exit 0. Both resolved only `_linked-cli/lib/esm/localize/*` and
+  `lib/esm/commands/localize.js` — never the checkout's nested `node_modules/@_linked/localize`
+  nor `_linked-localize`. The relink, with the merged prune, then removed that nested copy itself:
+  `[localize] packages-local/_linked-cli: removed its own copies of what the app provides —
+  @_linked/core@2.25.0 (app: 2.26.0), @_linked/localize@0.3.0 (app: localized, 0.3.1)` (the
+  bootstrap pitfall, resolved as predicted).
