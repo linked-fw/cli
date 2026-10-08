@@ -1,6 +1,7 @@
 // Locating installed packages the way Node does, shared by the Vite config
 // helper and `linked app-doctor`.
 import fsExtra from 'fs-extra';
+import fs from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -11,8 +12,8 @@ import path from 'node:path';
  *
  * A NAME check, used only by `client-dep-includes` (alongside the flag). Deciding
  * whether an installed package is linked goes by its `package.json` instead —
- * {@link isLinkedPackageJson} — which is what the source walk, the standalone
- * `optimizeDeps.exclude` and `linked localize` use.
+ * {@link isLinkedPackageJson} — which is what the source walk and the standalone
+ * `optimizeDeps.exclude` use.
  */
 export const FRAMEWORK_PKG_PATTERNS: RegExp[] = [/^@_linked\//, /^lincd-/];
 export const isFrameworkPkg = (name: string): boolean =>
@@ -53,6 +54,41 @@ export async function readInstalledPkg(
     const parent = path.dirname(dir);
     if (parent === dir || (await isWorkspaceRoot(dir))) return null;
     dir = parent;
+  }
+}
+
+/**
+ * {@link readInstalledPkg}, synchronously, for callers on a hot path that must
+ * not go async (the one-copy check before every `linked start`). Same walk,
+ * same stop at the workspace root.
+ */
+export function readInstalledPkgSync(
+  name: string,
+  fromDir: string,
+): {root: string; json: any} | null {
+  let dir = path.resolve(fromDir);
+  while (true) {
+    const root = path.join(dir, 'node_modules', name);
+    const pkgJson = path.join(root, 'package.json');
+    if (fs.existsSync(pkgJson)) {
+      try {
+        return {root, json: JSON.parse(fs.readFileSync(pkgJson, 'utf8'))};
+      } catch {
+        return null;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir || isWorkspaceRootSync(dir)) return null;
+    dir = parent;
+  }
+}
+
+function isWorkspaceRootSync(dir: string): boolean {
+  try {
+    return !!JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
+      .workspaces;
+  } catch {
+    return false;
   }
 }
 
@@ -121,26 +157,4 @@ export async function discoverInstalledLinkedPackages(
     level = next;
   }
   return out;
-}
-
-/**
- * The names of the linked packages an app itself provides: those
- * {@link discoverInstalledLinkedPackages} finds that resolve from the app root
- * (not only from inside some dependency's own `node_modules`), plus `react` and
- * `react-dom` when they do. These are what must load once per runtime: what
- * `linked localize` tells localize the app provides, so a checkout's own copy of
- * one is removed.
- */
-export async function appProvidedPackages(
-  cwd: string = process.cwd(),
-): Promise<string[]> {
-  const names = new Set<string>();
-  for (const pkg of await discoverInstalledLinkedPackages(cwd)) {
-    if (names.has(pkg.name)) continue;
-    if (await readInstalledPkg(pkg.name, cwd)) names.add(pkg.name);
-  }
-  for (const name of ['react', 'react-dom']) {
-    if (await readInstalledPkg(name, cwd)) names.add(name);
-  }
-  return [...names].sort();
 }

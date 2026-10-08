@@ -20,13 +20,14 @@
  * from the registry's `repository` field, so a name that npm cannot resolve is
  * an error rather than a guess.
  *
- * The other framework knowledge it supplies is what an app PROVIDES. A
- * checkout's own install leaves its own copies of `@_linked/core`, React and
+ * A checkout's own install leaves its own copies of `@_linked/core`, React and
  * any localized sibling in its `node_modules`, and Node loads those instead of
  * the app's: a localized package then never sees a localized sibling, and core
  * loads once per copy. localize removes those copies by default wherever the
- * app's version satisfies the checkout's range (`--no-prune` turns it off);
- * this CLI tells localize what the app provides: `providedByApp`.
+ * app's version satisfies the checkout's ranges (`--no-prune` turns it off).
+ * What the app provides is one rule, `providedPackages` (localize/provided.ts),
+ * shared with the run-time check (`--ensure`, and before `linked start` etc.)
+ * and Vite's dedupe.
  *
  * `--adopt` is the exception to "clone from the registry": it links a git
  * checkout that is already in `packages-local/` under its localize name, with
@@ -37,37 +38,27 @@ import process from 'node:process';
 
 import {
   adopt,
+  checkOneCopy,
   defaultDeps,
   delocalize,
   list,
   localize,
+  reinstall,
   relink,
 } from '../localize/index.js';
 
 /** The build command `localize` runs inside a fresh checkout by default. */
 export const DEFAULT_BUILD_COMMAND = 'linked build';
 
-/**
- * What a linked app provides to its localized checkouts: the names of the
- * linked packages it has installed — by their `linkedPackage` flag, whatever
- * their scope — plus `react` and `react-dom`. Each one either holds
- * module-level state that must exist once (core's shape registry, React's
- * dispatcher, the context objects in server-utils and react) or is a localized
- * sibling the checkout should reach live (see `appProvidedPackages`). localize
- * itself already treats every localized sibling and a checkout's
- * peerDependencies as provided. Vite's `resolve.dedupe` is derived separately,
- * from what is localized (`localized-dedupe.ts`).
- */
-export async function providedByApp(appRoot: string): Promise<string[]> {
-  const {appProvidedPackages} = await import('../installed-packages.js');
-  return appProvidedPackages(appRoot);
-}
-
 export interface LocalizeCommandOptions {
   adopt?: boolean;
   list?: boolean;
   check?: boolean;
   relink?: boolean;
+  /** Check every checkout for a copy of what the app provides and prune it; exit 0. */
+  ensure?: boolean;
+  /** `npm install` in this package's checkout, then prune it. */
+  reinstall?: string;
   dir?: string;
   repo?: string;
   subdir?: string;
@@ -79,11 +70,10 @@ export interface LocalizeCommandOptions {
 }
 
 /** localize's prune options for a run: on unless explicitly turned off. */
-export async function pruneOptions(
-  appRoot: string,
-  prune: boolean | undefined = true,
-): Promise<{prune: boolean; provided: string[]}> {
-  return {prune: prune !== false, provided: await providedByApp(appRoot)};
+export function pruneOptions(prune: boolean | undefined = true): {
+  prune: boolean;
+} {
+  return {prune: prune !== false};
 }
 
 /**
@@ -96,10 +86,20 @@ export async function runLocalize(
   options: LocalizeCommandOptions = {},
 ): Promise<void> {
   const deps = defaultDeps(process.cwd());
-  const prune = await pruneOptions(process.cwd(), options.prune);
+  const prune = pruneOptions(options.prune);
 
   if (options.relink) {
     process.exitCode = relink(deps, prune);
+    return;
+  }
+  if (options.ensure) {
+    // For an app's npm `pre*` scripts: never fails the script it guards.
+    checkOneCopy(deps.appRoot, deps);
+    process.exitCode = 0;
+    return;
+  }
+  if (options.reinstall) {
+    process.exitCode = reinstall(options.reinstall, prune, deps);
     return;
   }
   if (options.adopt && packages.length === 0) {
@@ -168,7 +168,7 @@ export async function adoptPackage(
     {
       build: options.build,
       repo: options.repo,
-      ...(await pruneOptions(options.appRoot)),
+      ...pruneOptions(),
     },
     defaultDeps(options.appRoot),
   );

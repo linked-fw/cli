@@ -184,3 +184,96 @@ Dependency graph: `1 → 2 → 3 → 4 (release) → {5 localize retire, 6 CN} �
   `[localize] packages-local/_linked-cli: removed its own copies of what the app provides —
   @_linked/core@2.25.0 (app: 2.26.0), @_linked/localize@0.3.0 (app: localized, 0.3.1)` (the
   bootstrap pitfall, resolved as predicted).
+
+### Phase 2 — done
+
+**Changes**
+
+- `src/localize/provided.ts`: `providedPackages(appRoot, localizedNames?)` — P3's rule, synchronous
+  (`readInstalledPkgSync`, new in `installed-packages.ts`, same walk as `readInstalledPkg`). Returns
+  `{names, skipped, localized, dependencies}`; `skipped` is `{name, reason: 'range', asks, appVersion}`.
+- `src/localized-dedupe.ts` consumes it and keeps only the Vite-only "a registry install nests its
+  own copy" exclusion (applied to `dependencies`, never to a localized package or react/react-dom).
+  Output shape unchanged; `viteDedupe.test.ts` untouched and green.
+- `prune.ts`: candidates are `candidatesFor(entries)` = the rule over the entries being pruned plus
+  every entry (sibling). The per-copy range guard and "cannot tell → keep" are unchanged. Gone:
+  `PruneOptions.provided`, the `@scope/*` `matches` patterns, the peer-specific candidate rule,
+  `appProvidedPackages` (`installed-packages.ts`) and `providedByApp` (`commands/localize.ts`);
+  `pruneOptions()` is now `{prune}` only. `pruneProvided` takes an optional
+  `scope {owners?, deps?}`.
+- `src/localize/ensure.ts`: `ensure(entry, deps, opts)` (in-checkout `npm install`, then prune that
+  checkout), `reinstall(name, opts, deps)` (`--reinstall`), `checkOneCopy(appRoot, deps)` (P4).
+  `installLinkAndRecord` (localize + adopt) and relink's reinstall go through `ensure`.
+- `src/cli.ts`: `linked localize --ensure` (exit 0) and `--reinstall <package>`; a `program.hook
+  ('preAction')` runs `checkOneCopy(process.cwd())` before `start`, `script`, `call`, `build-all`.
+  `--no-prune` help describes the new rule.
+- `list.ts` (P8): a directory in the manifest's `dir` that no entry records and no untracked link
+  points at is a row `UNRECORDED … directory not in local-packages.json`, counted in the summary;
+  it does not fail `--check`.
+- Tests: `tests/unit/localize/ensure.test.ts` (13): rule parity against the previous
+  `localizedDedupe` (kept verbatim in the test as the oracle) on a fixture hitting every branch;
+  ensure prunes after a stubbed install / `{prune:false}` / install failure; `--reinstall` routes
+  through ensure; `checkOneCopy` prunes a planted duplicate in one line with a `run` that throws, is
+  silent when clean, a no-op with no manifest, quiet when the guard keeps a copy, never throws;
+  `--list` flags an unrecorded directory. `localizeCommand.test.ts`: `--ensure` / `--reinstall`
+  routing; the `provided` expectations removed.
+
+**Deviations**
+
+- `ensure` is **synchronous** and returns `number` (the contract said `Promise<number>`): all of
+  localize is `spawnSync` with sync exit-code entry points (`localize`, `adopt`, `relink`); an
+  async `ensure` would turn those public APIs async for no gain. It **throws**
+  `LocalizeError(EXIT_INSTALL_FAILED)` on a failed install so each caller adds its own context
+  (localize: "nothing was linked"; relink: warn + "retry with `linked localize --reinstall <pkg>`");
+  it returns `EXIT_WARNED` when only the prune failed. It takes a third `opts` (`--no-prune`) and
+  reads the package name from the checkout's `package.json`.
+- `providedPackages` takes an optional second argument (pruning passes the entries it prunes, so
+  a checkout being localized counts before the manifest records it) and also returns `localized` /
+  `dependencies` (the Vite consumer needs to know which names are a checkout's dependency).
+- A name the rule **skips** (a localized range misses the app's version) is never removed, but a
+  checkout that declares it and holds a copy still gets prune's "kept … Align the ranges" warning —
+  that keeps the existing warning test and says out loud what the rule left out.
+- `checkOneCopy` silences prune's per-checkout report and kept/drift warnings and prints only its
+  own one line of removals: kept copies are reported by localize / relink / ensure, not on every
+  `linked start`.
+- devDependencies are no longer candidates (P3 is runtime fields only). `prune.test`'s "only
+  candidates go … a bin is no exemption" now declares `@fw/cli` in `dependencies`.
+- In localize's install step the prune now runs right after the install, before the build (D2:
+  one step); the global prune over every checkout after linking stays.
+
+**Validation**
+
+- Housekeeping: `git diff --stat package-lock.json` → `Bin 466004 -> 464869 bytes`, and no
+  changed line other than a `"libc"` field → restored with `git checkout -- package-lock.json`.
+  The stray `packages-local/` and `local-packages.json` at the repo root are untouched and
+  unstaged; jest's `roots` is `tests/unit` and the adapter test mocks `src/localize/index`, so no
+  run reads them.
+- `npm run test:unit`: `Test Suites: 51 passed, 51 total` / `Tests: 609 passed, 609 total`.
+- Mutation check (each reverted): `checkOneCopy` comparing `realOrSelf(copy) === real` →
+  `✕ checkOneCopy removes a planted duplicate, says so in ONE line, and never runs anything`;
+  `ensure` without its prune → `✕ ensure installs inside the checkout, then prunes …` and
+  `✕ --reinstall <pkg> goes through ensure …`; dedupe dropping a nested react-dom →
+  `✕ rule parity: localizedDedupe gives exactly what it gave …`.
+- `npx linked build`: `✔ Build successful`.
+- preAction: a scratch app with a recorded checkout holding an older `@fw/core`, `linked
+  build-all` → `[localize] one copy: removed packages-local/fw-a/node_modules/@fw/core@2.20.0 — the
+  app provides it.` before the build output; a second run prints nothing extra.
+- Create Now (cli localized), planted `@_linked/core` 2.26.0 in `packages-local/_linked-cli`,
+  `npx linked localize --ensure` → exit 0, one line: `[localize] one copy: removed
+  packages-local/_linked-cli/node_modules/@_linked/core@2.26.0, …/@tailwindcss/vite@4.3.3,
+  …/@types/node@20.19.43, …/@types/react@19.3.0, …/@types/react-dom@19.3.0,
+  …/@vitejs/plugin-react@4.7.0, …/colors@1.4.0, …/commander@11.1.0, …/copyfiles@2.4.1,
+  …/create-esm-loader@0.2.5, …/depcheck@1.4.7, …/env-cmd@10.1.0, …/esbuild@0.28.2,
+  …/find-nearest-package-json@2.0.1, …/fs-extra@11.4.1, …/glob@10.5.0, …/ora@8.2.0,
+  …/require-extensions@0.0.4, …/rimraf@5.0.10, …/staged-git-files@1.3.0, …/tailwindcss@4.3.3,
+  …/tsconfig-to-dual-package@1.2.0, …/typescript@5.9.3, …/typescript-plugin-css-modules@5.2.0,
+  …/vite@6.4.3 — the app provides them.` The other 24 are D4's widening (runtime dependencies of a
+  localized checkout the app has in range), never candidates before. Afterwards the cli checkout's
+  `npm run test:unit` (609 passed) and `npx linked build` (`✔ Build successful`) still pass,
+  resolving those from the app root.
+- Clean `npx linked localize --ensure`: silent, exit 0; wall 1.68 / 1.22 / 1.25 s via `npx`,
+  0.94 / 0.94 / 0.92 s via `node …/launch.js` — against 0.87 s for the cli to start and reject an
+  unknown option, i.e. the cost is cli startup. `checkOneCopy` itself: 7.5 ms cold, then
+  2.0 / 1.7 / 2.1 / 2.1 ms.
+- `npx linked localize --list` → `2 linked · 0 not linked · 6 untracked link · 22 unrecorded
+  directories` (`_linked-auth` … `_linked-xsd`, `semantu-cli`; Phase 7's adoption list).

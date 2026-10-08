@@ -38,6 +38,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import 'require-extensions';
 import {unknownCommandError} from './unknown-command.js';
+import {checkOneCopy} from './localize/ensure.js';
 
 /**
  * Run an async command action and report a failure the way the rest of this
@@ -473,6 +474,14 @@ program
     '--relink',
     'Recreate the recorded symlinks. This is what a postinstall runs.',
   )
+  .option(
+    '--ensure',
+    "Remove every localized checkout's own copy of a package the app provides, and exit 0. Never runs npm; prints nothing when there is nothing to remove. For an app's npm pre* scripts (linked start, script, call and build-all already run it).",
+  )
+  .option(
+    '--reinstall <package>',
+    "npm install inside that package's checkout, then remove its own copies of what the app provides. Use this instead of running npm install in a checkout by hand.",
+  )
   .option('--dir <path>', 'Where checkouts live (default: packages-local).')
   .option(
     '--repo <git-url>',
@@ -492,7 +501,7 @@ program
   )
   .option(
     '--no-prune',
-    "Keep every checkout's node_modules as npm installed it. By default, after installing (and on --relink) a checkout's own copy of a linked package (one with linkedPackage: true in its package.json), react or react-dom is removed when the app has a version that satisfies the checkout's range, so the checkout loads the app's copy (and a localized sibling) instead of a second one. A copy the app's version does not satisfy is kept, with a warning.",
+    "Keep every checkout's node_modules as npm installed it. By default, after installing (and on --relink and --reinstall) a checkout's own copy of something the app provides is removed: a localized sibling, a runtime dependency of a localized checkout that the app has at a version satisfying every localized range, react or react-dom. The checkout then loads the app's copy instead of a second one. A copy the app's version does not satisfy is kept, with a warning.",
   )
   .action(async (packages: string[], options) => {
     const {runLocalize} = await import('./commands/localize.js');
@@ -628,6 +637,15 @@ program
 
 program.command('enable-capacitor').action(() => {
   addCapacitor();
+});
+
+// One copy, always (localize/ensure.ts): before a command that runs the app's
+// code, remove any localized checkout's own copy of what the app provides.
+// Stat-only, never runs npm, silent when clean, a no-op with no
+// local-packages.json, and it never throws.
+const ONE_COPY_COMMANDS = new Set(['start', 'script', 'call', 'build-all']);
+program.hook('preAction', (_program, actionCommand) => {
+  if (ONE_COPY_COMMANDS.has(actionCommand.name())) checkOneCopy(process.cwd());
 });
 
 const unknownCommand = unknownCommandError(program, process.argv.slice(2));

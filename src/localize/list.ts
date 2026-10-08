@@ -7,6 +7,11 @@
  * The four states are distinguished deliberately: both of the silent failures
  * this tool was built to end were disagreements between intent and truth.
  *
+ * It also flags a directory in the checkout directory (`packages-local/`) that
+ * nothing records and nothing links: every checkout there is meant to be
+ * localized, and one that is not loads nobody's code while looking as if it
+ * did.
+ *
  * Never writes. Exits 0, unless `--check` and something recorded is not
  * actually linked.
  */
@@ -14,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {MANIFEST_FILENAME, readManifest} from './manifest.js';
-import {isInside, linkTarget, scanLinks} from './fsops.js';
+import {isInside, linkTarget, readJson, scanLinks} from './fsops.js';
 import {reportError} from './localize.js';
 import type {Deps} from './run.js';
 
@@ -22,7 +27,12 @@ import type {Deps} from './run.js';
 export interface ListRow {
   name: string;
   state:
-    'linked' | 'checkout-missing' | 'not-linked' | 'malformed' | 'untracked';
+    | 'linked'
+    | 'checkout-missing'
+    | 'not-linked'
+    | 'malformed'
+    | 'untracked'
+    | 'unrecorded';
   path: string;
   branch: string;
   note: string;
@@ -81,14 +91,35 @@ export function collect(deps: Deps): {rows: ListRow[]; notLinked: number} {
 
   // A symlink out of node_modules that the manifest does not know about.
   // Reported, never touched.
+  const untrackedTargets: string[] = [];
   for (const {name, target} of scanLinks(deps.appRoot)) {
     if (manifest.entries[name]) continue;
+    untrackedTargets.push(target);
     rows.push({
       name,
       state: 'untracked',
       path: path.relative(deps.appRoot, target),
       branch: '—',
       note: `not in ${MANIFEST_FILENAME}`,
+    });
+  }
+
+  // A directory in the checkout directory with no record (and no link, which
+  // the row above already reports).
+  const recorded = Object.values(manifest.entries).map((e) =>
+    real(path.join(deps.appRoot, e.path)),
+  );
+  for (const sub of directoriesIn(dir)) {
+    const abs = real(path.join(dir, sub));
+    if (recorded.some((r) => r === abs || isInside(r, abs))) continue;
+    if (untrackedTargets.some((t) => t === abs || isInside(t, abs))) continue;
+    const pkg = readJson(path.join(abs, 'package.json'));
+    rows.push({
+      name: typeof pkg?.name === 'string' ? pkg.name : '—',
+      state: 'unrecorded',
+      path: path.join(manifest.dir, sub),
+      branch: '—',
+      note: `directory not in ${MANIFEST_FILENAME}`,
     });
   }
 
@@ -114,7 +145,11 @@ export function list(opts: {check?: boolean}, deps: Deps): number {
   const pathW = Math.max(...rows.map((r) => r.path.length)) + 2;
   for (const r of rows) {
     const label =
-      r.state === 'linked' || r.state === 'untracked' ? 'linked' : 'NOT LINKED';
+      r.state === 'linked' || r.state === 'untracked'
+        ? 'linked'
+        : r.state === 'unrecorded'
+          ? 'UNRECORDED'
+          : 'NOT LINKED';
     deps.log(
       pad(nameW, r.name) +
         pad(12, label) +
@@ -128,8 +163,38 @@ export function list(opts: {check?: boolean}, deps: Deps): number {
   const parts = [`${count('linked')} linked`, `${notLinked} not linked`];
   if (count('untracked')) parts.push(`${count('untracked')} untracked link`);
   if (count('malformed')) parts.push(`${count('malformed')} malformed entry`);
+  if (count('unrecorded'))
+    parts.push(
+      `${count('unrecorded')} unrecorded ${count('unrecorded') === 1 ? 'directory' : 'directories'}`,
+    );
   deps.log('');
   deps.log(parts.join(' · '));
 
   return opts.check && notLinked > 0 ? 1 : 0;
+}
+
+/** The (non-hidden) directories directly in `dir`, following links; none when it is absent. */
+function directoriesIn(dir: string): string[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names.filter((n) => {
+    if (n.startsWith('.')) return false;
+    try {
+      return fs.statSync(path.join(dir, n)).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+}
+
+function real(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
 }

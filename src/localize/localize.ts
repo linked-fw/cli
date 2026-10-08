@@ -5,7 +5,7 @@
  *
  *   1. npm name -> registry `repository` (see resolve.ts)
  *   2. `git clone` into `<dir>/<name>`
- *   3. **`npm install` INSIDE the checkout**
+ *   3. **`npm install` INSIDE the checkout**, then prune it (`ensure`)
  *   4. `fs.symlink` node_modules/<name> -> the checkout
  *   5. record it in a gitignored manifest
  *
@@ -49,6 +49,7 @@ import type {ManifestEntry} from './manifest.js';
 import type {Deps} from './run.js';
 import {checkoutNameFor, resolvePackage} from './resolve.js';
 import {pruneProvided, shouldPrune} from './prune.js';
+import {ensure} from './ensure.js';
 import type {PruneOptions} from './prune.js';
 import {
   diffManifests,
@@ -62,7 +63,7 @@ import {
 
 /**
  * @param {string[]} names  full npm package names
- * @param {object} opts  `{force, dir, repo, subdir, build, prune, provided}` -- `prune`
+ * @param {object} opts  `{force, dir, repo, subdir, build, prune}` -- `prune`
  *   defaults to true; see prune.ts
  * @param {object} deps  `{appRoot, run, log, warn, error}`
  * @returns {number} the process exit code: the HIGHEST of the per-name codes,
@@ -276,17 +277,14 @@ export function installLinkAndRecord(
   deps: Deps,
   code = 0,
 ): {code: number; entry: {name: string; value: ManifestEntry}} {
-  // THE constraint. Read the module header before changing this.
-  deps.log(`[localize] npm install in ${relPkg}`);
-  const install = deps.run('npm', ['install', '--no-audit', '--no-fund'], {
-    cwd: pkgDir,
-  });
-  if (install.status !== 0) {
-    throw new LocalizeError(
-      `npm install failed in ${relPkg}:\n${(install.stderr || install.stdout).trim()}\n` +
-        `The checkout is left on disk. Nothing was linked and nothing was recorded.`,
-      EXIT_INSTALL_FAILED,
-    );
+  // THE constraint. Read the module header before changing this. `ensure`
+  // installs inside the checkout and prunes it as one step (ensure.ts).
+  try {
+    code = Math.max(code, ensure({path: relPkg, subdir}, deps, opts));
+  } catch (e) {
+    if (e instanceof LocalizeError && e.code === EXIT_INSTALL_FAILED)
+      e.message += `\nThe checkout is left on disk. Nothing was linked and nothing was recorded.`;
+    throw e;
   }
 
   // The build is the one thing localize does not know how to do, so it is

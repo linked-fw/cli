@@ -18,8 +18,6 @@ import {writeManifest} from '../../../src/localize/manifest.js';
 import {checkoutNameFor} from '../../../src/localize/resolve.js';
 import {makeConsumer, ok, rm, stubbed, test, tmpdir} from './helpers.js';
 
-const PROVIDED = {provided: ['@fw/*']};
-
 function consumer(t) {
   const root = makeConsumer();
   t.after(() => rm(root));
@@ -103,7 +101,7 @@ test('localize removes, from EVERY checkout, the copies the app provides — by 
 
   // adopt shares forEachName with localize; it is the stub-free way in.
   assert.equal(
-    adopt(['@fw/b'], {...PROVIDED, dir: 'packages-local'}, deps),
+    adopt(['@fw/b'], {dir: 'packages-local'}, deps),
     0,
     deps.output(),
   );
@@ -140,7 +138,7 @@ test('--no-prune ({prune: false}) removes nothing — the behaviour of 0.2', (t)
   const {appRoot, a, b} = twoSiblings(t);
   const deps = stubbed(appRoot);
   assert.equal(
-    adopt(['@fw/b'], {...PROVIDED, prune: false, dir: 'packages-local'}, deps),
+    adopt(['@fw/b'], {prune: false, dir: 'packages-local'}, deps),
     0,
     deps.output(),
   );
@@ -157,7 +155,7 @@ test('a copy the app does not satisfy is KEPT, with a warning naming package, ra
   record(appRoot, {'@fw/a': a});
 
   const deps = stubbed(appRoot);
-  relink(deps, PROVIDED);
+  relink(deps);
   assert.ok(
     has(a, '@fw/core'),
     'removing it would hand A a core outside its range',
@@ -180,7 +178,7 @@ test('a range from ANOTHER installed package that would load the copy counts too
   record(appRoot, {'@fw/a': a});
 
   const deps = stubbed(appRoot);
-  relink(deps, {provided: ['@fw/core']});
+  relink(deps);
   assert.ok(has(a, '@fw/core'));
   assert.match(
     deps.warns.join('\n'),
@@ -190,7 +188,7 @@ test('a range from ANOTHER installed package that would load the copy counts too
   // ...but not when that package has its own copy, which it then loads instead.
   nested(path.join(a, 'node_modules', '@fw/ui'), '@fw/core', '2.30.0');
   const again = stubbed(appRoot);
-  relink(again, {provided: ['@fw/core']});
+  relink(again);
   assert.equal(has(a, '@fw/core'), false, again.output());
 });
 
@@ -200,7 +198,8 @@ test('only candidates go: unlisted packages and what the app lacks stay; a bin i
   appHas(appRoot, 'typescript', '5.9.3');
   appHas(appRoot, 'react', '19.1.0');
   const a = checkout(appRoot, '@fw/a', {
-    devDependencies: {'@fw/cli': '^1.19.0', typescript: '^5.0.0'},
+    dependencies: {'@fw/cli': '^1.19.0'},
+    devDependencies: {typescript: '^5.0.0'},
     peerDependencies: {react: '^19.0.0'},
   });
   nested(a, '@fw/cli', '1.19.1', {bin: {fw: 'bin.js'}});
@@ -214,7 +213,7 @@ test('only candidates go: unlisted packages and what the app lacks stay; a bin i
   record(appRoot, {'@fw/a': a});
 
   const deps = stubbed(appRoot);
-  relink(deps, PROVIDED);
+  relink(deps);
   // npm puts every ancestor's node_modules/.bin on the PATH, so the app's `fw` is
   // found from inside the checkout -- measured with `npx`, `npm exec`, `npm run`.
   assert.equal(
@@ -230,7 +229,7 @@ test('only candidates go: unlisted packages and what the app lacks stay; a bin i
   assert.ok(isLink(path.join(bin, 'tsc')), 'other packages keep theirs');
   assert.ok(
     has(a, 'typescript'),
-    'not a candidate: neither listed, nor a peer, nor a sibling',
+    'not a candidate: a devDependency, so the checkout keeps its own tooling',
   );
   assert.ok(
     has(a, '@fw/only-here'),
@@ -270,7 +269,7 @@ test('relink does not reinstall a checkout for a copy it pruned on purpose', (t)
   record(appRoot, {'@fw/a': a}); // core is already absent from A: pruned by an earlier run
 
   const deps = stubbed(appRoot);
-  assert.equal(relink(deps, PROVIDED), 0);
+  assert.equal(relink(deps), 0);
   assert.equal(
     deps.npmCalls().length,
     0,
@@ -279,7 +278,7 @@ test('relink does not reinstall a checkout for a copy it pruned on purpose', (t)
 
   // With --no-prune, the same tree reads as pruned by a root install -- as in 0.2.
   const plain = stubbed(appRoot);
-  relink(plain, {...PROVIDED, prune: false});
+  relink(plain, {prune: false});
   assert.equal(plain.npmCalls().length, 1);
   assert.equal(plain.npmCalls()[0].cwd, a);
 });
@@ -300,7 +299,7 @@ test('relink reinstalls when a pruned dependency is NOT provided, then prunes', 
     }
     return ok();
   });
-  assert.equal(relink(deps, PROVIDED), 0);
+  assert.equal(relink(deps), 0);
   assert.equal(deps.npmCalls().length, 1);
   assert.ok(has(a, 'tool'));
   assert.equal(
@@ -330,7 +329,7 @@ test('a checkout outside the app root is left alone: Node would never reach the 
   });
 
   const deps = stubbed(appRoot);
-  relink(deps, PROVIDED);
+  relink(deps);
   assert.ok(has(a, '@fw/core'));
   assert.match(deps.output(), /outside the app root/);
 });
@@ -340,11 +339,7 @@ test('localize itself prunes: the named package and its siblings', (t) => {
   const deps = stubbed(appRoot);
   // B already sits where the clone would go, so localize refreshes it instead of cloning.
   assert.equal(
-    localize(
-      ['@fw/b'],
-      {...PROVIDED, repo: 'https://example.invalid/b.git'},
-      deps,
-    ),
+    localize(['@fw/b'], {repo: 'https://example.invalid/b.git'}, deps),
     0,
     deps.output(),
   );

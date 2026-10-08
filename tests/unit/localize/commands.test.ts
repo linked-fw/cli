@@ -378,7 +378,7 @@ test('relink reinstalls a checkout a root install pruned — inside the checkout
   assert.equal(relink(failing), 0);
   assert.match(
     failing.output(),
-    /npm install in packages-local\/widget failed/,
+    /npm install failed in packages-local\/widget[\s\S]*linked localize --reinstall widget/,
   );
 });
 

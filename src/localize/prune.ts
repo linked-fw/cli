@@ -22,16 +22,21 @@
  * that of every installed package that would load it. Node's upward search
  * then finds the app's copy instead. Nothing else in the checkout moves.
  *
- * Candidates are deliberately narrow; removing everything the app happens to
- * provide would make the checkout's tooling depend on the app's for no gain:
+ * The candidates are `providedPackages` (provided.ts) -- the one rule the
+ * run-time check and Vite's dedupe use too -- over the entries being pruned:
  *
  * - a **localized sibling** -- always counts as provided, whatever the range,
  *   because the live checkout is the point of localizing it. A range it does
  *   not satisfy is said out loud, never acted on;
- * - the checkout's **peerDependencies** -- by definition, the host's to provide;
- * - anything matching `provided` -- names or `@scope/*` patterns the caller
- *   passes (`@_linked/cli` passes the names of the app's installed linked
- *   packages plus react/react-dom).
+ * - a **runtime dependency** (`dependencies`, `peerDependencies`,
+ *   `optionalDependencies`) of any localized checkout that the app has at a
+ *   version satisfying every localized checkout's range for it;
+ * - `react` and `react-dom`.
+ *
+ * Nothing else is touched -- a devDependency the app happens to have too
+ * stays, so the checkout's tooling does not come to depend on the app's. A
+ * runtime dependency the rule leaves out because a localized range misses the
+ * app's version is kept and said out loud, like any other copy kept below.
  *
  * Never removed, candidate or not:
  *
@@ -51,13 +56,17 @@
  *
  * It never runs npm and never touches the checkout's `package.json` or
  * `package-lock.json`. `npm install` in the checkout puts the copies back;
- * the next localize or `--relink` takes them out again.
+ * `ensure` (ensure.ts) is the install-then-prune step every in-checkout
+ * install goes through, and the run-time check (`checkOneCopy`) takes them out
+ * again before `linked start` and friends.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
 import {isInside, isSymlink, readJson} from './fsops.js';
 import semver from 'semver';
+import {providedPackages} from './provided.js';
+import type {ProvidedSkip} from './provided.js';
 
 import type {ManifestEntry} from './manifest.js';
 import type {Deps} from './run.js';
@@ -66,8 +75,32 @@ import type {Deps} from './run.js';
 export interface PruneOptions {
   /** On unless explicitly false. */
   prune?: boolean;
-  /** Names or `@scope/*` patterns the app provides. */
-  provided?: string[];
+}
+
+/** Limit a prune to some checkouts and/or some dependency names. */
+export interface PruneScope {
+  /** Only these localized packages' checkouts. */
+  owners?: string[];
+  /** Only these dependency names. */
+  deps?: string[];
+}
+
+/** What pruning may remove: the rule's names plus every localized sibling, and what the rule skipped. */
+export interface Candidates {
+  names: Set<string>;
+  skipped: Map<string, ProvidedSkip>;
+}
+
+/** The candidates for `entries`, by `providedPackages` (provided.ts). */
+export function candidatesFor(
+  entries: Record<string, ManifestEntry>,
+  deps: Pick<Deps, 'appRoot'>,
+): Candidates {
+  const rule = providedPackages(deps.appRoot, Object.keys(entries));
+  return {
+    names: new Set([...rule.names, ...Object.keys(entries)]),
+    skipped: new Map(rule.skipped.map((s) => [s.name, s])),
+  };
 }
 
 /**
@@ -106,21 +139,25 @@ const DECLARE_FIELDS = [
 ];
 
 /**
- * @param {Record<string, {path: string, subdir?: string}>} entries  the manifest's packages
- * @param {{provided?: string[]}} opts
- * @param {object} deps  `{appRoot, log, warn}`
- * @returns {{removed: object[], kept: object[]}}
+ * @param entries  the localized packages: every one counts as a sibling
+ * @param opts  unused beyond `prune`, which callers check with `shouldPrune`
+ * @param deps  `{appRoot, log, warn}`
+ * @param scope  prune only some checkouts / names (the run-time check)
  */
 export function pruneProvided(
   entries: Record<string, ManifestEntry>,
   opts: PruneOptions,
   deps: Pick<Deps, 'appRoot' | 'log' | 'warn'>,
+  scope: PruneScope = {},
 ): {removed: any[]; kept: any[]} {
   const removed: any[] = [];
   const kept: any[] = [];
   const appRoot = realOrSelf(deps.appRoot);
+  const candidates = candidatesFor(entries, deps);
+  const only = scope.deps ? new Set(scope.deps) : null;
 
   for (const [name, entry] of Object.entries(entries)) {
+    if (scope.owners && !scope.owners.includes(name)) continue;
     const pkgDir = path.join(deps.appRoot, entry.path);
     if (!fs.existsSync(path.join(pkgDir, 'package.json'))) continue;
     if (!isInside(realOrSelf(pkgDir), appRoot)) {
@@ -136,7 +173,8 @@ export function pruneProvided(
       pkgDir,
       pkg: readJson(path.join(pkgDir, 'package.json')) ?? {},
       entries,
-      opts,
+      candidates,
+      only,
       deps,
     };
     for (const nm of nodeModulesRoots(pkgDir, entry)) {
@@ -160,26 +198,27 @@ export function pruneProvided(
 export function isProvidedByApp(
   dep: string,
   range: string | undefined,
-  checkoutPkg: any,
   entries: Record<string, ManifestEntry>,
-  opts: PruneOptions,
+  candidates: Candidates,
   deps: Pick<Deps, 'appRoot'>,
 ): boolean {
   const app = appCopy(dep, deps);
   if (!app) return false;
   if (entries[dep]) return true;
-  if (!isCandidate(dep, checkoutPkg, entries, opts)) return false;
+  if (!candidates.names.has(dep)) return false;
   return range === undefined || satisfies(app.version, range) === true;
 }
 
 function pruneOne(nm, ctx) {
   const removed = [];
   const kept = [];
-  const {name: owner, entry, pkg, entries, opts, deps} = ctx;
+  const {name: owner, entry, pkg, entries, candidates, only, deps} = ctx;
 
   for (const dep of topLevelPackages(nm)) {
     if (dep === owner) continue;
-    if (!isCandidate(dep, pkg, entries, opts)) continue;
+    if (only && !only.has(dep)) continue;
+    const skip = candidates.skipped.get(dep);
+    if (!candidates.names.has(dep) && !skip) continue;
     const dir = path.join(nm, dep);
     const nested = readJson(path.join(dir, 'package.json'));
     if (!nested) continue;
@@ -188,6 +227,21 @@ function pruneOne(nm, ctx) {
     if (realOrSelf(dir) === app.real) continue; // already the app's copy
 
     const where = path.relative(deps.appRoot, dir);
+    if (!candidates.names.has(dep)) {
+      // The rule leaves it out: a localized checkout asks a range the app
+      // misses. Said for a checkout that declares it; a copy it only has
+      // transitively is none of its business.
+      if (declared(pkg, DECLARE_FIELDS, dep) === undefined) continue;
+      kept.push({
+        where,
+        dep,
+        version: nested.version,
+        app: app.version,
+        unmet: skip!.asks,
+        owner: entry.path,
+      });
+      continue;
+    }
     const sibling = Boolean(entries[dep]);
     const ranges = rangesResolvingTo(nm, dep, pkg, owner);
 
@@ -297,19 +351,6 @@ function declared(pkg, fields, dep) {
   return undefined;
 }
 
-function isCandidate(dep, checkoutPkg, entries, opts) {
-  if (entries[dep]) return true;
-  if (checkoutPkg.peerDependencies?.[dep] !== undefined) return true;
-  return (opts.provided ?? []).some((p) => matches(dep, p));
-}
-
-/** `name` exactly, or `@scope/*` / any trailing-`*` prefix. */
-export function matches(name, pattern) {
-  return pattern.endsWith('*')
-    ? name.startsWith(pattern.slice(0, -1))
-    : name === pattern;
-}
-
 /** The app's own copy of `dep`: `<appRoot>/node_modules/<dep>`, followed through a link. */
 function appCopy(dep, deps) {
   const dir = path.join(deps.appRoot, 'node_modules', dep);
@@ -319,7 +360,7 @@ function appCopy(dep, deps) {
 }
 
 /** The package dir's `node_modules`, and the clone root's when the package is a monorepo subdir. */
-function nodeModulesRoots(pkgDir, entry) {
+export function nodeModulesRoots(pkgDir, entry) {
   const roots = [path.join(pkgDir, 'node_modules')];
   if (entry.subdir) {
     const rel = path.normalize(entry.subdir);
@@ -383,7 +424,7 @@ function removeEmptyScope(nm, dep) {
   }
 }
 
-function realOrSelf(p) {
+export function realOrSelf(p: string): string {
   try {
     return fs.realpathSync(p);
   } catch {
