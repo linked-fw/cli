@@ -24,7 +24,8 @@
  * any localized sibling in its `node_modules`, and Node loads those instead of
  * the app's: a localized package then never sees a localized sibling, and core
  * loads once per copy. localize removes those copies by default wherever the
- * app's version satisfies the checkout's ranges (`--no-prune` turns it off).
+ * app's version satisfies the checkout's ranges (`--no-prune` turns it off for
+ * that checkout, and is recorded so the run-time check honours it too).
  * What the app provides is one rule, `providedPackages` (localize/provided.ts),
  * shared with the run-time check (`--ensure`, and before `linked start` etc.)
  * and Vite's dedupe.
@@ -55,7 +56,7 @@ export interface LocalizeCommandOptions {
   list?: boolean;
   check?: boolean;
   relink?: boolean;
-  /** Check every checkout for a copy of what the app provides and prune it; exit 0. */
+  /** Check every checkout for a copy of what the app provides and prune it; exit 0. No names. */
   ensure?: boolean;
   /** `npm install` in this package's checkout, then prune it. */
   reinstall?: string;
@@ -93,8 +94,21 @@ export async function runLocalize(
     return;
   }
   if (options.ensure) {
+    if (packages.length) {
+      // A name would read as "check only these", which it is not: say so
+      // rather than ignore it.
+      console.error(
+        '[localize] --ensure takes no package names: it checks every recorded checkout ' +
+          '(one localized with --no-prune is skipped). To reinstall one checkout and prune it: ' +
+          '`linked localize --reinstall <package>`.',
+      );
+      process.exitCode = 2;
+      return;
+    }
+    // `--ensure --no-prune` asks for nothing: a no-op, so a script can turn
+    // the check off without removing the hook.
     // For an app's npm `pre*` scripts: never fails the script it guards.
-    checkOneCopy(deps.appRoot, deps);
+    if (prune.prune) checkOneCopy(deps.appRoot, deps);
     process.exitCode = 0;
     return;
   }

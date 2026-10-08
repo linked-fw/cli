@@ -159,6 +159,26 @@ describe('linked localize --ensure / --reinstall', () => {
     expect(process.exitCode).toBe(0);
   });
 
+  it('--ensure --no-prune is a no-op: no check, exit 0', async () => {
+    await runLocalize([], {ensure: true, prune: false});
+    expect(calls).toEqual([]);
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('--ensure with package names refuses (exit 2) rather than ignore them', async () => {
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runLocalize(['@_linked/core'], {ensure: true});
+      expect(calls).toEqual([]);
+      expect(process.exitCode).toBe(2);
+      expect(String(error.mock.calls[0][0])).toMatch(
+        /--ensure takes no package names.*--reinstall <package>/,
+      );
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('--reinstall <pkg> reaches reinstall with the prune options, and reports its exit code', async () => {
     await runLocalize([], {reinstall: '@_linked/core'});
     expect(calls.map((c) => c.fn)).toEqual(['reinstall']);

@@ -41,6 +41,15 @@ export interface ManifestEntry {
   subdir?: string;
   /** The range the app declared when it was localized. */
   range?: string;
+  /**
+   * `false` when the package was localized or adopted with `--no-prune`: its
+   * checkout's `node_modules` stay as npm installed them -- no prune after
+   * `--relink` or `--reinstall`, and the run-time check (`--ensure`, before
+   * `linked start` etc.) skips it. Absent means on; localizing or adopting it
+   * again without `--no-prune` turns it back on. Optional, so schema version 1
+   * readers that do not know it simply ignore it.
+   */
+  prune?: false;
 }
 
 export interface Manifest {
@@ -158,6 +167,7 @@ export function readManifest(
       branch: value.branch,
       ...(typeof value.subdir === 'string' ? {subdir: value.subdir} : {}),
       ...(typeof value.range === 'string' ? {range: value.range} : {}),
+      ...(value.prune === false ? {prune: false as const} : {}),
     };
   }
 

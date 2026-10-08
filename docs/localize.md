@@ -20,7 +20,8 @@ npx linked delocalize some-dependency
 ```
 
 Localize used to be a separate package, `@_linked/localize` (binary `linked-localize`). It is now
-part of this CLI and `@_linked/localize` is deprecated; `linked localize` is the only entry.
+part of this CLI and `@_linked/localize` is being retired (no longer developed; not yet marked
+deprecated on npm). Use `linked localize`.
 
 ## The problem
 
@@ -112,7 +113,7 @@ linked localize <package…> --adopt     the same for a checkout already in pack
 linked localize                        what is localized (same as --list)
 linked localize --list --check         exit 1 when something recorded is not linked
 linked localize --relink               recreate the recorded links (for postinstall)
-linked localize --ensure               remove checkouts' own copies of what the app provides; exit 0
+linked localize --ensure               remove checkouts' own copies of what the app provides; exit 0 (no names)
 linked localize --reinstall <package>  npm install inside that checkout, then prune it
 linked delocalize <package…>           unlink and forget; keep the checkout
 linked delocalize                      undo everything
@@ -125,7 +126,7 @@ linked delocalize <package> --purge    also delete the checkout (refuses on unsa
 | `--repo <git-url>` | clone this instead of the published `repository`, and record it. With `--adopt`: record this instead of the checkout's `origin` |
 | `--subdir <path>` | where the package lives inside the repository (monorepos) |
 | `--build "<cmd>"` | run this in the checkout after installing instead of `linked build`; `""` builds nothing. A failure only warns |
-| `--no-prune` | leave every checkout's `node_modules` exactly as npm installed it; also with `--relink` and `--reinstall` |
+| `--no-prune` | leave the checkout's `node_modules` exactly as npm installed it. With a package to localize or `--adopt` it is **recorded** (`"prune": false`), so `--relink`, `--reinstall` and the run-time check leave that checkout alone from then on; localizing it again without the flag turns pruning back on. With `--relink` or `--reinstall` alone it applies to that run; `--ensure --no-prune` does nothing |
 | `--force` | replace a symlink pointing outside `--dir`; with `delocalize --purge`, delete anyway |
 
 Use `--reinstall <package>` instead of running `npm install` in a checkout by hand: a hand-run
@@ -194,7 +195,10 @@ pruning, the run-time check and Vite's `resolve.dedupe` all start from it:
   name out;
 - `react` and `react-dom` when the app has them.
 
-devDependencies are not candidates: a checkout's own tooling stays its own.
+Pruning takes the rule **per checkout**: in checkout `A`, a candidate is a localized sibling,
+`react`/`react-dom`, or one of `A`'s *own* runtime dependencies that the rule provides. `A`'s
+devDependencies are never candidates — not even when another checkout depends on the same package at
+runtime — so a checkout's own tooling stays its own.
 
 ### Pruning
 
@@ -202,8 +206,23 @@ After every install in a checkout (localize, `--adopt`, `--reinstall`, relink's 
 every `--relink`, a candidate at the top of a checkout's `node_modules` is removed when the app has
 it at `node_modules/<name>` at a version satisfying every range that would load that copy — the
 checkout's own, and that of any installed package without a copy of its own. A localized sibling
-counts whatever its version; a range it misses is reported, not acted on. A copy that fails a check
-is kept, with a warning naming the package, the range and the app's version.
+counts whatever its version; a range it misses is reported, not acted on.
+
+A copy is also kept when removing it would change what **its own** dependencies resolve to: when
+one of its `dependencies`/`peerDependencies`/`optionalDependencies` (or the `@types/` package
+TypeScript would take for it) resolves, from the copy's place in the checkout, to a different version
+than from the app's copy. The checkout keeps its own copy of everything that failed the range check,
+so removing the copy would mix the two — for example a checkout that keeps React 18 for its own range
+would see its renderer library switch to the app's React 19 types, and its own `tsc` fail.
+
+A removal can make another copy removable, so pruning repeats until a pass removes nothing: one
+command converges. Kept copies are summarised in one line per checkout:
+
+```
+[localize] packages-local/scope-thing: kept 3 own copies the app's cannot replace: react@18.3.1 (app 19.2.0), react-dom@18.3.1 (app 19.2.0), prism-react-renderer@2.4.1 (its react would change) — so the app loads them twice. `linked localize --list` says why.
+```
+
+`--list` gives the full reason for each.
 
 This includes tooling a checkout declares as a runtime dependency — a checkout's own `vite` or
 `typescript`, for instance, when the app has them in range. The checkout still builds and runs its
@@ -219,22 +238,30 @@ A checkout outside your app's root is never touched. Nothing is written to the c
 
 An `npm install` in a checkout puts the copies back, and nothing above would notice until the next
 localize command. So `linked start`, `linked script`, `linked call` and `linked build-all` first run
-a cheap check: for each recorded checkout and each name the rule provides, is there a copy in the
-checkout's `node_modules` that is not the app's? If so it is pruned, with one line of output:
+a cheap check: would pruning remove anything? It makes the same per-copy decision as pruning — the
+per-checkout candidates, the range check, the resolution check — without removing anything, and
+prunes only when that decision removes something. Then it prints one line, on stderr:
 
 ```
 [localize] one copy: removed packages-local/fw-a/node_modules/@fw/core@2.20.0 — the app provides it.
 ```
 
-The check is stat-only — a few milliseconds — and never runs npm. It prints nothing when there is
-nothing to remove, and never fails the command it runs before. For anything else that loads the
-app's code (a type check, a test runner), run it from an npm `pre*` script:
+It never runs npm and never walks a checkout's `node_modules`: each candidate is a direct lookup,
+and the ranges other installed packages ask come from npm's hidden lockfile
+(`node_modules/.package-lock.json`, one read per checkout that needs it; a tree npm did not write is
+walked once instead). Measured on an app with 21 localized checkouts and 54 kept copies: about 40–50 ms,
+next to roughly a second for the CLI itself to start. It prints nothing when there is nothing to
+remove, skips a checkout recorded with `"prune": false`, and never fails the command it runs before.
+For anything else that loads the app's code (a type check, a test runner), run it from an npm `pre*`
+script:
 
 ```json
 { "scripts": { "pretest": "linked localize --ensure" } }
 ```
 
-`linked localize --ensure` runs the same check and always exits 0.
+`linked localize --ensure` runs the same check and always exits 0. It takes no package names (it
+refuses them with exit 2 rather than check only those); `--reinstall <package>` is the per-checkout
+command.
 
 ### Vite
 
@@ -258,6 +285,11 @@ leftover       UNRECORDED   packages-local/leftover      —          directory 
 1 linked · 2 not linked · 1 untracked link · 1 unrecorded directory
 ```
 
+A linked checkout whose `node_modules` holds copies pruning keeps shows `kept N own copies`, and the
+reasons follow the table — who asks which range the app's version misses, or which dependency would
+resolve elsewhere; the summary line counts them (`· 54 kept copies`). A checkout recorded with
+`"prune": false` shows `prune: off`.
+
 - **`checkout present`** — the checkout is there, the symlink is not: what `npm install`/`npm ci`
   leaves behind. `linked localize --relink` fixes it.
 - **`CHECKOUT MISSING`** — recorded, but nothing on disk. `linked localize <name>` clones it again.
@@ -280,6 +312,11 @@ actually linked (an unrecorded directory does not fail it).
       "path": "packages-local/scope-thing",
       "branch": "main",
       "range": "^2.1.0"
+    },
+    "other-pkg": {
+      "path": "packages-local/other-pkg",
+      "branch": "main",
+      "prune": false
     }
   }
 }
@@ -291,7 +328,9 @@ is the only record of what you intended, and silently resetting it is how a half
 becomes invisible.
 
 `repo` is absent for a package adopted with no remote; `subdir` is present for a package that lives
-inside a monorepo.
+inside a monorepo. `prune` is present, as `false`, only for a package localized or adopted with
+`--no-prune`: nothing is ever pruned in that checkout (it still counts as a localized sibling in the
+others). Older readers of schema version 1 ignore it.
 
 `range` is informational. **npm matches a linked package by name and never checks its version**, so
 a checkout at `2.0.99` satisfies `^3.0.0` as far as your tree is concerned and `npm ls` will not
@@ -319,7 +358,7 @@ the per-package codes — a failure on the second name does not undo the first. 
 
 - run an install against *your* project
 - remove anything from a checkout's `node_modules` but a copy of what your app provides (and never
-  with `--no-prune`)
+  with `--no-prune`, or in a checkout recorded with `"prune": false`)
 - edit `package.json`, `package-lock.json`, `.gitignore`, `workspaces`, or any bundler configuration
 - invoke `npm link`
 - delete a checkout you have not committed or pushed (without `--force`)

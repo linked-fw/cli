@@ -33,6 +33,7 @@ import {
   candidatesFor,
   isProvidedByApp,
   pruneProvided,
+  prunesEntry,
   shouldPrune,
 } from './prune.js';
 import {ensure} from './ensure.js';
@@ -44,7 +45,9 @@ import type {Deps} from './run.js';
  * @param {{prune?: boolean}} [opts]  unless `prune` is
  *   false, every checkout's own copies of what the app provides are removed
  *   after relinking (see prune.ts), and a dependency missing from a checkout
- *   because it was pruned is not mistaken for one a root install took.
+ *   because it was pruned is not mistaken for one a root install took. A
+ *   checkout recorded with `prune: false` (localized with `--no-prune`) is
+ *   neither pruned nor excused.
  */
 export function relink(deps: Deps, opts: PruneOptions = {}): number {
   let manifest;
@@ -120,10 +123,15 @@ export function relink(deps: Deps, opts: PruneOptions = {}): number {
  */
 function reinstallIfPruned(name, entry, entries, opts, deps) {
   const checkout = path.join(deps.appRoot, entry.path);
-  // When pruning, a dependency the app provides is absent on purpose.
-  const candidates = shouldPrune(opts) ? candidatesFor(entries, deps) : null;
+  // When pruning, a dependency the app provides is absent on purpose -- unless
+  // this checkout was localized with `--no-prune`, when nothing is.
+  const candidates =
+    shouldPrune(opts) && prunesEntry(entry)
+      ? candidatesFor(entries, deps)
+      : null;
   const provided = candidates
-    ? (dep, range) => isProvidedByApp(dep, range, entries, candidates, deps)
+    ? (dep, range, pkg) =>
+        isProvidedByApp(dep, range, entries, candidates, deps, pkg)
     : () => false;
   const missing = missingDependencies(
     checkout,

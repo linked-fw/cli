@@ -14,6 +14,7 @@ import path from 'node:path';
 import {localize} from '../../../src/localize/localize.js';
 import {adopt} from '../../../src/localize/adopt.js';
 import {relink} from '../../../src/localize/relink.js';
+import {list} from '../../../src/localize/list.js';
 import {writeManifest} from '../../../src/localize/manifest.js';
 import {checkoutNameFor} from '../../../src/localize/resolve.js';
 import {makeConsumer, ok, rm, stubbed, test, tmpdir} from './helpers.js';
@@ -160,10 +161,20 @@ test('a copy the app does not satisfy is KEPT, with a warning naming package, ra
     has(a, '@fw/core'),
     'removing it would hand A a core outside its range',
   );
+  // One summary line per checkout...
+  assert.equal(deps.warns.length, 1, deps.output());
   assert.match(
-    deps.warns.join('\n'),
-    /kept packages-local\/fw-a\/node_modules\/@fw\/core@3\.1\.0: @fw\/a asks @fw\/core@\^3\.0\.0, and the app has @fw\/core@2\.25\.0/,
+    deps.warns[0],
+    /packages-local\/fw-a: kept 1 own copy the app's cannot replace: @fw\/core@3\.1\.0 \(app 2\.25\.0\) — .*`linked localize --list`/,
   );
+  // ...and --list says who asks what.
+  const listed = stubbed(appRoot);
+  list({}, listed);
+  assert.match(
+    listed.output(),
+    /packages-local\/fw-a\/node_modules\/@fw\/core@3\.1\.0: @fw\/a asks @fw\/core@\^3\.0\.0, and the app has @fw\/core@2\.25\.0/,
+  );
+  assert.match(listed.output(), /1 linked · 0 not linked · 1 kept copy/);
 });
 
 test('a range from ANOTHER installed package that would load the copy counts too', (t) => {
@@ -180,8 +191,10 @@ test('a range from ANOTHER installed package that would load the copy counts too
   const deps = stubbed(appRoot);
   relink(deps);
   assert.ok(has(a, '@fw/core'));
+  const listed = stubbed(appRoot);
+  list({}, listed);
   assert.match(
-    deps.warns.join('\n'),
+    listed.output(),
     /@fw\/ui@1\.0\.0 asks @fw\/core@\^2\.30\.0, and the app has @fw\/core@2\.25\.0/,
   );
 

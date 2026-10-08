@@ -309,6 +309,8 @@ export function installLinkAndRecord(
         branch,
         ...(subdir ? {subdir} : {}),
         ...(range ? {range} : {}),
+        // `--no-prune` is remembered, so the run-time check and `--relink` honour it too.
+        ...(shouldPrune(opts) ? {} : {prune: false as const}),
       },
     },
   };

@@ -341,6 +341,84 @@ Dependency graph: `1 → 2 → 3 → 4 (release) → {5 localize retire, 6 CN} �
 - Validation: build-all 27 built; typecheck gate clean; unit 1850 passed; integration 178 passed / 13
   skipped; e2e relation-fields 2 passed; no "installed N times"; one `@_linked/core`.
 
+### Phase 8 — done
+
+**Changes**
+
+- `prune.ts`: one per-copy decision, `planPrune(entries, deps, scope?, cache?)` → `{remove, keep,
+  outside}` without touching disk; `pruneProvided` = plan + apply, repeated until a pass removes
+  nothing (`MAX_PRUNE_PASSES` 5) with one `PruneCache` per call. Candidates are per owner (R6): the
+  rule's names ∩ (siblings ∪ react/react-dom ∪ the owner's own runtime fields), plus skipped names the
+  owner declares, each looked up directly (no `node_modules` listing). The guard first checks the
+  owner's own range (no index needed), then a requirement index per `node_modules` built once per call
+  (R1); then the context check (R3, `contextChange`): keep D when any of D's
+  dependencies/peer/optional — or its `@types/` companion — resolves from D's place in the checkout to
+  a different version than from the app's copy (or to nothing from the app). Entries with
+  `prune: false` are skipped. Kept copies are reported as one summary line per checkout;
+  `explainKept` gives the full reason.
+- `ensure.ts`: `checkOneCopy` runs `planPrune` and calls `pruneProvided` only when the plan removes
+  something (scoped to those owners/deps, sharing the cache); one line on stderr (`warn`). `ensure`
+  honours `entry.prune === false`.
+- `manifest.ts`: optional `prune?: false` (read and preserved; schema stays 1); `installLinkAndRecord`
+  records it for `--no-prune` and drops it otherwise. `relink` neither prunes nor excuses missing deps
+  for such an entry; `isProvidedByApp` takes the owner's `package.json` (per-owner excuse).
+- `commands/localize.ts`: `--ensure` with names → exit 2 with a pointer to `--reinstall`;
+  `--ensure --no-prune` → no-op. `cli.ts` help updated; the preAction moved to
+  `localize/one-copy-hook.ts` (`ONE_COPY_COMMANDS`, `installOneCopyHook`) so it is testable.
+- `list.ts`: linked rows show `kept N own copies` / `prune: off`, reasons follow the table, summary
+  counts kept copies.
+- `client-dep-includes.ts`: `DEFAULT_DENY` = `['typescript', 'react-native']` (R4).
+- Tests: `tests/unit/localize/one-copy.test.ts` (10): preAction fires for exactly
+  start/script/call/build-all (not localize/build/publish/help) and cli.ts installs it; a symlinked
+  sibling/app copy is no hit; kept copies never reach `pruneProvided` (spy count 0), read ≤3 dirs and
+  <40 files over a 400-package tree with a hidden lockfile, <500 ms; without a lockfile the index is
+  built once and only when a range must be read; R3 keep (peer react 18 vs 19, listed reason); the
+  `@types/` companion counts, same version at another path does not; per-owner candidates; one call
+  converges (one `pruneProvided` call removes react then react-dom); `--no-prune` recorded, honoured by
+  check/relink/reinstall/`--list`, cleared by re-adopt; a `prune: false` checkout is still a sibling.
+  `localizeCommand.test.ts`: `--ensure --no-prune` no-op, `--ensure <names>` exit 2.
+  `clientDepIncludes.test.ts`: react-native never listed. `real-localize` and the fixture's `npm pack`
+  run with `scrubbedNpmEnv()` (drop `npm_config_*`, `npm_config_userconfig=/dev/null`).
+- Docs: `docs/localize.md` / README — per-owner candidates, the context rule, convergence, the kept
+  summary, `--list` reasons, `prune: false` (schema example), measured timing, `--ensure` takes no
+  names, `@_linked/localize` "being retired (not yet deprecated on npm)".
+- `.changeset/localize-one-copy-review.md`: minor (new manifest field and `--no-prune`/`--ensure`
+  semantics).
+
+**Deviations**
+
+- R1: the index is read from npm's hidden lockfile (`node_modules/.package-lock.json`) rather than a
+  walk — measured over 21 Create Now checkouts, a full walk of 16,824 package.json files took 0.77 s
+  warm / 3.4 s cold, all 21 lockfiles 45 ms. A tree without one is walked once. Requirers are checked
+  against disk when asked (pruned ones ask nothing).
+- R3: a dependency at another real path but the same `name@version` is not a context change
+  (otherwise nearly every copy with a dependency would be kept, as checkouts hold their own copies of
+  every transitive package); the `@types/` companion is compared too (the measured failure was types).
+- R6: `react`/`react-dom` stay candidates in every checkout (P3), guarded as before.
+- `--ensure` with names errors (exit 2) rather than honouring them.
+
+**Validation**
+
+- Re-verified first: dry probe of the old `checkOneCopy` on Create Now → `ms 6583.3 would-remove 0`
+  (R1); `packages-local/_linked-schema` had no `prism-react-renderer`, its `npx linked build` →
+  `Found 1 error in src/components/CodeView.tsx:53` / `✖ Build failed` (R3).
+- Mutation checks (each reverted): check always pruning, no context check, no `@types/` companion,
+  pooled candidates, one pass, ignoring `prune: false`, walk instead of lockfile, comparing paths
+  without realpath, `DEFAULT_DENY` without react-native — each fails at least one test.
+- `npm run test:unit`: `Test Suites: 52 passed, 52 total` / `Tests: 629 passed, 629 total`.
+- `npx linked build`: `✔ Build successful`.
+- Create Now: `planPrune` 37–41 ms warm, `checkOneCopy` 51.6 / 43.0 / 39.2 ms in a fresh process
+  (`remove 0 keep 53 index builds 5`). `time npx linked localize --ensure` twice: silent, exit 0,
+  `1.720 total` / `1.349 total`; via the bin, `linked --version` 0.96 s vs `localize --ensure`
+  1.01–1.03 s (the rest is cli startup; npx adds ~0.3 s).
+- `npx linked localize --reinstall @_linked/schema` → `kept 4 own copies the app's cannot replace:
+  prism-react-renderer@2.4.1 (its react would change), react@18.3.1 (app 19.3.0), react-dom@18.3.1
+  (app 19.3.0), typescript@5.9.3 (app 5.4.5)`; then `--ensure` silent; schema `npx linked build` →
+  `✔ Build successful with warnings` (depcheck: `@types/node` undeclared).
+- `npx linked localize --list` → `21 linked · 0 not linked · 6 untracked link · 54 kept copies · 3
+  unrecorded directories`.
+- Create Now `npm run typecheck:gate` → `No new type errors. 0 pre-existing errors still in the baseline.`
+
 ## Review
 
 | # | Sev | Finding |

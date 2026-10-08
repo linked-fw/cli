@@ -20,6 +20,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 
+import {scrubbedNpmEnv} from '../helpers.js';
+
 const git = (cwd, ...args) =>
   execFileSync('git', args, {
     cwd,
@@ -61,6 +63,7 @@ export function buildFixtureRepo(root, opts = {}) {
     cwd: depSrc,
     encoding: 'utf8',
     stdio: 'pipe',
+    env: scrubbedNpmEnv(),
   });
   const depTarball = path.join(root, `${depName}-1.0.0.tgz`);
   if (!fs.existsSync(depTarball))

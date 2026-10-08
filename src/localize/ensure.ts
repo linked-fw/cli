@@ -12,14 +12,17 @@
  *   replaces.
  * - **`checkOneCopy(appRoot)`** -- the run-time check. Before `linked start`,
  *   `script`, `call` and `build-all` (a commander `preAction` in cli.ts), and
- *   as `linked localize --ensure` for an app's npm `pre*` scripts. Stat-only:
- *   for every recorded checkout and every name the app provides, does
- *   `<checkout>/node_modules/<name>` exist with a real path other than the
- *   app's copy? Only then does it prune -- through prune's guarded path, so a
- *   copy whose ranges the app does not satisfy stays -- and it says what it
- *   removed in one line. It never runs npm, prints nothing when there is
- *   nothing to do (or no manifest), and never throws: a run command must not
- *   fail over a developer's private checkout state.
+ *   as `linked localize --ensure` for an app's npm `pre*` scripts. It plans
+ *   the prune (prune.ts `planPrune`) without touching anything -- per-owner
+ *   candidates, the same range guard, the same "would its dependencies
+ *   resolve elsewhere" check -- and only when that plan removes something does
+ *   it prune, and say so in one line on stderr. A copy prune would keep costs
+ *   a stat and, at most, one requirement index per `node_modules` (read from
+ *   npm's hidden lockfile), so a tree full of kept copies stays cheap. It
+ *   never runs npm, prints nothing when there is nothing to do (or no
+ *   manifest), skips a checkout recorded with `prune: false`, and never
+ *   throws: a run command must not fail over a developer's private checkout
+ *   state.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,13 +37,13 @@ import {manifestPath, readManifest} from './manifest.js';
 import type {ManifestEntry} from './manifest.js';
 import {readJson} from './fsops.js';
 import {
-  nodeModulesRoots,
+  newPruneCache,
+  planPrune,
   pruneProvided,
-  realOrSelf,
+  prunesEntry,
   shouldPrune,
 } from './prune.js';
 import type {PruneOptions} from './prune.js';
-import {providedPackages} from './provided.js';
 import {defaultDeps} from './run.js';
 import type {Deps} from './run.js';
 import {reportError} from './localize.js';
@@ -56,7 +59,7 @@ import {reportError} from './localize.js';
  * @throws {LocalizeError} `EXIT_INSTALL_FAILED` when `npm install` fails.
  */
 export function ensure(
-  entry: Pick<ManifestEntry, 'path' | 'subdir'>,
+  entry: Pick<ManifestEntry, 'path' | 'subdir' | 'prune'>,
   deps: Deps,
   opts: PruneOptions = {},
 ): number {
@@ -71,7 +74,7 @@ export function ensure(
       EXIT_INSTALL_FAILED,
     );
   }
-  if (!shouldPrune(opts)) return 0;
+  if (!shouldPrune(opts) || !prunesEntry(entry)) return 0;
 
   const name = readJson(path.join(pkgDir, 'package.json'))?.name;
   if (typeof name !== 'string') return 0;
@@ -116,7 +119,9 @@ export function reinstall(
 
 /**
  * The run-time check: remove every recorded checkout's own copy of what the
- * app provides. Stat-only until there is something to remove.
+ * app provides -- exactly what `pruneProvided` would remove, decided first
+ * without it, so the common case (nothing to remove, some copies kept) never
+ * reaches the prune.
  *
  * @returns what was removed, as `<checkout>/node_modules/<name>@<version>`.
  */
@@ -130,42 +135,28 @@ export function checkOneCopy(
     const owners = Object.keys(entries);
     if (!owners.length) return {pruned: []};
 
-    // The app's copy of each provided name, by real path.
-    const appReal = new Map<string, string>();
-    for (const name of providedPackages(appRoot, owners).names) {
-      const dir = path.join(appRoot, 'node_modules', name);
-      if (fs.existsSync(dir)) appReal.set(name, realOrSelf(dir));
-    }
+    if (!Object.values(entries).some(prunesEntry)) return {pruned: []};
 
-    const hitOwners = new Set<string>();
-    const hitNames = new Set<string>();
-    for (const [owner, entry] of Object.entries(entries)) {
-      const pkgDir = path.join(appRoot, entry.path);
-      for (const nm of nodeModulesRoots(pkgDir, entry)) {
-        for (const [name, real] of appReal) {
-          if (name === owner) continue;
-          const copy = path.join(nm, name);
-          if (fs.existsSync(copy) && realOrSelf(copy) !== real) {
-            hitOwners.add(owner);
-            hitNames.add(name);
-          }
-        }
-      }
-    }
-    if (!hitOwners.size) return {pruned: []};
+    const cache = newPruneCache();
+    const plan = planPrune(entries, {appRoot}, {}, cache);
+    if (!plan.remove.length) return {pruned: []};
 
     // Prune's own report is per checkout and also speaks of what it keeps;
     // here only what went is worth a line, on every run command.
     const quiet = {appRoot, log: () => {}, warn: () => {}};
-    const {removed} = pruneProvided(entries, {}, quiet, {
-      owners: [...hitOwners],
-      deps: [...hitNames],
-    });
-    const pruned = removed.map(
-      (r) => `${r.owner}/node_modules/${r.dep}@${r.version}`,
+    const {removed} = pruneProvided(
+      entries,
+      {},
+      quiet,
+      {
+        owners: [...new Set(plan.remove.map((d) => d.ownerName))],
+        deps: [...new Set(plan.remove.map((d) => d.dep))],
+      },
+      cache,
     );
+    const pruned = removed.map((r) => `${r.where}@${r.version}`);
     if (pruned.length) {
-      deps.log(
+      deps.warn(
         `[localize] one copy: removed ${pruned.join(', ')} — the app provides ` +
           `${pruned.length === 1 ? 'it' : 'them'}.`,
       );

@@ -325,6 +325,18 @@ describe('scanLinkedClientDeps', () => {
     expect(scan.entries.map((e) => e.entry)).not.toContain('typescript');
   });
 
+  test('react-native is never listed: a web build never loads it, and esbuild cannot parse its Flow source', async () => {
+    dep(app, 'react-native', {'index.js': ''}, {browser: 'index.js'});
+    write(
+      path.join(app, 'node_modules', '@_linked', 'ui', 'lib', 'esm', 'native.js'),
+      "import {View} from 'react-native';\nimport x from 'react-native/Libraries/Foo';\n",
+    );
+    const scan = await scanLinkedClientDeps(['@_linked/ui'], {cwd: app});
+    expect(
+      scan.entries.map((e) => e.entry).filter((e) => e.startsWith('react-native')),
+    ).toEqual([]);
+  });
+
   test('the cache returns the same result without rescanning', async () => {
     const cacheFile = path.join(
       app,
