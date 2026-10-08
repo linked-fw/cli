@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.41.1
+
+### Patch Changes
+
+- [#220](https://github.com/linked-fw/cli/pull/220) [`e695372`](https://github.com/linked-fw/cli/commit/e695372eba7d3635643789fd5aff0ff05884ded1) Thanks [@flyon](https://github.com/flyon)! - Remove the unused `postcss`, `postcss-url` and `@tailwindcss/postcss` dependencies. Tailwind is compiled by `@tailwindcss/vite` (still a dependency), and Vite brings its own `postcss`.
+
 ## 1.41.0
 
 ### Minor Changes
