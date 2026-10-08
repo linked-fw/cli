@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.40.1
+
+### Patch Changes
+
+- [#216](https://github.com/linked-fw/cli/pull/216) [`2f9a3b5`](https://github.com/linked-fw/cli/commit/2f9a3b5e668e638d94384f6996ba4336d28b60d8) Thanks [@flyon](https://github.com/flyon)! - Remove unused dependencies: express, open, postcss-import, postcss-nested, postcss-preset-env
+
 ## 1.40.0
 
 ### Minor Changes
