@@ -22,8 +22,9 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      # Left false so a package with no test script passes instead of failing on a missing one.
-      # Set to true — and `test-script` to the unit-only script where `test` is not CI-safe —
-      # once this package has a suite that must exist.
-      require-tests: false
+      # true makes a missing or failing `test` script fail the PR. `linked setup-publish` writes
+      # true when package.json has a `test` script and false when it does not, so a fresh scaffold
+      # still passes. Flip it to true once a suite exists, and set `test-script` to the unit-only
+      # script where `test` is not CI-safe.
+      require-tests: {{REQUIRE_TESTS}}
       run-e2e: false

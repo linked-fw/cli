@@ -4,11 +4,15 @@ import {
   WORKFLOW_FILES,
   applyPackageJsonPatches,
   buildBranchProtectionPayload,
+  hasTestScript,
+  renderWorkflow,
 } from '../../src/commands/setup-publish.js';
 
 const templates = path.resolve(__dirname, '..', '..', 'defaults', 'setup-publish');
 const workflowDir = path.join(templates, 'github', 'workflows');
 const read = (file: string) => fs.readFileSync(path.join(workflowDir, file), 'utf8');
+// The CLI's own substitution markers, not GitHub's ${{ … }} expressions.
+const PLACEHOLDER = /\{\{[A-Z_]+\}\}/;
 
 describe('setup-publish workflow templates', () => {
   test('exactly two workflows are scaffolded, both callers of the shared workflows', () => {
@@ -52,11 +56,43 @@ describe('setup-publish workflow templates', () => {
     expect(yml).toContain('RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}');
   });
 
+  test('pr.yml leaves require-tests to be filled in per package', () => {
+    expect(read('pr.yml')).toMatch(/^ {6}require-tests: \{\{REQUIRE_TESTS\}\}$/m);
+  });
+
   test('pr.yml grants pull-requests: write and names its job `checks`', () => {
     const yml = read('pr.yml');
     expect(yml).toContain('pull-requests: write');
     // The required check name is derived from this job id — see buildBranchProtectionPayload.
     expect(yml).toMatch(/^ {2}checks:$/m);
+  });
+});
+
+describe('renderWorkflow', () => {
+  test('requires tests when the package has a test script, as every linked-cm repo does', () => {
+    const pkg = {scripts: {test: 'vitest run'}};
+    const yml = renderWorkflow(read('pr.yml'), {
+      workflowOrg: 'linked-cm',
+      requireTests: hasTestScript(pkg),
+    });
+    expect(yml).toContain('uses: linked-cm/.github/.github/workflows/pr.yml@v1');
+    expect(yml).toMatch(/^ {6}require-tests: true$/m);
+    expect(yml).not.toMatch(PLACEHOLDER);
+  });
+
+  test('does not require tests for a fresh scaffold with no test script', () => {
+    for (const pkg of [{}, {scripts: {build: 'linked build'}}, {scripts: {test: '  '}}]) {
+      expect(hasTestScript(pkg)).toBe(false);
+    }
+    const yml = renderWorkflow(read('pr.yml'), {workflowOrg: 'linked-cm', requireTests: false});
+    expect(yml).toMatch(/^ {6}require-tests: false$/m);
+  });
+
+  test('leaves no placeholder in either workflow', () => {
+    for (const file of WORKFLOW_FILES) {
+      const yml = renderWorkflow(read(file), {workflowOrg: 'linked-fw', requireTests: true});
+      expect(yml).not.toMatch(PLACEHOLDER);
+    }
   });
 });
 

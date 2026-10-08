@@ -138,7 +138,16 @@ export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void
       ),
     );
   }
-  await copyWorkflows(cwd, workflowOrg);
+  const requireTests = hasTestScript(pkgJson);
+  if (!requireTests) {
+    console.warn(
+      chalk.yellow(
+        '  ⚠ package.json has no `test` script, so pr.yml is written with require-tests: false.\n' +
+          '    Set it to true in .github/workflows/pr.yml once the package has a test suite.',
+      ),
+    );
+  }
+  await copyWorkflows(cwd, {workflowOrg, requireTests});
 
   // 2. Changesets config + README
   await copyChangesetConfig(cwd, repoSlug);
@@ -191,14 +200,31 @@ async function resolveRepoSlug(cwd: string, pkgJson: any): Promise<string> {
   return 'OWNER/REPO';
 }
 
-async function copyWorkflows(cwd: string, workflowOrg: string): Promise<void> {
+/**
+ * Whether the package has a `test` script for the PR check to run. `require-tests: true` turns a
+ * missing script into a failure, so it is only safe to write once one exists — and a fresh
+ * `create-package` scaffold has none.
+ */
+export function hasTestScript(pkgJson: {scripts?: Record<string, unknown>}): boolean {
+  const test = pkgJson.scripts?.test;
+  return typeof test === 'string' && test.trim() !== '';
+}
+
+export type WorkflowVars = {workflowOrg: string; requireTests: boolean};
+
+export function renderWorkflow(template: string, vars: WorkflowVars): string {
+  return template
+    .replace(/\{\{WORKFLOW_ORG\}\}/g, vars.workflowOrg)
+    .replace(/\{\{REQUIRE_TESTS\}\}/g, String(vars.requireTests));
+}
+
+async function copyWorkflows(cwd: string, vars: WorkflowVars): Promise<void> {
   const srcDir = path.join(TEMPLATE_ROOT, 'github', 'workflows');
   const dstDir = path.join(cwd, '.github', 'workflows');
   fs.mkdirpSync(dstDir);
 
   for (const file of WORKFLOW_FILES) {
-    let content = fs.readFileSync(path.join(srcDir, file), 'utf8');
-    content = content.replace(/\{\{WORKFLOW_ORG\}\}/g, workflowOrg);
+    const content = renderWorkflow(fs.readFileSync(path.join(srcDir, file), 'utf8'), vars);
     fs.writeFileSync(path.join(dstDir, file), content);
     console.log(chalk.green('  ✓') + ` .github/workflows/${file}`);
   }
