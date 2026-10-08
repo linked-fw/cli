@@ -18,6 +18,10 @@
   "//types": "Correct as written, do not 'fix' it: typesVersions below is applied to the types field too, so \"index.d.ts\" resolves to lib/esm/index.d.ts. Writing that literal path applies the mapping twice (lib/esm/lib/esm/index.d.ts) and breaks node10 resolution. Verify with ts.resolveModuleName under node10 AND bundler, not by looking for the file on disk.",
   "types": "index.d.ts",
   "license": "ISC",
+  "files": [
+    "lib",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "start": "linked dev",
     "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib",
