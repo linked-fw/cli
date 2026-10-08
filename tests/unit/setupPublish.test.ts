@@ -5,7 +5,10 @@ import {
   applyPackageJsonPatches,
   buildBranchProtectionPayload,
   hasTestScript,
+  mergeNpmrc,
+  npmrcSettings,
   renderWorkflow,
+  renovateStub,
 } from '../../src/commands/setup-publish.js';
 
 const templates = path.resolve(__dirname, '..', '..', 'defaults', 'setup-publish');
@@ -133,9 +136,49 @@ describe('applyPackageJsonPatches', () => {
     ]);
   });
 
+  test('adds the changesets majors the fleet runs on', () => {
+    const pkg: any = {name: '@linked.cm/x'};
+    applyPackageJsonPatches(pkg, 'linked-cm/x');
+    expect(pkg.devDependencies['@changesets/cli']).toBe('^3.0.0');
+    expect(pkg.devDependencies['@changesets/changelog-github']).toBe('^1.0.0');
+  });
+
   test('leaves repository.url alone when the slug could not be resolved', () => {
     const pkg: any = {name: '@_linked/owl'};
     applyPackageJsonPatches(pkg, 'OWNER/REPO');
     expect(pkg.repository).toBeUndefined();
+  });
+});
+
+describe('npmrc', () => {
+  test('linked-cm gets legacy-peer-deps to match its CI; linked-fw installs strictly', () => {
+    expect(npmrcSettings('linked-cm')).toEqual(['allow-remote=all', 'legacy-peer-deps=true']);
+    expect(npmrcSettings('linked-fw')).toEqual(['allow-remote=all']);
+  });
+
+  test('writes a fresh .npmrc', () => {
+    expect(mergeNpmrc('', npmrcSettings('linked-cm'))).toBe(
+      'allow-remote=all\nlegacy-peer-deps=true\n',
+    );
+  });
+
+  test('appends only missing keys and never flips one the repo already sets', () => {
+    const existing = '# repo setting\nlegacy-peer-deps=false\nregistry=https://example.test';
+    expect(mergeNpmrc(existing, npmrcSettings('linked-cm'))).toBe(existing + '\nallow-remote=all\n');
+  });
+
+  test('is a no-op when everything is already there', () => {
+    const existing = 'allow-remote=all\nlegacy-peer-deps=true\n';
+    expect(mergeNpmrc(existing, npmrcSettings('linked-cm'))).toBe(existing);
+  });
+});
+
+describe('renovateStub', () => {
+  test("extends the org's own shared policy", () => {
+    expect(JSON.parse(renovateStub('linked-cm'))).toEqual({
+      $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+      extends: ['local>linked-cm/renovate-config'],
+    });
+    expect(renovateStub('linked-fw')).toContain('"local>linked-fw/renovate-config"');
   });
 });
