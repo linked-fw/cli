@@ -14,17 +14,17 @@
     "test": "node --experimental-strip-types --no-warnings=ExperimentalWarning --test test/*.test.mjs"
   },
   "dependencies": {
-    "@_linked/core": "2.18.1",
-    "@_linked/fuseki": "3.0.0",
-    "@_linked/s3": "1.1.0",
-    "@_linked/schema": "1.1.2",
-    "@_linked/server": "2.3.0",
-    "@_linked/server-utils": "1.2.0",
+    "@_linked/core": "2.26.0",
+    "@_linked/fuseki": "3.4.0",
+    "@_linked/s3": "1.6.0",
+    "@_linked/schema": "1.4.0",
+    "@_linked/server": "2.24.0",
+    "@_linked/server-utils": "1.12.0",
     "app-shapes": "*",
     "react-dom": "19.2.3"
   },
   "devDependencies": {
-    "@_linked/cli": "1.13.0",
+    "@_linked/cli": "1.40.0",
     "@types/node": "22.20.4",
     "typescript": "6.0.3"
   }
