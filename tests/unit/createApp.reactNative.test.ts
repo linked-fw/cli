@@ -3,6 +3,7 @@
 import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
+import semver from 'semver';
 
 // ora is ESM-only, which Jest's CommonJS loader cannot require.
 jest.mock('ora', () => {
@@ -24,6 +25,7 @@ import {
 } from '../../src/cli-methods.js';
 
 const FIXTURE = path.join(__dirname, '..', 'fixtures', 'app-react-native-min');
+const TEMPLATE = path.join(__dirname, '..', '..', 'defaults', 'app-react-native');
 const ID = {
   appName: 'Demo',
   appPrefix: 'demo',
@@ -210,13 +212,20 @@ describe('scaffoldReactNativeApp', () => {
     expect(mobilePkg.dependencies['expo-dev-client']).toBeDefined();
     expect(mobilePkg.devDependencies['@react-native/jest-preset']).toBeDefined();
 
-    // No root overrides: @_linked/react 1.5.0 accepts React 19.
+    // No root overrides: @_linked/react accepts React 19 from 1.5.0 on.
     expect(rootPkg.overrides).toBeUndefined();
     for (const script of ['fuseki:up', 'api', 'lint', 'typecheck', 'test', 'test:integration', 'check:react']) {
       expect(rootPkg.scripts[script]).toBeDefined();
     }
     expect(rootPkg.scripts.typecheck).toContain('packages/demo-shapes');
-    expect(mobilePkg.dependencies['@_linked/react']).toBe('1.5.0');
+    // An exact pin (no range, no `*`) copied from the template, and never below the first release
+    // that accepts React 19. The literal is not asserted: Renovate moves it on every framework bump.
+    const linkedReact: string = mobilePkg.dependencies['@_linked/react'];
+    expect(linkedReact).toBe(
+      readJSON(path.join(TEMPLATE, 'apps/mobile/package.json')).dependencies['@_linked/react'],
+    );
+    expect(semver.valid(linkedReact)).toBe(linkedReact);
+    expect(semver.gte(linkedReact, '1.5.0')).toBe(true);
     expect(mobilePkg.jest.testPathIgnorePatterns).toContain(
       '<rootDir>/__tests__/integration/',
     );
