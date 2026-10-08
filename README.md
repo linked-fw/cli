@@ -227,10 +227,10 @@ linked app-doctor                 # in an app: check optimizeDeps.include and Re
 
 ### Developing a dependency from a git checkout
 
-`linked localize` clones an npm dependency, installs inside the checkout, builds
-it with `linked build` and symlinks it into `node_modules` — **without** touching
-`package.json` or `package-lock.json`, so the manifest still describes the
-released dependency and CI is unaffected.
+`linked localize` clones an npm dependency, installs inside the checkout, builds it with
+`linked build` and symlinks it into `node_modules` — **without** touching `package.json` or
+`package-lock.json`, so the manifest still describes the released dependency and CI is unaffected.
+Full guide: [docs/localize.md](docs/localize.md).
 
 ```bash
 linked localize @_linked/rdfs     # clone, install, build, symlink into node_modules
@@ -238,61 +238,28 @@ linked localize                   # report what is localized (same as --list)
 linked localize --list --check    # exit 1 when something recorded is not actually linked
 linked localize --relink          # recreate the recorded symlinks — run this from postinstall
 linked localize @_linked/rdfs --adopt  # link a checkout already in packages-local/_linked-rdfs, no clone
+linked localize --reinstall @_linked/rdfs  # npm install inside the checkout, then prune it
+linked localize --ensure          # remove checkouts' own copies of what the app provides; exit 0
 linked delocalize @_linked/rdfs   # unlink and forget, keeping the checkout
 linked delocalize --purge         # undo everything and delete the checkouts
 ```
 
 Checkouts go in `packages-local/` under the npm name with the scope flattened:
-`@_linked/rdfs` → `packages-local/_linked-rdfs`.
+`@_linked/rdfs` → `packages-local/_linked-rdfs`. `--list` also flags a directory there that
+`local-packages.json` does not record (`UNRECORDED`).
 
-`npm install <name>` — with a package name — does not run the app's own `postinstall`, so it
-replaces every localized link with the registry copy and prunes the checkouts' dependencies,
-silently. Run `linked localize --relink` after it (a bare `npm install` runs the hook itself).
+**One copy of each package the app provides.** A checkout's own install leaves its own copies of
+what it depends on, and Node loads those instead of the app's. One rule says what the app provides:
+the localized packages, plus every runtime dependency (`dependencies`, `peerDependencies`,
+`optionalDependencies`) a localized checkout declares that the app has at a version satisfying
+every localized range, plus `react` and `react-dom`. After every install in a checkout and on every
+`--relink`, the checkouts' own copies of those are removed; `linked start`, `script`, `call` and
+`build-all` re-check first (stat-only, one line of output when it removes something), and
+`createViteConfig` derives Vite's `resolve.dedupe` from the same rule. `--no-prune` keeps every
+checkout's `node_modules` as npm left it.
 
-Name packages exactly as npm names them (`@_linked/rdfs`, `lodash`): the
-repository is read from the package's published `repository` field, so there is
-no short-name expansion and no org guessing. `--dir` moves the checkout
-directory (default `packages-local`), `--repo`/`--subdir` cover a package whose
-published metadata does not point at the right place, and `--build "<cmd>"`
-replaces `linked build` (an empty string builds nothing). A failing build only
-warns — a package whose build is broken is usually why you localized it.
-
-**One copy of each framework package.** A checkout's own install leaves its own
-`@_linked/core` (pinned by the checkout's lockfile, often older than the app's)
-and a registry copy of any localized sibling in its `node_modules`, and Node
-loads those instead of the app's. So after installing, and on every `--relink`,
-`linked localize` removes from every checkout's `node_modules` its own copy of
-a linked package the app has installed, `react` and `react-dom` (plus its
-peerDependencies) when the app has a version that satisfies the checkout's range; a localized sibling always
-counts. A copy the app's version does not satisfy is kept, with a warning naming
-the package, the range and the app's version. The checkout still builds and runs
-its tests, resolving those packages from the app — this CLI included: npm puts
-every ancestor's `node_modules/.bin` on the `PATH`, so `npx linked build` in a
-checkout runs the app's `linked`. `--no-prune` keeps every checkout's
-`node_modules` as npm left it. The
-A linked package is one whose `package.json` says `"linkedPackage": true` — the
-definition `build-all` and `linked build` use — whatever its npm scope;
-`@_linked/localize`, a plain tool, is not one.
-
-The dev server gets the same guarantee from Vite's `resolve.dedupe`, which
-`createViteConfig` derives from what is localized: the localized packages
-themselves, plus every runtime dependency a localized checkout declares that the
-app has at a version satisfying the checkout's range, plus React. A dependency
-whose range the app does not satisfy keeps the checkout's own copy (the dev log
-says which), and so does a name some registry install nests its own copy of —
-a dedupe hands every importer the app's copy without checking versions. With
-nothing localized, only React is deduped. The dedupe covers what Vite loads; the
-removal on disk covers plain Node, `tsx` and test runners, which never read it.
-
-The work is done by [`@_linked/localize`](https://www.npmjs.com/package/@_linked/localize),
-which is dependency-free and framework-agnostic; this CLI supplies the
-build command and the list of what an app provides. That package's own binary, `linked-localize`, is the same mechanism with
-three differences: it builds nothing unless given `--build "<cmd>"`, it treats only localized
-siblings and peerDependencies as provided unless given `--provided "<name>,…"`,
-and its verbs are subcommands —
-`linked-localize adopt <pkg>` and `linked-localize remove <pkg>` where this CLI has
-`linked localize --adopt <pkg>` and `linked delocalize <pkg>`. In a linked app, use
-`linked localize`.
+Localize used to be the separate `@_linked/localize` package (binary `linked-localize`), now
+deprecated; `linked localize` replaces it.
 
 ### Registry / dev utilities
 

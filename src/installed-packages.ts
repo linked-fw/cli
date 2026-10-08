@@ -96,7 +96,7 @@ function isWorkspaceRootSync(dir: string): boolean {
  * THE definition of a linked package: its own `package.json` says
  * `"linkedPackage": true`. Not its npm scope — a linked package can be
  * published under any scope, and not everything under `@_linked/` is one
- * (`@_linked/localize` is a plain tool). The pre-rename `"lincd": true` is not
+ * (a plain tool need not be). The pre-rename `"lincd": true` is not
  * read: the packages that still carry it are the old `lincd-*` framework,
  * which cannot share a runtime with `@_linked/core`. `lifecycle.ts`
  * (`build-all`, `getLincdPackages`) and `linked build-package` use this too.

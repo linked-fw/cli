@@ -92,14 +92,24 @@ checkout's version against the app's range before adopting.
 
 ### Contracts
 
+As implemented (Phase 2 deviations folded in):
+
 ```ts
 // src/localize/provided.ts
-providedPackages(appRoot: string): {names: string[]; skipped: {name: string; reason: string}[]}
+providedPackages(appRoot: string, localizedNames?: string[]): Provided
+//   Provided = {names: string[]; skipped: ProvidedSkip[]; localized: string[]; dependencies: string[]}
+//   ProvidedSkip = {name: string; reason: 'range'; asks: {from: string; range: string}[]; appVersion: string}
 // src/localize/ensure.ts
-ensure(entry: ManifestEntry, deps: Deps): Promise<number>        // npm install + prune
-checkOneCopy(appRoot: string, deps: Deps): {pruned: string[]}   // stat-only, used by preAction and --ensure
+ensure(entry: Pick<ManifestEntry, 'path' | 'subdir'>, deps: Deps, opts?: PruneOptions): number
+//   npm install in the checkout + prune it; 0, or EXIT_WARNED when only the prune failed;
+//   throws LocalizeError(EXIT_INSTALL_FAILED) when the install fails
+reinstall(name: string, opts: PruneOptions, deps: Deps): number   // --reinstall <pkg>
+checkOneCopy(appRoot?: string, deps?: Pick<Deps, 'log' | 'warn'>): {pruned: string[]}
+//   stat-only until there is something to remove; never runs npm, never throws
 ```
-CLI: `linked localize --ensure` (check + prune, exit 0), `linked localize --reinstall <pkg>`, `--list` shows unrecorded directories.
+CLI: `linked localize --ensure` (check + prune, exit 0), `linked localize --reinstall <package>`,
+`--list` shows `UNRECORDED` directories; a `preAction` hook runs `checkOneCopy` before `start`,
+`script`, `call`, `build-all`.
 
 ### Pitfalls
 
@@ -277,3 +287,35 @@ Dependency graph: `1 → 2 → 3 → 4 (release) → {5 localize retire, 6 CN} �
   2.0 / 1.7 / 2.1 / 2.1 ms.
 - `npx linked localize --list` → `2 linked · 0 not linked · 6 untracked link · 22 unrecorded
   directories` (`_linked-auth` … `_linked-xsd`, `semantu-cli`; Phase 7's adoption list).
+
+### Phase 3 — done
+
+**Changes**
+
+- Plan: the Contracts block now gives the implemented signatures (`providedPackages(appRoot,
+  localizedNames?)` → `{names, skipped, localized, dependencies}`; synchronous `ensure(entry, deps,
+  opts?)` → `number`; `reinstall`; `checkOneCopy(appRoot?, deps?)` → `{pruned}`; `--ensure`,
+  `--reinstall <package>`, `UNRECORDED`, the preAction hook).
+- `docs/localize.md` (new): the guide, moved from localize's README and rewritten for the merged
+  command — the problem, how it works, set-up (`.gitignore`, postinstall `--relink`, the npm-install
+  traps), commands and options (`--adopt`, `--ensure`, `--reinstall`), monorepo `--subdir`, adopt,
+  building, one copy (the rule, pruning incl. tooling deps, the run-time check, Vite), `--list` incl.
+  `UNRECORDED`, the `local-packages.json` schema, exit codes, what it never does, programmatic use via
+  `@_linked/cli/localize/index.js`. The README's localize section is now a summary + command list
+  linking to it.
+- `docs/reports/010-localize-adopt-and-relink-reinstall.md`: localize's report 001, kept as history
+  with a note that it was written for `@_linked/localize` 0.2.0 before the merge (and the name
+  mapping to the cli's commands and paths).
+- `src/installed-packages.ts`: the `@_linked/localize` example in `isLinkedPackageJson`'s comment is
+  gone.
+- `.changeset/localize-merged.md`: `'@_linked/cli': minor`.
+
+**Validation**
+
+- `grep -rna "linked-localize\|@_linked/localize" src docs README.md .changeset` outside this plan
+  and reports 007/009/010 → `src/commands/localize.ts:6` ("once the separate `@_linked/localize`
+  package"), `docs/localize.md:22-23`, `README.md:261` and the changeset — all the intended
+  "used to be / deprecated" notes. `tests/unit/createPackageLocation.test.ts:138` keeps
+  `'linked-localize --relink'` on purpose (an existing postinstall is recognised).
+- `npm run test:unit`: `Test Suites: 51 passed, 51 total` / `Tests: 609 passed, 609 total`.
+- `npx linked build`: `✔ Build successful`.
