@@ -2440,7 +2440,7 @@ export const createPackage = async (
   } else {
     // localize's own naming, so `linked localize` and this command can never
     // disagree about where a package lives.
-    const {checkoutNameFor, DEFAULT_DIR} = await import('@_linked/localize');
+    const {checkoutNameFor, DEFAULT_DIR} = await import('./localize/index.js');
     targetFolder = path.join(appRoot, DEFAULT_DIR, checkoutNameFor(name));
   }
   if (fs.existsSync(targetFolder)) {
@@ -2705,7 +2705,7 @@ async function installOwnRepoPackage(
   }
 
   const {adoptPackage} = await import('./commands/localize.js');
-  const {EXIT_WARNED} = await import('@_linked/localize');
+  const {EXIT_WARNED} = await import('./localize/index.js');
   // Only the build command matters here: adopt always installs with npm, so
   // the package-manager half of the plan does not apply.
   const {buildCommand} = planPackageSetup(

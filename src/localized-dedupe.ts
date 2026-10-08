@@ -29,20 +29,14 @@
  *   nests when the hoisted copy does not satisfy that package, so deduping the
  *   name would hand it the wrong version.
  *
- * Plain Node, `tsx` and test runners never read this list; for them
- * `linked localize` removes the checkout's copies from disk instead.
+ * Plain Node, `tsx`, `tsc` and test runners never read this list; for them the
+ * checkout's copies are removed from disk instead -- by every localize install
+ * (`ensure`) and by the run-time check before `linked start`, `script`,
+ * `call`, `build-all` and `linked localize --ensure` (localize/ensure.ts).
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import semver from 'semver';
-import {readInstalledPkg} from './installed-packages.js';
-import {localizedPackageNames} from './lifecycle.js';
-
-const RUNTIME_FIELDS = [
-  'dependencies',
-  'peerDependencies',
-  'optionalDependencies',
-];
+import {providedPackages} from './localize/provided.js';
 
 export interface SkippedDedupe {
   name: string;
@@ -59,51 +53,28 @@ export interface LocalizedDedupe {
   skipped: SkippedDedupe[];
 }
 
+/**
+ * `providedPackages` (localize/provided.ts) -- the one rule pruning and the
+ * run-time check use too -- minus the Vite-only exclusion: a checkout's
+ * dependency some registry install nests its own copy of. A localized package
+ * and react / react-dom are never excluded that way.
+ */
 export async function localizedDedupe(
   appRoot: string = process.cwd(),
 ): Promise<LocalizedDedupe> {
-  const localized = localizedPackageNames(appRoot).filter((name) =>
-    fs.existsSync(path.join(appRoot, 'node_modules', name, 'package.json')),
-  );
-  const names = new Set<string>(localized);
-  const skipped: SkippedDedupe[] = [];
-
-  // name -> every localized checkout's runtime range for it
-  const asks = new Map<string, {from: string; range: string}[]>();
-  for (const from of localized) {
-    const pkg =
-      readJson(path.join(appRoot, 'node_modules', from, 'package.json')) ?? {};
-    for (const field of RUNTIME_FIELDS) {
-      for (const [dep, range] of Object.entries<string>(pkg[field] ?? {})) {
-        if (names.has(dep)) continue;
-        const list = asks.get(dep) ?? [];
-        if (!list.some((a) => a.from === from)) list.push({from, range});
-        asks.set(dep, list);
-      }
-    }
-  }
-
-  const nested = asks.size
+  const provided = providedPackages(appRoot);
+  const skipped: SkippedDedupe[] = [...provided.skipped];
+  const nested = provided.dependencies.length
     ? nestedCopies(path.join(appRoot, 'node_modules'))
-    : new Map();
-  for (const [name, ranges] of asks) {
-    const app = await readInstalledPkg(name, appRoot);
-    if (!app?.json?.version) continue; // nothing at the root to dedupe to
-    const appVersion = app.json.version;
-    const unmet = ranges.filter((a) => !satisfies(appVersion, a.range));
-    if (unmet.length) {
-      skipped.push({name, reason: 'range', asks: unmet, appVersion});
-    } else if (nested.has(name)) {
-      skipped.push({name, reason: 'nested', nestedAt: nested.get(name)});
-    } else {
-      names.add(name);
-    }
+    : new Map<string, string>();
+  const drop = new Set<string>();
+  for (const name of provided.dependencies) {
+    if (!nested.has(name)) continue;
+    skipped.push({name, reason: 'nested', nestedAt: nested.get(name)});
+    if (name !== 'react' && name !== 'react-dom') drop.add(name);
   }
-
-  for (const name of ['react', 'react-dom']) {
-    if (await readInstalledPkg(name, appRoot)) names.add(name);
-  }
-  return {names: [...names].sort(), skipped};
+  const names = provided.names.filter((name) => !drop.has(name));
+  return {names, skipped};
 }
 
 /** One line for the dev log about the ranges the app does not satisfy; null when there are none. */
@@ -120,16 +91,6 @@ export function describeSkipped(skipped: SkippedDedupe[]): string | null {
       )
       .join(', ')
   );
-}
-
-function satisfies(version: string, range: string): boolean {
-  try {
-    return (
-      semver.validRange(range) !== null && semver.satisfies(version, range)
-    );
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -180,12 +141,4 @@ function packageNames(nm: string): string[] {
     }
   }
   return out;
-}
-
-function readJson(file: string): any {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return null;
-  }
 }
