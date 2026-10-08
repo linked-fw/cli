@@ -49,11 +49,16 @@ enforce it at run time; the cli loads localize from the app root; one derived "p
 Rejected: npm workspaces (breaks the no-committed-diff guarantee), resolve-time hooks only (do not
 fix `tsc`/Jest/raw node).
 
+## Accepted decisions
+
+| # | Decision | Rationale |
+|---|---|---|
+| D1 | **Merge localize into the cli** and deprecate `@_linked/localize` (pointing at `@_linked/cli`). Localize becomes a cli module; `linked localize` is the only entry; the `linked-localize` bin goes. | Removes the bootstrap / version-drift class entirely (no separately versioned copy to nest). One release; the "provided" rule, prune and Vite dedupe live together. Rejected: keep separate (fence, not fix); monorepo with two packages (adds tooling, keeps the nesting). |
+| D2 | **Install, then prune, as one step (`ensure`).** Every checkout install goes through it: localize, relink's reinstall, and a new `linked localize --reinstall <pkg>` replacing a hand-run `npm install` in a checkout. | Reuses the shipped prune; copies exist only transiently. Rejected for now: peer-dependency convention + `--omit=peer` (fleet migration), temp-dir install (reimplements npm). |
+| D3 | **Run commands enforce it.** `linked start`, `script`, `build-all` and the test entry points run a cheap check (any recorded checkout holding a package the app provides?) and prune with one line of output. The server's "installed N times" warning stays as the backstop. | Covers an in-checkout install and the postinstall `npm install <name>` skips. Safe to auto-fix: prune only removes copies the app provides at versions satisfying every range. Rejected: warn-only; status quo. |
+
 ## Open questions (ideation)
 
-1. Should localize stay a separate package/repo, or merge into the cli?
-2. Install less vs install-then-prune: how does a checkout's install avoid creating the copies?
-3. Which entry points enforce the invariant at run time, and how cheap must the check be?
 4. One "provided" rule: where it lives and who consumes it (prune, Vite dedupe, server duplicate
    warning).
 5. Unrecorded checkouts in `packages-local/`: adopt, warn, or prune too?
