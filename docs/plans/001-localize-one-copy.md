@@ -56,16 +56,18 @@ fix `tsc`/Jest/raw node).
 | D1 | **Merge localize into the cli** and deprecate `@_linked/localize` (pointing at `@_linked/cli`). Localize becomes a cli module; `linked localize` is the only entry; the `linked-localize` bin goes. | Removes the bootstrap / version-drift class entirely (no separately versioned copy to nest). One release; the "provided" rule, prune and Vite dedupe live together. Rejected: keep separate (fence, not fix); monorepo with two packages (adds tooling, keeps the nesting). |
 | D2 | **Install, then prune, as one step (`ensure`).** Every checkout install goes through it: localize, relink's reinstall, and a new `linked localize --reinstall <pkg>` replacing a hand-run `npm install` in a checkout. | Reuses the shipped prune; copies exist only transiently. Rejected for now: peer-dependency convention + `--omit=peer` (fleet migration), temp-dir install (reimplements npm). |
 | D3 | **Run commands enforce it.** `linked start`, `script`, `build-all` and the test entry points run a cheap check (any recorded checkout holding a package the app provides?) and prune with one line of output. The server's "installed N times" warning stays as the backstop. | Covers an in-checkout install and the postinstall `npm install <name>` skips. Safe to auto-fix: prune only removes copies the app provides at versions satisfying every range. Rejected: warn-only; status quo. |
+| D4 | **One rule: the localized packages plus their dependencies that the app provides** — the derivation the cli's Vite config already uses (`src/localized-dedupe.ts`). Pruning and the run-time check use the same rule, scoped to localized packages only (no "every installed linked package" list). Create Now's hand-written `resolve.dedupe` (`vite.config.ts:148`, `[...linkedFrameworkDependencies, 'react', 'react-dom']`) is deleted. The server's duplicate warning stays as an independent cross-check. | One source of truth, already proven in Vite. Note: this widens prune's candidates from "siblings, peers, provided list" to every dependency of a localized checkout that the app provides — still guarded by "the app's version satisfies every range that resolves to that copy". Rejected: rule in core (couples runtime to tooling); hand-kept list in app config (how Create Now's drifted). |
+| D5 | **Every checkout in `packages-local/` is localized.** The unrecorded `_linked-*` checkouts are a leftover of the old set-up; adopt them all (one-off migration step: each on `main` = `origin/main`, version compatible with the app's range, built), so `local-packages.json` lists everything in `packages-local/`. `linked localize --list` flags any directory in `packages-local/` without a record. | The architect's set-up intent; no half-converted state. Consequence: the app runs every checkout's source — the adoption step must verify versions and run the full validation. |
 
 ## Open questions (ideation)
 
-4. One "provided" rule: where it lives and who consumes it (prune, Vite dedupe, server duplicate
-   warning).
-5. Unrecorded checkouts in `packages-local/`: adopt, warn, or prune too?
+None blocking. For plan mode: check that the derived Vite list covers everything Create Now's
+hand list does today (`linkedFrameworkDependencies` + react/react-dom); confirm each leftover
+checkout's version against the app's range before adopting.
 
 ## Test surfaces
 
-- localize: (to confirm) its test command and suites.
+- localize (to be merged): `node --test test/*.test.js` (`test:fast` skips `slow:`); its suites move into the cli.
 - cli: `npm test` (jest).
 - Create Now: `npm run typecheck:gate`, `npm run test:unit`, an integration boot (`project-config`)
   checking for "installed N times".
