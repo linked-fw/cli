@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.43.1
+
+### Patch Changes
+
+- [#225](https://github.com/linked-fw/cli/pull/225) [`1b8e157`](https://github.com/linked-fw/cli/commit/1b8e157a3d28e232f7fe4df4db6ac6a248f41f44) Thanks [@flyon](https://github.com/flyon)! - Packages created with `create-package` now publish only the files consumers need: the template's `package.json` has `"files": ["lib", "CHANGELOG.md"]`, so their tarballs no longer include `.github/`, `.changeset/`, tests or tsconfig files.
+
 ## 1.43.0
 
 ### Minor Changes
