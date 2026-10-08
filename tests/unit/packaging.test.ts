@@ -63,6 +63,24 @@ describe('packaging', () => {
       fs.rmSync(tmp, {recursive: true, force: true});
     }
   });
+
+  // Without `files`, a package created from the template publishes its whole
+  // repo (.github/, .changeset/, docs/, tests, tsconfigs) to npm.
+  test('package template publishes only what its entry points need', () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, 'defaults', 'package', 'package.json'), 'utf8'),
+    );
+    expect(pkg.files).toEqual(['lib', 'CHANGELOG.md']);
+    const targets: string[] = [pkg.main, pkg.module];
+    const collect = (node: unknown) => {
+      if (typeof node === 'string') targets.push(node);
+      else if (node && typeof node === 'object') Object.values(node).forEach(collect);
+    };
+    collect(pkg.exports);
+    for (const target of targets) {
+      expect(target.replace(/^\.\//, '')).toMatch(/^lib\//);
+    }
+  });
 });
 
 // The published lib/esm is loaded by Node's ESM resolver, which does not add
