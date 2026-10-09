@@ -1074,14 +1074,18 @@ export function buildAll(options) {
   //   // return async (pkg) => {};
   // }
 
+  // Successfully built (or deliberately passed over by --from).
   let done: Set<PackageDetails> = new Set();
-  let failedModules = [];
+  // Packages whose own build script failed.
+  let failed: Set<PackageDetails> = new Set();
+  // Packages not built because a dependency failed or was itself not built,
+  // mapped to the failed package(s) at the root of that chain.
+  let notBuilt: Map<PackageDetails, string[]> = new Map();
 
   progressUpdate(lincdPackages.size + ' packages left');
 
   let packagesLeft = lincdPackages.size;
-  // let packagesLeft = lincdPackages.size - done.size;
-  runOnPackagesGroupedByDependencies(
+  const finished = runOnPackagesGroupedByDependencies(
     lincdPackages,
     (packageGroup, dependencies) => {
       if (done.size > 0) {
@@ -1090,18 +1094,38 @@ export function buildAll(options) {
             '\n-------\nThese packages are next, since all their dependencies have now been build:',
           ),
         );
-        // log(stack);
       }
       debugInfo(
         'Now building: ' + chalk.blue(packageGroup.map((i) => i.packageName)),
       );
       return async (pkg: PackageDetails) => {
-        let command;
+        // A package whose dependency failed (directly or further down the
+        // chain) cannot be built against it. Report it instead of building it,
+        // and keep building everything else.
+        const causes = new Set<string>();
+        for (const dep of dependencies.get(pkg) || []) {
+          if (typeof dep === 'string') continue;
+          if (failed.has(dep)) causes.add(dep.packageName);
+          notBuilt.get(dep)?.forEach((c) => causes.add(c));
+        }
+        if (causes.size > 0) {
+          const roots = [...causes];
+          notBuilt.set(pkg, roots);
+          packagesLeft--;
+          console.log(
+            chalk.yellow(
+              `Not building ${pkg.packageName} because ${roots.join(', ')} failed`,
+            ),
+          );
+          return undefined;
+        }
+
+        let command: Promise<any>;
         let skipping = false;
         //if we're skipping builds until a certain package
         if (!building) {
           //if the package name matches the package we're supposed to start from then start building packages
-          if (pkg.packageName == startFrom || pkg.packageName == startFrom) {
+          if (pkg.packageName == startFrom) {
             building = true;
           }
           //else still waiting for the package
@@ -1122,7 +1146,7 @@ export function buildAll(options) {
           // packages inside an existing yarn workspace still build with yarn.
           const pkgDir = path.join(process.cwd(), pkg.path);
           const pkgJson = getPackageJSON(pkgDir);
-          const hasBuildScript = !!(pkgJson?.scripts?.build);
+          const hasBuildScript = !!pkgJson?.scripts?.build;
 
           if (!hasBuildScript) {
             // No build script — skip gracefully (e.g. a pure-assets package).
@@ -1154,124 +1178,22 @@ export function buildAll(options) {
           process.stdout.write(packagesLeft + ' packages left\r');
         }
 
-        return command
-          .then((res) => {
-            //empty string or true is success
-            //false is success with warnings
-            //any other string is the build error text
-            //undefined result means it failed
-            // if (res !== '' && res !== true && res !== false) {
-            if (typeof res === 'undefined') {
-              failedModules.push(pkg.packageName);
-              let dependentModules = getDependentPackages(dependencies, pkg);
-              if (dependentModules.length > 0) {
-                printBuildResults(failedModules, done);
-                console.log(
-                  'Stopping build process because an error occurred whilst building ' +
-                    pkg.packageName +
-                    ', which ' +
-                    dependentModules.length +
-                    ' other packages depend on.',
-                ); //"+dependentModules.map(d => d.packageName).join(", ")));
-                log(
-                  'Run ' +
-                    chalk.greenBright(
-                      `linked build-all --from=${pkg.packageName}`,
-                    ) +
-                    ' to build only the remaining packages',
-                ); //"+dependentModules.map(d => d.packageName).join(", ")));
-                process.exit(1);
-              }
-              // A failed package with no dependents still counts towards the
-              // total, or the summary and exit code are never reached.
-              packagesLeft--;
-              if (packagesLeft == 0) {
-                printBuildResults(failedModules, done);
-                process.exit(1);
-              }
-            } else {
-              if (!skipping) {
-                log(
-                  chalk.green('Built ' + pkg.packageName) +
-                    (res === false ? chalk.redBright(' (with warnings)') : ''),
-                );
-              }
-              done.add(pkg);
-
-              packagesLeft--;
-              // log(chalk.magenta(packagesLeft + ' packages left'));
-              process.stdout.write(packagesLeft + ' packages left\r');
-              if (packagesLeft == 0) {
-                printBuildResults(failedModules, done);
-                if (failedModules.length > 0) {
-                  process.exit(1);
-                }
-              }
-
-              return res;
-            }
-          })
-          .catch(({error, stdout, stderr}) => {
-            logError(chalk.red('Failed to build ' + pkg.packageName));
-            console.log(stdout);
-            process.exit(1);
-            // let dependentModules = getDependentP
-          });
-        //undefined result means it failed
-        /*if (typeof res === 'undefined')
-        {
-          // .catch(({ error,stdout,stderr }) => {
-          //this prints out the webpack output, including the build errors
-          // warn('Failed to build ' + pkg.packageName);
-          // console.log(stdout);
-          failedModules.push(pkg.packageName);
-          let dependentModules = getDependentPackages(dependencies,pkg);
-          if (dependentModules.length > 0)
-          {
-            printBuildResults(failedModules,done);
-            console.log(
-              'Stopping build process because an error occurred whilst building ' +
-              pkg.packageName +
-              ', which ' +
-              dependentModules.length +
-              ' other packages depend on.',
-            ); //"+dependentModules.map(d => d.packageName).join(", ")));
-            log(
-              'Run ' +
-              chalk.greenBright(`linked build-all --from=${pkg.packageName}`) +
-              ' to build only the remaining packages',
-            ); //"+dependentModules.map(d => d.packageName).join(", ")));
-            process.exit(1);
-          }
+        const res = await command;
+        packagesLeft--;
+        //true is success, false is success with warnings, undefined is failure
+        if (typeof res === 'undefined') {
+          failed.add(pkg);
+          return undefined;
         }
-        else //true is successful build, false is successful but with warnings
-        {
-          //successful build
-          // })
-          //   .then((res) => {
-          if (!skipping)
-          {
-            log(chalk.green('Built ' + pkg.packageName)+(res === false ? chalk.redBright(' (with warnings)') : ''));
-          }
-          done.add(pkg);
-
-          packagesLeft--;
-          // log(chalk.magenta(packagesLeft + ' packages left'));
-          process.stdout.write(packagesLeft + ' packages left\r');
-          if (packagesLeft == 0)
-          {
-            printBuildResults(failedModules,done);
-            if (failedModules.length > 0)
-            {
-              process.exit(1);
-            }
-          }
-
-          return res;
-        }*/
-        // }).catch(err => {
-        //   console.log(err);
-        // })
+        if (!skipping) {
+          log(
+            chalk.green('Built ' + pkg.packageName) +
+              (res === false ? chalk.redBright(' (with warnings)') : ''),
+          );
+        }
+        done.add(pkg);
+        process.stdout.write(packagesLeft + ' packages left\r');
+        return res;
       };
     },
     (dependencies) => {
@@ -1282,68 +1204,103 @@ export function buildAll(options) {
             'Could not find the package to start from. Please provide a correct package name or package name to build from',
           ),
         );
-      } else {
-        //Detecting cyclical dependencies that caused some packages not to be build
-        let first = true;
-        lincdPackages.forEach((pkg) => {
-          if (!done.has(pkg)) {
-            let deps = dependencies.get(pkg);
-            if (first) {
-              console.log(
-                chalk.red(
-                  'CYCLICAL DEPENDENCIES? - could not build some packages because they depend on each other.',
-                ),
-              );
-              first = false;
-            }
-            //print the cyclical dependencies
+        process.exit(1);
+        return;
+      }
+      // Anything neither built, failed nor held back by a failure was never
+      // scheduled: its dependencies could not all be met, which points to a
+      // dependency cycle.
+      const unscheduled = Array.from(lincdPackages.values()).filter(
+        (pkg: PackageDetails) =>
+          !done.has(pkg) && !failed.has(pkg) && !notBuilt.has(pkg),
+      ) as PackageDetails[];
+      if (unscheduled.length > 0) {
+        console.log(
+          chalk.red(
+            'CYCLICAL DEPENDENCIES? - could not build some packages because they depend on each other.',
+          ),
+        );
+        for (const pkg of unscheduled) {
+          const deps = dependencies.get(pkg) || [];
+          console.log(
+            chalk.red(pkg.packageName) +
+              ' depends on ' +
+              deps
+                .filter((dependency) => typeof dependency !== 'string')
+                .map((d: PackageDetails) =>
+                  done.has(d) ? d.packageName : chalk.red(d.packageName),
+                )
+                .join(', '),
+          );
+          //also print some information why these packages have not been moved into the stack
+          const stringDependencies = deps.filter((d) => typeof d === 'string');
+          if (stringDependencies.length > 0) {
             console.log(
-              chalk.red(pkg.packageName) +
-                ' depends on ' +
-                deps
-                  .filter((dependency) => {
-                    return typeof dependency !== 'string';
-                  })
-                  .map((d: PackageDetails) => {
-                    return done.has(d)
-                      ? d.packageName
-                      : chalk.red(d.packageName);
-                  })
-                  .join(', '),
+              chalk.red(
+                'And it depends on these package(s) - which seem not to be proper packages :' +
+                  stringDependencies.join(', '),
+              ),
             );
-
-            //also print some information why these packages have not been moved into the stack
-            let stringDependencies = deps.filter((d) => typeof d === 'string');
-            if (stringDependencies.length > 0) {
-              console.log(
-                chalk.red(
-                  'And it depends on these package(s) - which seem not to be proper packages :' +
-                    stringDependencies.join(', '),
-                ),
-              );
-              console.log(
-                chalk.red(
-                  'Could you remove this from dependencies? Should it be a devDependency?',
-                ),
-              );
-            }
+            console.log(
+              chalk.red(
+                'Could you remove this from dependencies? Should it be a devDependency?',
+              ),
+            );
           }
-        });
+        }
+      }
+
+      printBuildAllSummary(done, failed, notBuilt, unscheduled);
+      if (failed.size > 0 || notBuilt.size > 0 || unscheduled.length > 0) {
+        process.exit(1);
       }
     },
     sync,
   );
+  return finished;
 }
 
-function getDependentPackages(dependencies, pkg): PackageDetails[] {
-  let dependentModules: PackageDetails[] = [];
-  dependencies.forEach((dModuleDependencies, dModule) => {
-    if (dModuleDependencies.indexOf(pkg) !== -1) {
-      dependentModules.push(dModule);
-    }
-  });
-
-  return dependentModules;
+/**
+ * The end-of-run report of `build-all`: what was built, every package whose
+ * build failed, and every package that was not built because of one.
+ */
+function printBuildAllSummary(
+  done: Set<PackageDetails>,
+  failed: Set<PackageDetails>,
+  notBuilt: Map<PackageDetails, string[]>,
+  unscheduled: PackageDetails[],
+) {
+  printBuildResults(
+    [...failed].map((p) => p.packageName),
+    done,
+  );
+  if (notBuilt.size > 0) {
+    warn(
+      `Not built (${notBuilt.size}) because a dependency failed:\n` +
+        [...notBuilt]
+          .map(
+            ([pkg, roots]) =>
+              `  - ${chalk.red(pkg.packageName)}: not built because ${roots.join(', ')} failed`,
+          )
+          .join('\n') +
+        '\n',
+    );
+  }
+  if (unscheduled.length > 0) {
+    warn(
+      'Not built (dependency cycle): ' +
+        chalk.red(unscheduled.map((p) => p.packageName).join(', ')) +
+        '\n',
+    );
+  }
+  const problems = failed.size + notBuilt.size + unscheduled.length;
+  if (problems > 0) {
+    warn(
+      chalk.red(
+        `build-all finished with ${failed.size} failed and ${notBuilt.size + unscheduled.length} not built, out of ${done.size + problems} packages.`,
+      ),
+    );
+  }
 }
 
 /**
