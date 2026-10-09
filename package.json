@@ -70,7 +70,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@_linked/core": "^2.22.8",
+    "@_linked/core": "^2.28.0",
     "@tailwindcss/vite": "^4.1.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
