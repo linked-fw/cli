@@ -154,6 +154,12 @@ case already.
 
 # Part 2 — The build-script standard
 
+> **Superseded for the template.** `defaults/package/package.json` now builds with
+> `"build": "linked build"`, the CLI's own pipeline (ESM compile, asset copy, specifier rewrite and
+> the shape checks), and no longer carries `build-esm`, `copy-to-lib`, `rimraf` or `copyfiles`.
+> Every linked package builds with `linked build`. The findings below still explain why a guarded
+> `tsc` is wrong wherever a hand-written script remains.
+
 ## 2.1 The swallowed failure, in two repos, byte-identical
 
 `auth` and `owl` both had:

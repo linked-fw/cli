@@ -24,9 +24,7 @@
   ],
   "scripts": {
     "start": "linked dev",
-    "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib",
-    "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && tsc -p tsconfig-esm.json",
-    "copy-to-lib": "echo 'copying CSS + JSON assets to lib folder' && copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/esm"
+    "build": "linked build"
   },
   "keywords": [
     "linked",
@@ -60,9 +58,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.14",
-    "@_linked/cli": "^1.2",
-    "copyfiles": "^2.4.1",
-    "rimraf": "^5.0.7",
+    "@_linked/cli": "^1.45.0",
     "typescript": "^5.7.3"
   }
 }

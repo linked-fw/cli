@@ -270,7 +270,12 @@ describe('the package template follows the standard', () => {
       './*.js': {types: './lib/esm/*.d.ts', import: './lib/esm/*.js'},
       './*': {types: './lib/esm/*.d.ts', import: './lib/esm/*.js'},
     });
-    expect(Object.keys(pkg.scripts).sort()).toEqual(['build', 'build-esm', 'copy-to-lib', 'start']);
+    expect(Object.keys(pkg.scripts).sort()).toEqual(['build', 'start']);
+    // Every linked package builds with the CLI's own pipeline, not a hand-rolled
+    // tsc + copy chain, so the helpers that chain needed are gone too.
+    expect(pkg.scripts.build).toBe('linked build');
+    expect(pkg.devDependencies.rimraf).toBeUndefined();
+    expect(pkg.devDependencies.copyfiles).toBeUndefined();
     expect(JSON.stringify(pkg.scripts)).not.toMatch(/cjs|dual-package/);
     expect(pkg.devDependencies['tsconfig-to-dual-package']).toBeUndefined();
     expect(fs.existsSync(path.join(root, 'tsconfig-cjs.json'))).toBe(false);
