@@ -60,12 +60,62 @@ import ora, {Ora} from 'ora';
 import stagedGitFiles from 'staged-git-files';
 import {packagePublishesCjs} from './package-manifest.js';
 import {asNamespace, defaultOntologyNamespace} from './utils/ontologyNamespace.js';
+import {
+  decidePackageKind,
+  ontologySlugFor,
+  packageNameFor,
+  scaffoldKinds,
+  PACKAGE_TEMPLATE_DIRS,
+  SHARED_TEMPLATE_FILES,
+} from './utils/packageKind.js';
+import type {PackageKind, ScaffoldKind} from './utils/packageKind.js';
 
 let dirname__ =
   typeof __dirname !== 'undefined'
     ? __dirname
     : //@ts-ignore
       dirname(import.meta.url).replace('file:/', '');
+
+/**
+ * A folder under this package's `defaults/`. The built module sits in `lib/esm/`
+ * and the source in `src/`, so the templates are two or one level up.
+ */
+function defaultsDir(...parts: string[]): string {
+  const candidates = [
+    path.join(dirname__, '..', '..', 'defaults'),
+    path.join(dirname__, '..', 'defaults'),
+  ];
+  const root = candidates.find((dir) => fs.existsSync(dir)) ?? candidates[0];
+  return path.join(root, ...parts);
+}
+
+/**
+ * The commands that write a file importing `../package.js` only make sense in a
+ * linked package. An app root registers no package (it is a linkedApp, not a
+ * linkedPackage), so there the import would be broken: refuse instead. An app
+ * is recognised by its manifest first, so a template clone that still carries a
+ * `src/package.ts` is refused all the same.
+ */
+function assertInsidePackage(basePath: string, sourceFolder: string, command: string) {
+  const here = `run this inside a package (packages/<name>).`;
+  let manifest: any;
+  try {
+    manifest = fs.readJsonSync(path.join(basePath, 'package.json'));
+  } catch {
+    manifest = undefined;
+  }
+  if (manifest?.linkedApp === true) {
+    throw new CreatePackageError(
+      `${command}: ${manifest.name || basePath} is a linked app, not a package, and an app ` +
+        `registers no package to add to; ${here}`,
+    );
+  }
+  if (!fs.existsSync(path.join(sourceFolder, 'package.ts'))) {
+    throw new CreatePackageError(
+      `${command}: no src/package.ts here, so there is no package to add to; ${here}`,
+    );
+  }
+}
 
 /**
  * Dynamically import the app's backend storage configuration. Tries the
@@ -528,8 +578,12 @@ function setEnvVar(envText: string, key: string, value: string): string {
  *  - `.env.example` (committed defaults for this app) + `.env` (local): APP_NAME
  *    drives the display name; APP_PREFIX names data files.
  *  - `package.json`: `name` (hyphenated id) + `displayName` (human name).
- *  - `src/package.ts`: the runtime `linkedPackage` id — shape URIs derive from it.
  *  - pm2 process names + the VS Code launch name (cosmetic, but should match).
+ *
+ * Nothing under `src/` is touched: the app is a linkedApp, not a linked package,
+ * so its root registers no package and has no package id to stamp. Its shapes
+ * live in its packages (`packages/<name>-assets`), each with its own
+ * `src/package.ts`.
  */
 /**
  * Scaffolded apps are npm apps, so the new app must not also look like a yarn
@@ -549,7 +603,7 @@ export function stripYarnProjectFiles(targetFolder: string) {
   }
 }
 
-function applyAppIdentity(
+export function applyAppIdentity(
   targetFolder: string,
   ids: {appName: string; appPrefix: string; hyphenName: string},
 ) {
@@ -575,20 +629,7 @@ function applyAppIdentity(
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
   }
 
-  // 3. src/package.ts — the runtime linkedPackage id.
-  const packageTs = path.join(targetFolder, 'src', 'package.ts');
-  if (fs.existsSync(packageTs)) {
-    const src = fs.readFileSync(packageTs, 'utf8');
-    fs.writeFileSync(
-      packageTs,
-      src.replace(
-        /linkedPackage\(\s*['"][^'"]*['"]\s*\)/,
-        `linkedPackage('${hyphenName}')`,
-      ),
-    );
-  }
-
-  // 4. pm2 process names + VS Code launch name (template hardcodes 'app').
+  // 3. pm2 process names + VS Code launch name (template hardcodes 'app').
   const renames: Array<[string, RegExp, string]> = [
     ['pm2.config.js', /name:\s*'app'/, `name: '${hyphenName}'`],
     ['pm2-staging.config.js', /name:\s*'app-staging'/, `name: '${hyphenName}-staging'`],
@@ -1372,6 +1413,7 @@ export const createOntology = async (
   }
 
   let sourceFolder = getSourceFolder(basePath);
+  assertInsidePackage(basePath, sourceFolder, 'create-ontology');
   let targetFolder = ensureFolderExists(sourceFolder, 'ontologies');
 
   if (!uriBase) {
@@ -1386,16 +1428,7 @@ export const createOntology = async (
   let targetFile = path.join(targetFolder, hyphenName + '.ts');
   let targetRegisterFile = path.join(targetFolder, hyphenName + '.register.ts');
   fs.copySync(
-    path.join(
-      dirname__,
-      '..',
-      '..',
-      'defaults',
-      'package',
-      'src',
-      'ontologies',
-      'example-ontology.ts',
-    ),
+    defaultsDir('package-ontology', 'src', 'ontologies', 'example-ontology.ts'),
     targetFile,
   );
 
@@ -1403,16 +1436,7 @@ export const createOntology = async (
   // ontology module's whole export namespace, and a module cannot import itself once a
   // bundler is involved -- Rollup elides the self-reference and the app dies at boot.
   fs.copySync(
-    path.join(
-      dirname__,
-      '..',
-      '..',
-      'defaults',
-      'package',
-      'src',
-      'ontologies',
-      'example-ontology.register.ts',
-    ),
+    defaultsDir('package-ontology', 'src', 'ontologies', 'example-ontology.register.ts'),
     targetRegisterFile,
   );
 
@@ -1430,29 +1454,11 @@ export const createOntology = async (
     hyphenName + '.json.d.ts',
   );
   fs.copySync(
-    path.join(
-      dirname__,
-      '..',
-      '..',
-      'defaults',
-      'package',
-      'src',
-      'data',
-      'example-ontology.json',
-    ),
+    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.json'),
     targetDataFile,
   );
   fs.copySync(
-    path.join(
-      dirname__,
-      '..',
-      '..',
-      'defaults',
-      'package',
-      'src',
-      'data',
-      'example-ontology.json.d.ts',
-    ),
+    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.json.d.ts'),
     targetDataFile2,
   );
 
@@ -1692,6 +1698,7 @@ export const getScriptDir = () => {
 };
 export const createShape = async (name, basePath = process.cwd()) => {
   let sourceFolder = getSourceFolder(basePath);
+  assertInsidePackage(basePath, sourceFolder, 'create-shape');
   let targetFolder = ensureFolderExists(sourceFolder, 'shapes');
   let {hyphenName, camelCaseName, underscoreName} = setNameVariables(name);
 
@@ -1699,7 +1706,7 @@ export const createShape = async (name, basePath = process.cwd()) => {
   // log("Creating files for shape '" + name + "'");
   let targetFile = path.join(targetFolder, hyphenName + '.ts');
   fs.copySync(
-    path.join(getScriptDir(), '..', '..', 'defaults', 'shape.ts'),
+    defaultsDir('shape.ts'),
     targetFile,
   );
 
@@ -1721,6 +1728,7 @@ export const createShape = async (name, basePath = process.cwd()) => {
 };
 
 export const createSetComponent = async (name, basePath = process.cwd()) => {
+  assertInsidePackage(basePath, path.join(basePath, 'src'), 'create-set-component');
   let targetFolder = ensureFolderExists(basePath, 'src', 'components');
   let {hyphenName, camelCaseName, underscoreName} = setNameVariables(name);
 
@@ -1728,13 +1736,13 @@ export const createSetComponent = async (name, basePath = process.cwd()) => {
   log("Creating files for set component '" + name + "'");
   let targetFile = path.join(targetFolder, hyphenName + '.tsx');
   fs.copySync(
-    path.join(getScriptDir(), '..', '..', 'defaults', 'set-component.tsx'),
+    defaultsDir('set-component.tsx'),
     targetFile,
   );
 
   let targetFile2 = path.join(targetFolder, hyphenName + '.scss');
   fs.copySync(
-    path.join(getScriptDir(), '..', '..', 'defaults', 'component.scss'),
+    defaultsDir('component.scss'),
     targetFile2,
   );
 
@@ -1758,6 +1766,7 @@ export const createSetComponent = async (name, basePath = process.cwd()) => {
 };
 export const createComponent = async (name, basePath = process.cwd()) => {
   let sourceFolder = getSourceFolder(basePath);
+  assertInsidePackage(basePath, sourceFolder, 'create-component');
   let targetFolder = ensureFolderExists(sourceFolder, 'components');
   let {hyphenName, camelCaseName, underscoreName} = setNameVariables(name);
 
@@ -1765,13 +1774,13 @@ export const createComponent = async (name, basePath = process.cwd()) => {
   log("Creating files for component '" + name + "'");
   let targetFile = path.join(targetFolder, hyphenName + '.tsx');
   fs.copySync(
-    path.join(getScriptDir(), '..', 'defaults', 'component.tsx'),
+    defaultsDir('component.tsx'),
     targetFile,
   );
 
   let targetFile2 = path.join(targetFolder, hyphenName + '.scss');
   fs.copySync(
-    path.join(getScriptDir(), '..', 'defaults', 'component.scss'),
+    defaultsDir('component.scss'),
     targetFile2,
   );
 
@@ -2409,21 +2418,70 @@ export const createPackage = async (
     console.warn('Please provide a name as the first argument');
     return;
   }
+  const isTTY = !!(process.stdin.isTTY && process.stdout.isTTY);
+
+  // What, then where. Both are settled before anything is written, so a
+  // refusal leaves nothing behind and `both` asks each question once.
+  const kindDecided = decidePackageKind({
+    kind: options.kind,
+    remote: options.remote,
+    isTTY,
+  });
+  if (kindDecided.kind === 'refuse') throw new CreatePackageError(kindDecided.message);
+  const packageKind: PackageKind =
+    kindDecided.kind === 'ask' ? await askPackageKind(name) : kindDecided.packageKind;
 
   const appRoot = findLinkedAppRoot(basePath);
-  const decided = decideCreatePackageTarget({
-    appRoot,
-    options,
-    isTTY: !!(process.stdin.isTTY && process.stdout.isTTY),
-  });
+  const decided = decideCreatePackageTarget({appRoot, options, isTTY});
   if (decided.kind === 'refuse') throw new CreatePackageError(decided.message);
   const decision =
     decided.kind === 'ask' ? await askPackageLocation(name) : decided;
 
-  //let's remove scope for variable names
-  const cleanPackageName = bareName(name);
+  const packages = scaffoldKinds(packageKind).map((kind) => ({
+    kind,
+    name: packageNameFor(name, kind),
+  }));
+  // Nothing is written until every target is free.
+  const targets = await Promise.all(
+    packages.map(async ({name: packageName}) => {
+      const targetFolder = await packageTargetFolder(packageName, basePath, appRoot, decision);
+      if (fs.existsSync(targetFolder)) {
+        throw new CreatePackageError(
+          `${targetFolder} already exists. Refusing to write a new package over it.`,
+        );
+      }
+      return targetFolder;
+    }),
+  );
 
-  let targetFolder: string;
+  for (const [i, {kind, name: packageName}] of packages.entries()) {
+    const targetFolder = targets[i];
+    await scaffoldPackage(packageName, kind, targetFolder, uriBase);
+    const skipped = () =>
+      log(`Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`);
+    if (decision.kind === 'outside') {
+      if (options.skipInstall) skipped();
+      else await installStandalonePackage(targetFolder);
+    } else if (decision.location === 'packages') {
+      // The app's package.json is wired either way: that is files, not install.
+      await installWorkspacePackage(packageName, targetFolder, appRoot, options.skipInstall);
+    } else if (options.skipInstall) {
+      skipped();
+    } else {
+      await installOwnRepoPackage(packageName, targetFolder, appRoot, decision);
+    }
+  }
+};
+
+/** Where a package goes, given where create-package was told to put it. */
+async function packageTargetFolder(
+  name: string,
+  basePath: string,
+  appRoot: string | null,
+  decision: TargetDecision,
+): Promise<string> {
+  //let's remove scope for folder names
+  const cleanPackageName = bareName(name);
   if (decision.kind === 'outside') {
     //if ran with npx, basePath will be the root directory of the repository, even if we're executing from a sub folder (the root directory is where node_modules lives and package.json with workspaces)
     //so we manually find a packages folder, if it exists we go into that.
@@ -2434,23 +2492,35 @@ export const createPackage = async (
     else if (fs.existsSync(path.join(basePath, 'modules'))) {
       basePath = path.join(basePath, 'modules');
     }
-    targetFolder = path.join(basePath, cleanPackageName);
-  } else if (decision.location === 'packages') {
-    targetFolder = path.join(appRoot, 'packages', cleanPackageName);
-  } else {
-    // localize's own naming, so `linked localize` and this command can never
-    // disagree about where a package lives.
-    const {checkoutNameFor, DEFAULT_DIR} = await import('./localize/index.js');
-    targetFolder = path.join(appRoot, DEFAULT_DIR, checkoutNameFor(name));
+    return path.join(basePath, cleanPackageName);
   }
-  if (fs.existsSync(targetFolder)) {
-    throw new CreatePackageError(
-      `${targetFolder} already exists. Refusing to write a new package over it.`,
-    );
+  if (decision.kind === 'resolved' && decision.location === 'packages') {
+    return path.join(appRoot, 'packages', cleanPackageName);
   }
+  // localize's own naming, so `linked localize` and this command can never
+  // disagree about where a package lives.
+  const {checkoutNameFor, DEFAULT_DIR} = await import('./localize/index.js');
+  return path.join(appRoot, DEFAULT_DIR, checkoutNameFor(name));
+}
 
+/**
+ * Write one package of a kind. Every kind gets the shared files of
+ * `defaults/package` (manifest, tsconfigs, dotfiles, `src/package.ts`); an asset
+ * package gets the rest of that folder, an ontology package gets
+ * `defaults/package-ontology` instead, with the example ontology named after
+ * its ontology slug.
+ */
+async function scaffoldPackage(
+  name: string,
+  kind: ScaffoldKind,
+  targetFolder: string,
+  uriBase?: string,
+) {
+  // An ontology package `foo-ont` holds the ontology `foo`: that slug names its
+  // files and its prefix, and its terms mint `{root}ont/foo/{Term}`.
+  const ontologySlug = kind === 'ontology' ? ontologySlugFor(name) : undefined;
   if (!uriBase) {
-    uriBase = defaultOntologyNamespace(name);
+    uriBase = defaultOntologyNamespace(ontologySlug ?? name);
   }
   setVariable('uri_base', asNamespace(uriBase));
 
@@ -2460,33 +2530,41 @@ export const createPackage = async (
   //extra variable for clarity (will be same as 'name')
   setVariable('output_file_name', name);
 
-  const {hyphenName} = setNameVariables(cleanPackageName);
+  const {hyphenName} = setNameVariables(ontologySlug ?? bareName(name));
 
-  log("Creating new linked package '" + name + "'");
+  log(`Creating new linked ${kind} package '${name}'`);
   fs.mkdirSync(targetFolder, {recursive: true});
-  fs.copySync(
-    path.join(getScriptDir(), '..', '..', 'defaults', 'package'),
-    targetFolder,
-  );
+  const [shared, ...variants] = PACKAGE_TEMPLATE_DIRS[kind];
+  if (variants.length === 0) {
+    fs.copySync(defaultsDir(shared), targetFolder);
+  } else {
+    for (const file of SHARED_TEMPLATE_FILES) {
+      fs.copySync(defaultsDir(shared, file), path.join(targetFolder, file));
+    }
+    for (const variant of variants) {
+      fs.copySync(defaultsDir(variant), targetFolder);
+    }
+  }
   renameShippedDotfiles(targetFolder);
 
   //replace variables in some of the copied files
   await Promise.all(
-    [
-      'src/index.ts',
-      'package.json',
-      'src/package.ts',
-      'src/ontologies/example-ontology.ts',
-      'src/ontologies/example-ontology.register.ts',
-      'src/data/example-ontology.json',
-    ]
+    ['src/index.ts', 'package.json', 'src/package.ts']
+      .concat(
+        kind === 'ontology'
+          ? [
+              'src/ontologies/example-ontology.ts',
+              'src/ontologies/example-ontology.register.ts',
+              'src/data/example-ontology.json',
+            ]
+          : [],
+      )
       .map((f) => path.join(targetFolder, f))
-      .map((file) => {
-        return replaceVariablesInFile(file);
-      }),
+      .map((file) => replaceVariablesInFile(file)),
   );
 
-  //rename these to a file name similar to the pkg name
+  if (kind !== 'ontology') return;
+  //rename these to a file name similar to the ontology slug
   [
     'src/ontologies/example-ontology.ts',
     // The register sibling is what index.ts imports; without it here the scaffold keeps a
@@ -2498,27 +2576,33 @@ export const createPackage = async (
   ].forEach((f) => {
     let parts = f.split('/');
     let newParts = [...parts];
-    let [name, ...extensions] = newParts.pop().split('.');
+    let [, ...extensions] = newParts.pop().split('.');
     let newName = hyphenName + '.' + extensions.join('.');
-    console.log(
-      'rename ',
-      path.join(targetFolder, f),
-      path.join(targetFolder, ...newParts, newName),
-    );
     fs.renameSync(
       path.join(targetFolder, f),
       path.join(targetFolder, ...newParts, newName),
     );
   });
+}
 
-  if (decision.kind === 'outside') {
-    await installStandalonePackage(targetFolder);
-  } else if (decision.location === 'packages') {
-    await installWorkspacePackage(name, targetFolder, appRoot);
-  } else {
-    await installOwnRepoPackage(name, targetFolder, appRoot, decision);
+/**
+ * Ask what kind of package to make — only ever on a terminal, and only when
+ * `--kind` did not say.
+ */
+async function askPackageKind(name: string): Promise<PackageKind> {
+  console.log(
+    `\nWhat kind of package is ${chalk.magenta(name)}?\n` +
+      `  1) ontology  one ontology, no shapes or components   (${packageNameFor(name, 'ontology')})\n` +
+      `  2) assets    shapes, components and a backend         (${packageNameFor(name, 'assets')})\n` +
+      `  3) both      the two packages above\n`,
+  );
+  const kinds: PackageKind[] = ['ontology', 'assets', 'both'];
+  let answer = '';
+  while (!['1', '2', '3'].includes(answer)) {
+    answer = await promptUser('Choose 1, 2 or 3: ');
   }
-};
+  return kinds[Number(answer) - 1];
+}
 
 /**
  * Ask where a new package goes — only ever on a terminal, and only when no
@@ -2632,6 +2716,7 @@ async function installWorkspacePackage(
   name: string,
   targetFolder: string,
   appRoot: string,
+  skipInstall = false,
 ) {
   const appPkgPath = path.join(appRoot, 'package.json');
   const appPkg = fs.readJsonSync(appPkgPath);
@@ -2644,6 +2729,10 @@ async function installWorkspacePackage(
     `Added ${name}@^${version} to ${path.relative(process.cwd(), appPkgPath) || 'package.json'}` +
       (workspaces.changed ? ' and packages/* to its workspaces' : ''),
   );
+  if (skipInstall) {
+    log(`Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`);
+    return;
+  }
 
   const setup = await packageSetupFor(appRoot);
   await installThenBuild(

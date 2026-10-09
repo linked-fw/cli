@@ -13,6 +13,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import type {PackageKind} from './packageKind.js';
 
 export const PACKAGE_LOCATIONS = ['packages', 'packages-local'] as const;
 export type PackageLocation = (typeof PACKAGE_LOCATIONS)[number];
@@ -24,6 +25,13 @@ export interface CreatePackageOptions {
   remote?: string;
   /** Push the initial commit. Needs `remote`. */
   push?: boolean;
+  /**
+   * What to scaffold: an ontology package, an asset package or both. See
+   * `./packageKind.js`. Validated at runtime too.
+   */
+  kind?: PackageKind;
+  /** Write the files only: no install, no build, no git. */
+  skipInstall?: boolean;
 }
 
 /**

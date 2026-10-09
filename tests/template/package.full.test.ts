@@ -32,7 +32,11 @@ import ts from 'typescript';
 const CLI_ROOT = path.resolve(__dirname, '..', '..');
 const CLI = path.join(CLI_ROOT, 'lib', 'esm', 'launch.js');
 const TEN_MINUTES = 10 * 60 * 1000;
-const PKG = 'tmplprobe';
+// `create-package tmplprobe --kind ontology` writes the ontology package `tmplprobe-ont`
+// holding the ontology `tmplprobe`.
+const NAME = 'tmplprobe';
+const PKG = `${NAME}-ont`;
+const ONT = NAME;
 
 const describeFull =
   process.env.RUN_TEMPLATE_FULL === '1' ? describe : describe.skip;
@@ -79,7 +83,7 @@ describeFull('create-package (full)', () => {
     }
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-pkg-full-'));
     pkg = path.join(tmp, PKG);
-    execFileSync(process.execPath, [CLI, 'create-package', PKG], {
+    execFileSync(process.execPath, [CLI, 'create-package', NAME, '--kind', 'ontology'], {
       cwd: tmp,
       stdio: 'pipe',
       maxBuffer: 100 * 1024 * 1024,
@@ -120,12 +124,12 @@ describeFull('create-package (full)', () => {
       'lib',
       'esm',
       'ontologies',
-      `${PKG}.register.js`,
+      `${ONT}.register.js`,
     );
     expect([register, fs.existsSync(register)]).toEqual([register, true]);
     // ...and the entry imports it, so linkedOntology() actually runs on boot.
     expect(fs.readFileSync(path.join(pkg, 'lib', 'esm', 'index.js'), 'utf8')).toContain(
-      `./ontologies/${PKG}.register.js`,
+      `./ontologies/${ONT}.register.js`,
     );
     expect(fs.readFileSync(register, 'utf8')).toContain('linkedOntology');
     // The template's example-ontology.register.ts must have been renamed away.
