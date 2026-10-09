@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.45.5
+
+### Patch Changes
+
+- [#243](https://github.com/linked-fw/cli/pull/243) [`8b31574`](https://github.com/linked-fw/cli/commit/8b315745bd10a8ff6be43103756fd12e664ff59a) Thanks [@flyon](https://github.com/flyon)! - A localized checkout's install (`linked localize`, `--relink`, `--reinstall`) now passes `--include=dev`. It runs from the app's npm lifecycle hooks, which inherit the outer command's config as `npm_config_*`, so `npm install --omit=dev` at the app root used to make the checkout skip its devDependencies and stop building.
+
 ## 1.45.4
 
 ### Patch Changes
