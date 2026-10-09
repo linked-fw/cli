@@ -1136,9 +1136,19 @@ export function buildAll(options) {
               cwd: pkgDir,
             })
               .then((res) => res === '' || typeof res === 'string')
-              .catch((err) => ({
-                error: err.stdout || err.stderr || String(err),
-              }));
+              .catch((err) => {
+                // A non-zero exit is a failed build. Report it and resolve to
+                // undefined, which is what the result handler below reads as
+                // failure. Resolving to an error object would count as built.
+                const output = [err?.stdout, err?.stderr]
+                  .filter(Boolean)
+                  .join('\n');
+                console.error(
+                  chalk.red(pkg.packageName + ' build failed') +
+                    (output ? '\n' + output : ''),
+                );
+                return undefined;
+              });
           }
           log(chalk.cyan('Building ' + pkg.packageName));
           process.stdout.write(packagesLeft + ' packages left\r');
@@ -1170,6 +1180,13 @@ export function buildAll(options) {
                     ) +
                     ' to build only the remaining packages',
                 ); //"+dependentModules.map(d => d.packageName).join(", ")));
+                process.exit(1);
+              }
+              // A failed package with no dependents still counts towards the
+              // total, or the summary and exit code are never reached.
+              packagesLeft--;
+              if (packagesLeft == 0) {
+                printBuildResults(failedModules, done);
                 process.exit(1);
               }
             } else {
