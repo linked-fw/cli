@@ -128,7 +128,7 @@ linked localize                        what is localized (same as --list)
 linked localize --list --check         exit 1 when something recorded is not linked
 linked localize --relink               recreate the recorded links (for postinstall / dependencies)
 linked localize --ensure               remove checkouts' own copies of what the app provides; exit 0 (no names)
-linked localize --reinstall <package>  npm install inside that checkout, then prune it
+linked localize --reinstall <package>  npm install --no-save inside that checkout, then prune it
 linked delocalize <package…>           unlink and forget; keep the checkout
 linked delocalize                      undo everything
 linked delocalize <package> --purge    also delete the checkout (refuses on unsaved work)
@@ -146,6 +146,13 @@ linked delocalize <package> --purge    also delete the checkout (refuses on unsa
 Use `--reinstall <package>` instead of running `npm install` in a checkout by hand: a hand-run
 install puts back the checkout's own copies of what the app provides; `--reinstall` takes them out
 in the same step. (If you do run it by hand, the next `linked start` removes them — see below.)
+
+Every install localize runs inside a checkout is `npm install --no-save`: it installs what the
+checkout's committed lockfile says and leaves the checkout's `package.json` and `package-lock.json`
+untouched, so a relink never leaves a lockfile diff behind. A plain `npm install` rewrites the
+lockfile in the dialect of whichever npm is first on `PATH` — Node 22's bundled npm 10, for one,
+drops the `"libc"` fields npm 12 records. To change a checkout's dependencies, run
+`npm install <dep>` inside it on purpose, commit the lockfile with it, then `linked localize --ensure`.
 
 ### Packages published from a monorepo
 
@@ -375,6 +382,7 @@ the per-package codes — a failure on the second name does not undo the first. 
   with `--no-prune`, or in a checkout recorded with `"prune": false`)
 - edit `package-lock.json`, `.gitignore`, `workspaces`, your dependencies, or any bundler configuration
   (`package.json` only ever gains the two [relink hooks](#set-up), and only when they are missing)
+- rewrite a checkout's `package.json` or `package-lock.json` (its installs are `--no-save`)
 - invoke `npm link`
 - delete a checkout you have not committed or pushed (without `--force`)
 - guess at a repository URL

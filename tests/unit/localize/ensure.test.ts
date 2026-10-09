@@ -323,6 +323,26 @@ test('ensure installs inside the checkout, then prunes what the install put back
   );
 });
 
+test('ensure installs with --no-save, so the checkout keeps its committed lockfile', (t) => {
+  // A plain `npm install` rewrites the checkout's package-lock.json in the
+  // dialect of whichever npm is first on PATH. Measured: Node 22's bundled
+  // npm 10.9.9 drops every `"libc"` entry an npm 12 lockfile records, and any
+  // npm syncs a lockfile header the release bumped. `--no-save` installs from
+  // the lockfile and writes neither package.json nor package-lock.json.
+  const appRoot = consumer(t);
+  const a = checkout(appRoot, '@fw/a', {dependencies: {tool: '^1.0.0'}});
+  record(appRoot, {'@fw/a': a});
+  const deps = stubbed(appRoot, () => ok());
+
+  assert.equal(ensure({path: 'packages-local/fw-a'}, deps), 0, deps.output());
+  const [install] = deps.npmCalls();
+  assert.equal(install.args[0], 'install');
+  assert.ok(
+    install.args.includes('--no-save'),
+    `npm ${install.args.join(' ')} would rewrite the checkout's lockfile`,
+  );
+});
+
 test('ensure with {prune: false} only installs', (t) => {
   const appRoot = consumer(t);
   appHas(appRoot, '@fw/core', '2.25.0');

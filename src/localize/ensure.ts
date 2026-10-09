@@ -49,7 +49,16 @@ import type {Deps} from './run.js';
 import {reportError} from './localize.js';
 
 /**
- * `npm install` inside the checkout at `entry.path`, then prune it.
+ * `npm install --no-save` inside the checkout at `entry.path`, then prune it.
+ *
+ * `--no-save` keeps the checkout's tracked files out of it: npm installs what
+ * the committed lockfile says and writes neither `package.json` nor
+ * `package-lock.json` (only the gitignored hidden lockfile). Without it every
+ * relink left a lockfile diff in each checkout it reinstalled, written in the
+ * dialect of whichever npm was first on PATH -- measured: Node 22's bundled
+ * npm 10.9.9 drops every `"libc"` field an npm 12 lockfile records, and any
+ * npm syncs a lockfile header the release workflow bumped. Changing a
+ * checkout's dependencies is a deliberate `npm install <dep>` inside it.
  *
  * The package's name is read from the checkout's own `package.json`; the
  * other localized packages (siblings) from the manifest, so a checkout being
@@ -65,9 +74,11 @@ export function ensure(
 ): number {
   const pkgDir = path.join(deps.appRoot, entry.path);
   deps.log(`[localize] npm install in ${entry.path}`);
-  const install = deps.run('npm', ['install', '--no-audit', '--no-fund'], {
-    cwd: pkgDir,
-  });
+  const install = deps.run(
+    'npm',
+    ['install', '--no-save', '--no-audit', '--no-fund'],
+    {cwd: pkgDir},
+  );
   if (install.status !== 0) {
     throw new LocalizeError(
       `npm install failed in ${entry.path}:\n${(install.stderr || install.stdout).trim()}`,
