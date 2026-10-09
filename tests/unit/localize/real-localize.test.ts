@@ -43,7 +43,17 @@ test(
   async (t) => {
     const scratch = tmpdir('localize-fixture-');
     const {repoUrl, depName, name} = buildFixtureRepo(scratch);
-    const appRoot = makeConsumer({pkg: {dependencies: {[name]: '^1.0.0'}}});
+    // The relink hooks are already there: localize adds them when they are
+    // missing (adopt.test.ts), and that edit is the only one it may make.
+    const appRoot = makeConsumer({
+      pkg: {
+        dependencies: {[name]: '^1.0.0'},
+        scripts: {
+          postinstall: 'linked localize --relink',
+          dependencies: 'linked localize --relink',
+        },
+      },
+    });
     t.after(() => {
       rm(scratch);
       rm(appRoot);

@@ -149,8 +149,13 @@ test('adopt refuses a missing checkout, a non-git directory and a name mismatch'
   assert.deepEqual(Object.keys(readManifest(appRoot).entries), []);
 });
 
+const HOOKS = {
+  postinstall: 'linked localize --relink',
+  dependencies: 'linked localize --relink',
+};
+
 test('adopt leaves the consumer package.json alone and runs the configured build in the checkout', (t) => {
-  const appRoot = consumer(t, {dependencies: {}});
+  const appRoot = consumer(t, {dependencies: {}, scripts: HOOKS});
   const checkout = seed(appRoot, 'built', {name: 'built', version: '1.0.0'});
   const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
   const deps = stubbed(appRoot, gitWith(undefined));
@@ -200,4 +205,78 @@ test('a fresh `git init` with no commit yet is recorded on its branch, not as HE
 
   assert.equal(adopt(['unborn'], {}, deps), 0, deps.output());
   assert.equal(readManifest(appRoot, deps).entries.unborn.branch, 'trunk');
+});
+
+// npm runs the root `postinstall` only on a bare install, the root
+// `dependencies` script after any command that changes node_modules -- so a
+// recorded package needs both, and localize/adopt add them when missing.
+const appScripts = (appRoot) =>
+  JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'))
+    .scripts;
+
+test('adopt adds both relink hooks to an app that has neither, and says so once', (t) => {
+  const appRoot = consumer(t);
+  seed(appRoot, 'hooked', {name: 'hooked', version: '1.0.0'});
+  const deps = stubbed(appRoot, gitWith(undefined));
+
+  assert.equal(adopt(['hooked'], {}, deps), 0, deps.output());
+  assert.deepEqual(appScripts(appRoot), HOOKS);
+  assert.match(
+    deps.output(),
+    /Added `linked localize --relink` to the app's postinstall and dependencies scripts so npm keeps the links/,
+  );
+});
+
+test('adopt appends to scripts that do something else and leaves ones that already relink', (t) => {
+  const appRoot = consumer(t, {
+    scripts: {postinstall: 'patch-package', dependencies: HOOKS.dependencies},
+  });
+  seed(appRoot, 'merged', {name: 'merged', version: '1.0.0'});
+  const deps = stubbed(appRoot, gitWith(undefined));
+
+  assert.equal(adopt(['merged'], {}, deps), 0, deps.output());
+  assert.deepEqual(appScripts(appRoot), {
+    postinstall: 'patch-package && linked localize --relink',
+    dependencies: 'linked localize --relink',
+  });
+  assert.match(deps.output(), /to the app's postinstall script so npm/);
+});
+
+test('a run that records nothing does not touch the app scripts', (t) => {
+  const appRoot = consumer(t);
+  const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
+  const deps = stubbed(appRoot, gitWith(undefined));
+
+  assert.equal(adopt(['absent'], {}, deps), 6, deps.output());
+  assert.equal(
+    fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
+    before,
+  );
+  assert.doesNotMatch(deps.output(), /Added `linked localize --relink`/);
+});
+
+test('localize adds the relink hooks when it records a package', (t) => {
+  const appRoot = consumer(t, {
+    scripts: {postinstall: 'linked-localize --relink'},
+  });
+  const deps = stubbed(appRoot, (inv) => {
+    if (inv.args[0] === 'clone') {
+      const dest = inv.args[2];
+      fs.mkdirSync(path.join(dest, '.git'), {recursive: true});
+      fs.writeFileSync(
+        path.join(dest, 'package.json'),
+        JSON.stringify({name: 'widget', version: '1.0.0'}),
+      );
+      return ok();
+    }
+    if (inv.args[0] === 'symbolic-ref') return ok('main\n');
+    return ok();
+  });
+
+  assert.equal(localize(['widget'], {repo: 'r'}, deps), 0, deps.output());
+  assert.deepEqual(appScripts(appRoot), {
+    postinstall: 'linked-localize --relink',
+    dependencies: 'linked localize --relink',
+  });
+  assert.match(deps.output(), /to the app's dependencies script so npm/);
 });

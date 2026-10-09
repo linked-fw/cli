@@ -27,10 +27,43 @@ Run `linked --help` for the full list. The commonly used ones:
 
 ```bash
 linked create-app <name>          # scaffold a new app (interactive)
-linked create-package <name>      # scaffold a new linkedPackage (see below for where it goes)
+linked create-package <name>      # scaffold an ontology package, an asset package or both
+linked create-ont-package <name>  # <name>-ont: one ontology, no shapes or components
+linked create-asset-package <name># <name>-assets: shapes, components and a backend
 linked create-shape <name>        # add a shape file to the current package
 linked create-component <name>    # add a React component file
 ```
+
+An app is a `linkedApp`, not a linked package: its root registers no package, and its shapes
+live in its packages. A linked package is one of two kinds:
+
+- an **ontology package**, `<name>-ont` — exactly one ontology (`src/ontologies/<name>.ts`), no
+  shapes, components or backend. Its ontology slug is `<name>` (without `-ont`), so its terms
+  mint `https://linked.cm/ont/<name>/{Term}`, or `<uri_base>{Term}` when a namespace is given.
+- an **asset package**, `<name>-assets` — shapes, components and a backend, and no ontology.
+
+`create-package` asks which on a terminal; `--kind ontology|assets|both` answers it (`both`
+creates the pair), and without a terminal and without `--kind` it exits 1 and says so.
+With `both` and `--location packages`, the asset package depends on the ontology package
+(`"<name>-ont": "^<version>"`), which npm workspaces link locally. Anywhere else (`packages-local`
+or outside an app) it gets no such entry, because `npm install` would look the unpublished `-ont`
+package up in the registry and fail with E404; one line says to run `npm install <name>-ont` in
+the asset package once the ontology package is published.
+`create-ont-package` and `create-asset-package` are the two kinds spelled out. The suffix is
+never doubled: `create-ont-package foo-ont` creates `foo-ont`. Every package they create has
+`"linkedPackage": true`. `create-shape`, `create-component`, `create-set-component` and
+`create-ontology` refuse where there is no `src/package.ts` (a new app root has none) instead of
+writing an import of a package that does not exist: run them inside `packages/<name>`. An app that
+does have a `src/package.ts` at its root is served as before.
+
+A package's IRIs are minted under a root: `linkedPackage(name, {baseUri})`, shapes at
+`{baseUri}shape/<package>/<Name>`, an ontology package's terms at `{baseUri}ont/<slug>/<Term>`.
+The root is, first match wins: `--base-uri <uri>`; inside an app, `LINKED_BASE_URI` from the
+shell, then from the app's `.env.local`, then its `.env`. With none of them the package declares
+no root and mints under `https://linked.cm/`, the normal root for an open-source package. That is
+not a warning; the command prints one informational line:
+`Shapes and terms in <package> mint under https://linked.cm/. They resolve once the package is
+published (npx linked publish, coming soon).`
 
 Inside an app (a `package.json` with `"linkedApp": true` above the current directory),
 `create-package` puts the package in one of two places, and asks which on a terminal:
@@ -334,7 +367,8 @@ Templates live in `defaults/`:
 
 - `defaults/app-with-backend/` — used by `linked create-app`
 - `defaults/app-static/` — minimal static app
-- `defaults/package/` — used by `linked create-package`
+- `defaults/package/` — the asset package of `linked create-package` / `create-asset-package`; its manifest, tsconfigs, dotfiles and `src/package.ts` are shared by every kind
+- `defaults/package-ontology/` — what an ontology package (`create-ont-package`) gets on top of the shared files: the example ontology, its register sibling and its data
 - `defaults/setup-publish/` — caller workflows + changeset files written by `linked setup-publish` (`main`-only; `--dual-branch` is a deprecated no-op)
 
 ### `linked create-app` template structure

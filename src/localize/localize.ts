@@ -25,8 +25,15 @@
  * installed package cannot give you something to edit.
  *
  * What localize NEVER does: run an install at the consumer root, or edit
- * `package.json`, `package-lock.json`, `.gitignore`, `workspaces` or any
- * bundler config. It asserts it did not before exiting 0.
+ * `package-lock.json`, `.gitignore`, `workspaces`, dependencies or any
+ * bundler config. It asserts the work did not touch `package.json` or
+ * `package-lock.json` before exiting 0.
+ *
+ * The one deliberate edit, made after that assertion: when a run records a
+ * package, the app's `postinstall` and `dependencies` scripts get
+ * `linked localize --relink` if they lack it (`../utils/relinkHooks.ts`
+ * explains why npm needs both). Without them the next npm command silently
+ * undoes the link this run just made.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -51,6 +58,7 @@ import {checkoutNameFor, resolvePackage} from './resolve.js';
 import {pruneProvided, shouldPrune} from './prune.js';
 import {ensure} from './ensure.js';
 import type {PruneOptions} from './prune.js';
+import {ensureRelinkHooksInFile, RELINK_COMMAND} from '../utils/relinkHooks.js';
 import {
   diffManifests,
   isGitCheckout,
@@ -129,11 +137,15 @@ export function forEachName(
   const dir = opts.dir ?? manifest.dir ?? DEFAULT_DIR;
   const entries = {...manifest.entries};
   let code = 0;
+  let recorded = false;
 
   for (const name of names) {
     try {
       const result = one(name, dir, entries[name], opts, deps);
-      if (result.entry) entries[result.entry.name] = result.entry.value;
+      if (result.entry) {
+        entries[result.entry.name] = result.entry.value;
+        recorded = true;
+      }
       code = Math.max(code, result.code);
       // Written after EACH name, so an interruption keeps what already worked.
       writeManifest(deps.appRoot, {
@@ -161,7 +173,21 @@ export function forEachName(
 
   code = Math.max(code, assertLinked(entries, deps));
   code = Math.max(code, assertManifestsUntouched(before, deps));
+  // After the assertion, so it still covers everything the work itself did.
+  if (recorded) ensureRelinkHooksIn(deps);
   return code;
+}
+
+/** Add the relink hooks to the app's package.json when it lacks them. See relinkHooks.ts. */
+function ensureRelinkHooksIn(deps: Deps): void {
+  const added = ensureRelinkHooksInFile(
+    path.join(deps.appRoot, 'package.json'),
+  );
+  if (!added.length) return;
+  deps.log(
+    `[localize] Added \`${RELINK_COMMAND}\` to the app's ${added.join(' and ')} ` +
+      `script${added.length > 1 ? 's' : ''} so npm keeps the links`,
+  );
 }
 
 function localizeOne(

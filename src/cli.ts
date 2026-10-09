@@ -32,7 +32,7 @@ import {
   upgradePackages,
 } from './cli-methods.js';
 // import {buildMetadata} from './metadata';
-import {program} from 'commander';
+import {program, type Command} from 'commander';
 import {CreatePackageError} from './utils/createPackageLocation.js';
 import fs from 'fs-extra';
 import path from 'path';
@@ -149,37 +149,98 @@ program
     'the name of the script file inside the /scripts folder',
   );
 
-program
-  .command('create-package')
-  .action(async (name, uriBase, options) => {
-    try {
-      await createPackage(name, uriBase, process.cwd(), options);
-    } catch (e) {
-      if (!(e instanceof CreatePackageError)) throw e;
-      console.error(chalk.red(e.message));
-      process.exitCode = 1;
-    }
-  })
-  .description(
-    "Create a new folder with all the required files for a new Linked package. Inside an app, it goes in packages/ (part of the app's repository) or packages-local/ (its own git repository, linked with `linked localize`); without --location, --remote or --push you are asked, on a terminal.",
-  )
-  .option(
-    '--location <where>',
-    "packages: part of this app's repository, a workspace member added to its dependencies. packages-local: its own git repository (git init + a first commit), linked and recorded by `linked localize` and not added to the app's dependencies until it is published.",
-  )
-  .option(
-    '--remote <git-url>',
-    "The new repository's origin; also written to repository.url. Implies --location packages-local.",
-  )
-  .option('--push', 'Push the first commit to --remote.')
-  .argument(
-    '<name>',
-    'The name of the package. Will be used as package name in package.json',
-  )
-  .argument(
-    '[uri_base]',
-    'The base URL used for data of this package. Leave blank to use the URL of your package on lincd.org after you register it',
-  );
+/** A refusal of the create-* commands exits 1 with the message, not a stack. */
+const reportRefusal = (e: unknown) => {
+  if (!(e instanceof CreatePackageError)) throw e;
+  console.error(chalk.red(e.message));
+  process.exitCode = 1;
+};
+
+const LOCATION_HELP =
+  "packages: part of this app's repository, a workspace member added to its dependencies. packages-local: its own git repository (git init + a first commit), linked and recorded by `linked localize` and not added to the app's dependencies until it is published.";
+const REMOTE_HELP =
+  "The new repository's origin; also written to repository.url. Implies --location packages-local.";
+const PUSH_HELP = 'Push the first commit to --remote.';
+const SKIP_INSTALL_HELP = 'Write the files only: no install, no build, no git.';
+const BASE_URI_HELP =
+  "The root the package's IRIs are minted under: linkedPackage(name, {baseUri}), shapes at <uri>shape/<package>/<Name>, ontology terms at <uri>ont/<slug>/<Term>. Inside an app it defaults to LINKED_BASE_URI from the environment, then the app's .env.local, then its .env; with none of them the package declares no root and falls back to https://linked.cm/.";
+const WHERE_HELP =
+  "Inside an app, it goes in packages/ (part of the app's repository) or packages-local/ (its own git repository, linked with `linked localize`); without --location, --remote or --push you are asked, on a terminal.";
+
+/** The three scaffolding commands share the where-flags; `--kind` is create-package's own. */
+const withPackageOptions = (command: Command) =>
+  command
+    .option('--location <where>', LOCATION_HELP)
+    .option('--remote <git-url>', REMOTE_HELP)
+    .option('--push', PUSH_HELP)
+    .option('--skip-install', SKIP_INSTALL_HELP)
+    .option('--base-uri <uri>', BASE_URI_HELP);
+
+withPackageOptions(
+  program
+    .command('create-package')
+    .action(async (name, uriBase, options) => {
+      try {
+        await createPackage(name, uriBase, process.cwd(), options);
+      } catch (e) {
+        reportRefusal(e);
+      }
+    })
+    .description(
+      'Create a new Linked package: an ontology package (<name>-ont: one ontology, no shapes), an asset package (<name>-assets: shapes, components and a backend) or both. Without --kind you are asked, on a terminal. A name that already ends in -ont or -assets keeps it (foo-ont stays foo-ont). ' +
+        WHERE_HELP,
+    )
+    .option(
+      '--kind <kind>',
+      'ontology, assets or both. `both` creates <name>-ont and <name>-assets; it cannot take --remote (one repository cannot hold two packages).',
+    )
+    .argument(
+      '<name>',
+      'The name of the package, without the kind suffix: the package is named <name>-ont or <name>-assets (a name that already ends in the suffix is kept). An npm scope is kept (@acme/foo → @acme/foo-ont).',
+    )
+    .argument(
+      '[uri_base]',
+      "The namespace of the ontology package's ontology. Leave blank for https://linked.cm/ont/<name>/ (the ontology slug is <name>, without -ont).",
+    ),
+);
+
+withPackageOptions(
+  program
+    .command('create-ont-package')
+    .action(async (name, uriBase, options) => {
+      try {
+        await createPackage(name, uriBase, process.cwd(), {...options, kind: 'ontology'});
+      } catch (e) {
+        reportRefusal(e);
+      }
+    })
+    .description(
+      'Create an ontology package <name>-ont: exactly one ontology (src/ontologies/<name>.ts), no shapes, components or backend. Its ontology slug is <name>, so its terms mint {root}ont/<name>/{Term}. A name that already ends in -ont keeps it. ' +
+        WHERE_HELP,
+    )
+    .argument('<name>', 'The ontology slug; the package is named <name>-ont (foo-ont stays foo-ont).')
+    .argument(
+      '[uri_base]',
+      'The namespace of the ontology. Leave blank for https://linked.cm/ont/<name>/.',
+    ),
+);
+
+withPackageOptions(
+  program
+    .command('create-asset-package')
+    .action(async (name, options) => {
+      try {
+        await createPackage(name, undefined, process.cwd(), {...options, kind: 'assets'});
+      } catch (e) {
+        reportRefusal(e);
+      }
+    })
+    .description(
+      'Create an asset package <name>-assets: shapes, components and a backend (src/shapes, src/components, src/backend.ts), and no ontology. A name that already ends in -assets keeps it. ' +
+        WHERE_HELP,
+    )
+    .argument('<name>', 'The package is named <name>-assets (foo-assets stays foo-assets).'),
+);
 
 program
   .command('upgrade-packages')
@@ -193,10 +254,10 @@ program
 program
   .command('create-shape')
   .action((name, uriBase) => {
-    return createShape(name);
+    return createShape(name).catch(reportRefusal);
   })
   .description(
-    'Creates a new ShapeClass file for your package. Execute this from your package folder.',
+    'Creates a new ShapeClass file for your package. Execute this from your package folder (packages/<name>), not the app root: an app registers no package.',
   )
   .argument(
     '<name>',
@@ -206,10 +267,10 @@ program
 program
   .command('create-component')
   .action((name, uriBase) => {
-    return createComponent(name);
+    return createComponent(name).catch(reportRefusal);
   })
   .description(
-    'Creates a new Component file for your package. Execute this from your package folder.',
+    'Creates a new Component file for your package. Execute this from your package folder (packages/<name>), not the app root: an app registers no package.',
   )
   .argument(
     '<name>',
@@ -219,7 +280,7 @@ program
 program
   .command('create-set-component')
   .action((name, uriBase) => {
-    return createSetComponent(name);
+    return createSetComponent(name).catch(reportRefusal);
   })
   .description(
     'Creates a new SetComponent file for your package. Execute this from your package folder.',
@@ -232,7 +293,7 @@ program
 program
   .command('create-ontology')
   .action((prefix, uriBase) => {
-    return createOntology(prefix, uriBase);
+    return createOntology(prefix, uriBase).catch(reportRefusal);
   })
   .description(
     'Creates a new ontology file for your package. Execute this from your package folder.',

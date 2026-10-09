@@ -1,7 +1,7 @@
 ---
 summary: >
   `linked localize` / `linked delocalize` — develop an npm dependency from a git checkout without
-  touching package.json or the lockfile. How it works, monorepos, adopt, building, the one-copy
+  touching dependencies or the lockfile. How it works, monorepos, adopt, building, the one-copy
   rule (pruning, the run-time check, Vite's dedupe), --list, local-packages.json, exit codes.
 ---
 
@@ -39,7 +39,8 @@ way of doing that has a catch:
 
 `linked localize` makes the change **entirely outside the files npm reads**. Your `package.json`
 and `package-lock.json` come out byte-for-byte identical — it hashes them before and after and
-exits non-zero if they moved. CI, which never has the checkout, installs from the registry as
+exits non-zero if they moved. The one exception is deliberate and happens afterwards: an app that
+lacks the [relink hooks](#set-up) gets them added to its `scripts`. CI, which never has the checkout, installs from the registry as
 always.
 
 ## How it works
@@ -86,11 +87,28 @@ packages-local/
 local-packages.json
 ```
 
-And, so `npm install` or `npm ci` does not quietly undo your links:
+And, so npm does not quietly undo your links, two scripts running the same command:
 
 ```json
-{ "scripts": { "postinstall": "linked localize --relink" } }
+{
+  "scripts": {
+    "postinstall": "linked localize --relink",
+    "dependencies": "linked localize --relink"
+  }
+}
 ```
+
+`linked localize` and `--adopt` add both when they record a package and the app lacks them (an
+existing script is kept and the command appended with `&&`; one that already relinks is left
+alone), and `linked create-package` sets them up for a package it creates in `packages-local/`.
+With no `local-packages.json` the command prints nothing and exits 0, so they are safe to commit.
+
+**Why two.** npm runs an app's root `postinstall` only on a bare `npm install` or `npm ci`. It runs
+a root `dependencies` script after *any* command that changes `node_modules` — `npm install
+<name>`, `npm update`, `npm uninstall`, `npm dedupe` (npm's arborist, `reify.js`). Every one of
+those replaces each localized link with the registry copy, silently, so with `postinstall` alone
+they all went unguarded. A bare install runs both; `--relink` is idempotent, so the second run
+finds nothing to do.
 
 `npm ci` deletes `node_modules` and exits 0, taking the symlinks with it and leaving you running
 the registry copy while you edit the checkout — the state that costs hours, because nothing reports
@@ -101,10 +119,6 @@ dependencies `extraneous` and **deletes them** (measured on npm 11). So `--relin
 checkout's declared dependencies and, when any are gone, reinstalls **inside that checkout**
 (install, then prune — the same step as `--reinstall`), never in your project.
 
-`npm install <name>` — with a package name — does **not** run the app's own `postinstall`, so it
-replaces every localized link with the registry copy, silently. Run `linked localize --relink`
-after it.
-
 ## Commands
 
 ```sh
@@ -112,7 +126,7 @@ linked localize <package…>             clone, install, build, link, record
 linked localize <package…> --adopt     the same for a checkout already in packages-local/, no clone
 linked localize                        what is localized (same as --list)
 linked localize --list --check         exit 1 when something recorded is not linked
-linked localize --relink               recreate the recorded links (for postinstall)
+linked localize --relink               recreate the recorded links (for postinstall / dependencies)
 linked localize --ensure               remove checkouts' own copies of what the app provides; exit 0 (no names)
 linked localize --reinstall <package>  npm install inside that checkout, then prune it
 linked delocalize <package…>           unlink and forget; keep the checkout
@@ -359,7 +373,8 @@ the per-package codes — a failure on the second name does not undo the first. 
 - run an install against *your* project
 - remove anything from a checkout's `node_modules` but a copy of what your app provides (and never
   with `--no-prune`, or in a checkout recorded with `"prune": false`)
-- edit `package.json`, `package-lock.json`, `.gitignore`, `workspaces`, or any bundler configuration
+- edit `package-lock.json`, `.gitignore`, `workspaces`, your dependencies, or any bundler configuration
+  (`package.json` only ever gains the two [relink hooks](#set-up), and only when they are missing)
 - invoke `npm link`
 - delete a checkout you have not committed or pushed (without `--force`)
 - guess at a repository URL
