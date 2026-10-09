@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.45.3
+
+### Patch Changes
+
+- [#132](https://github.com/linked-fw/cli/pull/132) [`283e7ad`](https://github.com/linked-fw/cli/commit/283e7adfaa9f10bbf6c1d4ca90a9b708542c576b) Thanks [@abdipramana](https://github.com/abdipramana)! - Preserve validated release object paths exactly when publishing app artifacts, preventing file-store sanitization from breaking the URLs embedded in production bundles.
+
 ## 1.45.2
 
 ### Patch Changes
