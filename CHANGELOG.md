@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.45.6
+
+### Patch Changes
+
+- [#245](https://github.com/linked-fw/cli/pull/245) [`85edc51`](https://github.com/linked-fw/cli/commit/85edc51e0a47b23d5c785ff4e2a16b2018b0ae4a) Thanks [@flyon](https://github.com/flyon)! - `linked build-all` keeps building after a failure. A package whose build fails no longer stops the run when other packages depend on it: its dependents (direct and transitive) are skipped and reported as "not built because <package> failed", every package that does not depend on it is still built, and the run ends with one summary listing what was built, what failed and what was not built, then exits 1. A run where everything builds still exits 0. A dependency cycle that leaves packages unbuilt now also exits 1.
+
+- [#245](https://github.com/linked-fw/cli/pull/245) [`a7a6a29`](https://github.com/linked-fw/cli/commit/a7a6a291dda37f66659265e72b42334e25a72937) Thanks [@flyon](https://github.com/flyon)! - `linked create-package` now scaffolds `"build": "linked build"`, so a new package builds with the CLI's own pipeline (ESM compile, asset copy, import specifier rewrite and shape checks) instead of a hand-written `tsc` and copy chain. The template drops the `build-esm` and `copy-to-lib` scripts and the `rimraf` and `copyfiles` devDependencies, and requires `@_linked/cli` `^1.45.0`. Existing packages are not changed.
+
 ## 1.45.5
 
 ### Patch Changes
