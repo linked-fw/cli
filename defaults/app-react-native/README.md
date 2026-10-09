@@ -60,9 +60,12 @@ cd apps/mobile && npx expo export --platform ios --output-dir /tmp/export
 
 ## React Native specifics
 
-- **One React.** `npm ls react` lists extra React copies nested under `@_linked/server` and
-  `@_linked/server-utils`; the app never loads them, which `npm run check:react` verifies. Do not use
-  `--legacy-peer-deps`: it would hide a duplicate React.
+- **One React.** React is a peer of the `@_linked/*` packages, and npm resolves the peers of hoisted packages
+  at the repo root. Without a pin there, npm puts the newest React at the root and nests the app's 19.2.3
+  under `apps/mobile`, so `@_linked/react` and `react-native` would load a different React from the app.
+  The root `package.json` therefore pins `react` to the same version as `apps/mobile`, and every workspace
+  that depends on `@_linked/server` pins `react-dom` with it. `npm run check:react` verifies the result. Do
+  not use `--legacy-peer-deps`: it would hide a duplicate React.
 - **Workspaces are enumerated**, never globbed, so foreign repositories checked out under `packages/` are not
   adopted. `.gitignore` uses `packages/*` plus a negation per workspace package (`packages/` cannot be negated).
 - **Metro** (`apps/mobile/metro.config.js`) watches the workspace root and searches both `node_modules`

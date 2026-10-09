@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // One React for the app: `react` resolved from apps/mobile, from the installed @_linked/react and from react-native
-// must be the same file. `npm ls react` is not used because @_linked/server and @_linked/server-utils nest their
-// own copies, which the app never loads.
+// must be the same file. It checks resolution rather than `npm ls react`, because what matters is the file each
+// of them loads: a second copy nested under apps/mobile (see the README) passes `npm ls` and still splits React.
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';

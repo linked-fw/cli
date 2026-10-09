@@ -1,8 +1,10 @@
 // Example PersonPreview — single-Person row. Demonstrates @_linked/react's
 // linkedComponent: the wrapper runs the per-row query and injects query
-// result keys + `source` + `_refresh` into the render function. _refresh
-// patches local query state for optimistic UI; on delete, the parent
-// list re-runs via the PersonListRefresh context.
+// result keys + `source` + `_refresh` into the render function. After a
+// mutation, every mounted component whose query can read the changed data
+// refetches by itself; _refresh patches the shared cached result first, for
+// optimistic UI, and on delete the PersonListRefresh context re-runs the list
+// explicitly.
 // A React Native port of the web app-template's example (linked-fw/app-template).
 // Storage is imported first, so the row's queries go to the API store however this module is reached.
 import '../shell/storage';
