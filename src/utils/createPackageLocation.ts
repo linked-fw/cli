@@ -14,6 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import type {PackageKind} from './packageKind.js';
+import {ensureRelinkHooks} from './relinkHooks.js';
 
 export const PACKAGE_LOCATIONS = ['packages', 'packages-local'] as const;
 export type PackageLocation = (typeof PACKAGE_LOCATIONS)[number];
@@ -187,22 +188,18 @@ export function ensureWorkspaceGlob(pkg: Record<string, any>): {
   return {changed: true};
 }
 
-export const RELINK_COMMAND = 'linked localize --relink';
+export {RELINK_COMMAND, ensureRelinkHooks} from './relinkHooks.js';
 
 /**
- * Make sure the app's `postinstall` recreates localize's links. Without it the
- * next `npm install` prunes a packages-local link as extraneous. With no
- * `local-packages.json` the hook prints nothing and exits 0, so it is safe to
- * commit for everyone. Mutates `pkg`.
+ * Make sure the app's `postinstall` AND `dependencies` scripts recreate
+ * localize's links -- see `./relinkHooks.js` for why npm needs both. Kept
+ * under its old name for existing callers; prefer `ensureRelinkHooks`.
+ * Mutates `pkg`.
+ *
+ * @returns true when it changed `pkg`.
  */
 export function ensureRelinkPostinstall(pkg: Record<string, any>): boolean {
-  pkg.scripts = pkg.scripts ?? {};
-  const current: string | undefined = pkg.scripts.postinstall;
-  if (current && /localize\s+--relink/.test(current)) return false;
-  pkg.scripts.postinstall = current
-    ? `${current} && ${RELINK_COMMAND}`
-    : RELINK_COMMAND;
-  return true;
+  return ensureRelinkHooks(pkg).length > 0;
 }
 
 /**
