@@ -155,15 +155,51 @@ describe('createPackage kinds', () => {
     }
   });
 
-  test('both makes the asset package depend on the ontology package it was created with', async () => {
-    await createPackage('@acme/planning', undefined, tmp, {kind: 'both', skipInstall: true});
-    const ont = JSON.parse(read(tmp, 'planning-ont', 'package.json'));
-    const assets = JSON.parse(read(tmp, 'planning-assets', 'package.json'));
-    expect(assets.dependencies['@acme/planning-ont']).toBe(`^${ont.version}`);
-    expect(assets.devDependencies?.['@acme/planning-ont']).toBeUndefined();
-    expect(assets.peerDependencies?.['@acme/planning-ont']).toBeUndefined();
-    // The dependency runs one way: the ontology package depends on no asset package.
-    expect(ont.dependencies['@acme/planning-assets']).toBeUndefined();
+  // The asset package of a pair depends on its ontology package only where npm
+  // workspaces link the two: anywhere else `npm install` would look the
+  // unpublished `-ont` package up in the registry and fail with E404.
+  describe('the dependency of --kind both on its ontology package', () => {
+    const logged = () => (console.log as jest.Mock).mock.calls.map((c) => c.join(' ')).join('\n');
+    beforeEach(() => (console.log as jest.Mock).mockClear());
+
+    test('--location packages: the asset package depends on the ontology package', async () => {
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
+      await createPackage('@acme/planning', undefined, tmp, {
+        kind: 'both',
+        location: 'packages',
+        skipInstall: true,
+      });
+      const ont = JSON.parse(read(tmp, 'packages', 'planning-ont', 'package.json'));
+      const assets = JSON.parse(read(tmp, 'packages', 'planning-assets', 'package.json'));
+      expect(assets.dependencies['@acme/planning-ont']).toBe(`^${ont.version}`);
+      expect(assets.devDependencies?.['@acme/planning-ont']).toBeUndefined();
+      expect(assets.peerDependencies?.['@acme/planning-ont']).toBeUndefined();
+      // The dependency runs one way: the ontology package depends on no asset package.
+      expect(ont.dependencies['@acme/planning-assets']).toBeUndefined();
+      expect(logged()).not.toMatch(/npm install @acme\/planning-ont/);
+    });
+
+    test('--location packages-local: no dependency, and one line says how to add it', async () => {
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
+      await createPackage('@acme/planning', undefined, tmp, {
+        kind: 'both',
+        location: 'packages-local',
+        skipInstall: true,
+      });
+      const assetsDir = fs
+        .readdirSync(path.join(tmp, 'packages-local'))
+        .find((d) => d.endsWith('planning-assets'));
+      const assets = JSON.parse(read(tmp, 'packages-local', assetsDir, 'package.json'));
+      expect(assets.dependencies['@acme/planning-ont']).toBeUndefined();
+      expect(logged()).toMatch(/once @acme\/planning-ont is published.*npm install @acme\/planning-ont/);
+    });
+
+    test('standalone: no dependency, and one line says how to add it', async () => {
+      await createPackage('@acme/planning', undefined, tmp, {kind: 'both', skipInstall: true});
+      const assets = JSON.parse(read(tmp, 'planning-assets', 'package.json'));
+      expect(assets.dependencies['@acme/planning-ont']).toBeUndefined();
+      expect(logged()).toMatch(/once @acme\/planning-ont is published.*npm install @acme\/planning-ont/);
+    });
   });
 
   test('an asset package created on its own depends on no ontology package', async () => {
@@ -259,7 +295,7 @@ describe('createPackage kinds', () => {
       );
     });
 
-    test('without a source there is no baseUri, and one line says so', async () => {
+    test('without a source there is no baseUri, no warning, and one line says where it mints', async () => {
       await createPackage('planning', undefined, tmp, {
         kind: 'assets',
         location: 'packages',
@@ -268,7 +304,12 @@ describe('createPackage kinds', () => {
       expect(read(tmp, 'packages', 'planning-assets', 'src/package.ts')).toContain(
         `linkedPackage('planning-assets')`,
       );
-      expect(logged()).toMatch(/No base URI .*https:\/\/linked\.cm\//);
+      expect(warn).not.toHaveBeenCalled();
+      expect(logged()).not.toMatch(/No base URI/);
+      expect(logged()).toContain(
+        'Shapes and terms in planning-assets mint under https://linked.cm/. ' +
+          'They resolve once the package is published (npx linked publish, coming soon).',
+      );
     });
 
     test('a malformed root is refused before anything is written', async () => {

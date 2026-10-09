@@ -2452,11 +2452,13 @@ export const createPackage = async (
     }),
   );
 
+  // linked.cm is the normal root for an open-source package, so its absence is
+  // information, not a warning.
   log(
     root
       ? `Base URI ${root.baseUri} (from ${root.source}): shapes mint ${root.baseUri}shape/<package>/<Name>`
-      : `No base URI (no --base-uri, and no LINKED_BASE_URI in the environment or the app's .env.local / .env): ` +
-          `IRIs fall back to the default root https://linked.cm/`,
+      : `Shapes and terms in ${packages.map((p) => p.name).join(' and ')} mint under https://linked.cm/. ` +
+          `They resolve once the package is published (npx linked publish, coming soon).`,
   );
   for (const [i, {kind, name: packageName}] of packages.entries()) {
     const targetFolder = targets[i];
@@ -2466,7 +2468,12 @@ export const createPackage = async (
       // created with it. `ontology` comes first in `scaffoldKinds`, so its
       // package.json is already written.
       const ontIndex = packages.findIndex((p) => p.kind === 'ontology');
-      dependOnOntologyPackage(targetFolder, packages[ontIndex].name, targets[ontIndex]);
+      dependOnOntologyPackage(
+        targetFolder,
+        packages[ontIndex].name,
+        targets[ontIndex],
+        decision.kind === 'resolved' && decision.location === 'packages',
+      );
     }
     const skipped = () =>
       log(`Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`);
@@ -2487,8 +2494,25 @@ export const createPackage = async (
 /**
  * Declare the ontology package as a regular dependency of the asset package,
  * at `^` its version — the same entry Create Now's project scaffold writes.
+ *
+ * Only where npm workspaces link the two (`--location packages`). Anywhere
+ * else the `-ont` package is not published yet, so `npm install` in the asset
+ * package would fail with E404: the entry is left out and one line says how to
+ * add it once the ontology package is published.
  */
-function dependOnOntologyPackage(assetsFolder: string, ontName: string, ontFolder: string) {
+function dependOnOntologyPackage(
+  assetsFolder: string,
+  ontName: string,
+  ontFolder: string,
+  linkedByWorkspace: boolean,
+) {
+  if (!linkedByWorkspace) {
+    log(
+      `The asset package does not depend on ${ontName} yet: once ${ontName} is published, ` +
+        `run npm install ${ontName} in ${assetsFolder}`,
+    );
+    return;
+  }
   const {version} = fs.readJsonSync(path.join(ontFolder, 'package.json'));
   const pkgPath = path.join(assetsFolder, 'package.json');
   const pkg = fs.readJsonSync(pkgPath);

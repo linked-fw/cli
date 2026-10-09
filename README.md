@@ -44,6 +44,11 @@ live in its packages. A linked package is one of two kinds:
 
 `create-package` asks which on a terminal; `--kind ontology|assets|both` answers it (`both`
 creates the pair), and without a terminal and without `--kind` it exits 1 and says so.
+With `both` and `--location packages`, the asset package depends on the ontology package
+(`"<name>-ont": "^<version>"`), which npm workspaces link locally. Anywhere else (`packages-local`
+or outside an app) it gets no such entry, because `npm install` would look the unpublished `-ont`
+package up in the registry and fail with E404; one line says to run `npm install <name>-ont` in
+the asset package once the ontology package is published.
 `create-ont-package` and `create-asset-package` are the two kinds spelled out. The suffix is
 never doubled: `create-ont-package foo-ont` creates `foo-ont`. Every package they create has
 `"linkedPackage": true`. `create-shape`, `create-component`, `create-set-component` and
@@ -54,9 +59,11 @@ does have a `src/package.ts` at its root is served as before.
 A package's IRIs are minted under a root: `linkedPackage(name, {baseUri})`, shapes at
 `{baseUri}shape/<package>/<Name>`, an ontology package's terms at `{baseUri}ont/<slug>/<Term>`.
 The root is, first match wins: `--base-uri <uri>`; inside an app, `LINKED_BASE_URI` from the
-shell, then from the app's `.env.local`, then its `.env` (the variable the app template documents
-for this). With none of them the package declares no root, falls back to `https://linked.cm/`,
-and the command prints one line saying so.
+shell, then from the app's `.env.local`, then its `.env`. With none of them the package declares
+no root and mints under `https://linked.cm/`, the normal root for an open-source package. That is
+not a warning; the command prints one informational line:
+`Shapes and terms in <package> mint under https://linked.cm/. They resolve once the package is
+published (npx linked publish, coming soon).`
 
 Inside an app (a `package.json` with `"linkedApp": true` above the current directory),
 `create-package` puts the package in one of two places, and asks which on a terminal:
