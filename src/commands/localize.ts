@@ -107,8 +107,9 @@ export async function runLocalize(
     }
     // `--ensure --no-prune` asks for nothing: a no-op, so a script can turn
     // the check off without removing the hook.
-    // For an app's npm `pre*` scripts: never fails the script it guards.
     if (prune.prune) checkOneCopy(deps.appRoot, deps);
+    // Run from an app's npm `pre*` scripts, so it never fails the script it
+    // guards (`checkOneCopy` never throws; it warns instead).
     process.exitCode = 0;
     return;
   }
