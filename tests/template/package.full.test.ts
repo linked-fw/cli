@@ -4,7 +4,7 @@
 // from the registry and builds, then proves the properties a new package is supposed to
 // have and has repeatedly not had:
 //
-//   - it builds;
+//   - it builds, with `linked build`, and a type error fails that build;
 //   - the ontology REGISTER sibling is emitted, i.e. something actually calls
 //     linkedOntology() (report 058: a self-registering ontology is elided by Rollup as a
 //     circular import and the consuming app dies at boot with `_this is not defined`);
@@ -296,4 +296,20 @@ describeFull('create-package (full)', () => {
       bundler: results.bundler === 'FAILED' ? 'FAILED' : fs.realpathSync(results.bundler),
     }).toEqual({node10: expected, bundler: expected});
   });
+
+  // Runs last: it breaks the source on purpose. The scaffold builds with `linked build`,
+  // and a type error must fail that build, not be emitted and reported green.
+  test(
+    'the scaffold builds with `linked build`, and a type error fails it',
+    () => {
+      const manifest = JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8'));
+      expect(manifest.scripts.build).toBe('linked build');
+      fs.writeFileSync(
+        path.join(pkg, 'src', 'broken.ts'),
+        'export const broken: number = "not a number";\n',
+      );
+      expect(() => run('npm run build', pkg)).toThrow(/exit [1-9]/);
+    },
+    TEN_MINUTES,
+  );
 });
