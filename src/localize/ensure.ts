@@ -60,6 +60,13 @@ import {reportError} from './localize.js';
  * npm syncs a lockfile header the release workflow bumped. Changing a
  * checkout's dependencies is a deliberate `npm install <dep>` inside it.
  *
+ * `--include=dev` because this runs from the app's npm lifecycle hooks, and
+ * npm exports the outer command's config to them as `npm_config_*`: measured,
+ * `npm install --omit=dev` at the app root arrives as `npm_config_omit=dev`,
+ * and an inner install that inherits it skips the checkout's
+ * devDependencies, so the checkout no longer builds. A checkout is a
+ * development copy; it always needs them.
+ *
  * The package's name is read from the checkout's own `package.json`; the
  * other localized packages (siblings) from the manifest, so a checkout being
  * localized right now prunes before the manifest records it.
@@ -76,7 +83,7 @@ export function ensure(
   deps.log(`[localize] npm install in ${entry.path}`);
   const install = deps.run(
     'npm',
-    ['install', '--no-save', '--no-audit', '--no-fund'],
+    ['install', '--no-save', '--include=dev', '--no-audit', '--no-fund'],
     {cwd: pkgDir},
   );
   if (install.status !== 0) {
