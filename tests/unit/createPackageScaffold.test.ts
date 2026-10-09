@@ -150,6 +150,9 @@ describe('createPackage kinds', () => {
     expect(JSON.parse(read(tmp, 'planning-assets', 'package.json')).name).toBe(
       '@acme/planning-assets',
     );
+    for (const pkg of ['planning-ont', 'planning-assets']) {
+      expect([pkg, JSON.parse(read(tmp, pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
+    }
   });
 
   test('a name that already carries the suffix is not doubled', async () => {
@@ -164,6 +167,9 @@ describe('createPackage kinds', () => {
     expect(JSON.parse(read(tmp, 'planning-assets', 'package.json')).name).toBe(
       'planning-assets',
     );
+    for (const pkg of ['planning-ont', 'planning-assets']) {
+      expect([pkg, JSON.parse(read(tmp, pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
+    }
   });
 
   test('inside an app, --location packages wires the app even when the install is skipped', async () => {
@@ -178,6 +184,87 @@ describe('createPackage kinds', () => {
     const app = fs.readJsonSync(path.join(tmp, 'package.json'));
     expect(app.workspaces).toEqual(['packages/*']);
     expect(app.dependencies).toEqual({'planning-ont': '^1.0.0', 'planning-assets': '^1.0.0'});
+  });
+
+  // A package created inside an app mints under the app's root, not linked.cm.
+  describe('the base URI of a package created inside an app', () => {
+    const savedEnv = process.env.LINKED_BASE_URI;
+    let warn: jest.SpyInstance;
+    beforeEach(() => {
+      delete process.env.LINKED_BASE_URI;
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
+      warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      (console.log as jest.Mock).mockClear();
+    });
+    afterEach(() => {
+      if (savedEnv === undefined) delete process.env.LINKED_BASE_URI;
+      else process.env.LINKED_BASE_URI = savedEnv;
+      warn.mockRestore();
+    });
+    const logged = () =>
+      [...(console.log as jest.Mock).mock.calls, ...warn.mock.calls].map((c) => c.join(' ')).join('\n');
+
+    test("comes from the app's .env and is declared in src/package.ts", async () => {
+      fs.writeFileSync(path.join(tmp, '.env'), 'LINKED_BASE_URI=https://acme.id.create.now\n');
+      await createPackage('planning', undefined, tmp, {
+        kind: 'both',
+        location: 'packages',
+        skipInstall: true,
+      });
+      const ont = path.join(tmp, 'packages', 'planning-ont');
+      const assets = path.join(tmp, 'packages', 'planning-assets');
+      expect(read(assets, 'src/package.ts')).toContain(
+        `linkedPackage('planning-assets', {baseUri: "https://acme.id.create.now/"})`,
+      );
+      expect(read(ont, 'src/package.ts')).toContain(
+        `linkedPackage('planning-ont', {baseUri: "https://acme.id.create.now/"})`,
+      );
+      // The ontology's terms mint {baseUri}ont/{ontologySlug}/{Term}.
+      expect(read(ont, 'src/ontologies/planning.ts')).toContain(
+        `createNameSpace('https://acme.id.create.now/ont/planning/')`,
+      );
+      for (const pkg of [ont, assets]) {
+        expect([pkg, fs.readJsonSync(path.join(pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
+      }
+      expect(logged()).toMatch(/https:\/\/acme\.id\.create\.now\/ \(from \.env\)/);
+    });
+
+    test('--base-uri wins over the env file', async () => {
+      fs.writeFileSync(path.join(tmp, '.env'), 'LINKED_BASE_URI=https://env.example.org/\n');
+      await createPackage('planning', undefined, tmp, {
+        kind: 'assets',
+        location: 'packages',
+        skipInstall: true,
+        baseUri: 'https://flag.example.org',
+      });
+      expect(read(tmp, 'packages', 'planning-assets', 'src/package.ts')).toContain(
+        `{baseUri: "https://flag.example.org/"}`,
+      );
+    });
+
+    test('without a source there is no baseUri, and one line says so', async () => {
+      await createPackage('planning', undefined, tmp, {
+        kind: 'assets',
+        location: 'packages',
+        skipInstall: true,
+      });
+      expect(read(tmp, 'packages', 'planning-assets', 'src/package.ts')).toContain(
+        `linkedPackage('planning-assets')`,
+      );
+      expect(logged()).toMatch(/No base URI .*https:\/\/linked\.cm\//);
+    });
+
+    test('a malformed root is refused before anything is written', async () => {
+      await expect(
+        createPackage('planning', undefined, tmp, {
+          kind: 'assets',
+          location: 'packages',
+          skipInstall: true,
+          baseUri: 'not-a-uri',
+        }),
+      ).rejects.toThrow(/--base-uri must be an absolute/);
+      expect(exists(tmp, 'packages')).toBe(false);
+    });
   });
 
   test('without --kind and without a terminal it refuses and names the flag', async () => {

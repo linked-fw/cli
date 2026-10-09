@@ -69,6 +69,8 @@ import {
   SHARED_TEMPLATE_FILES,
 } from './utils/packageKind.js';
 import type {PackageKind, ScaffoldKind} from './utils/packageKind.js';
+import {resolvePackageBaseUri, withBaseUri} from './utils/packageBaseUri.js';
+import type {ResolvedBaseUri} from './utils/packageBaseUri.js';
 
 let dirname__ =
   typeof __dirname !== 'undefined'
@@ -90,31 +92,18 @@ function defaultsDir(...parts: string[]): string {
 }
 
 /**
- * The commands that write a file importing `../package.js` only make sense in a
- * linked package. An app root registers no package (it is a linkedApp, not a
- * linkedPackage), so there the import would be broken: refuse instead. An app
- * is recognised by its manifest first, so a template clone that still carries a
- * `src/package.ts` is refused all the same.
+ * The commands that write a file importing `../package.js` need a `src/package.ts`
+ * to import. A new app root has none (it is a linkedApp, not a linkedPackage), so
+ * there the import would be broken: refuse instead. Only the file decides: a
+ * linkedApp that keeps its shapes at its root with its own `src/package.ts`, as
+ * create-now does, is served as before.
  */
-function assertInsidePackage(basePath: string, sourceFolder: string, command: string) {
-  const here = `run this inside a package (packages/<name>).`;
-  let manifest: any;
-  try {
-    manifest = fs.readJsonSync(path.join(basePath, 'package.json'));
-  } catch {
-    manifest = undefined;
-  }
-  if (manifest?.linkedApp === true) {
-    throw new CreatePackageError(
-      `${command}: ${manifest.name || basePath} is a linked app, not a package, and an app ` +
-        `registers no package to add to; ${here}`,
-    );
-  }
-  if (!fs.existsSync(path.join(sourceFolder, 'package.ts'))) {
-    throw new CreatePackageError(
-      `${command}: no src/package.ts here, so there is no package to add to; ${here}`,
-    );
-  }
+function assertInsidePackage(sourceFolder: string, command: string) {
+  if (fs.existsSync(path.join(sourceFolder, 'package.ts'))) return;
+  throw new CreatePackageError(
+    `${command}: no src/package.ts here, so there is no package to add to. An app root is ` +
+      `not a package; run this inside a package (packages/<name>).`,
+  );
 }
 
 /**
@@ -1413,7 +1402,7 @@ export const createOntology = async (
   }
 
   let sourceFolder = getSourceFolder(basePath);
-  assertInsidePackage(basePath, sourceFolder, 'create-ontology');
+  assertInsidePackage(sourceFolder, 'create-ontology');
   let targetFolder = ensureFolderExists(sourceFolder, 'ontologies');
 
   if (!uriBase) {
@@ -1698,7 +1687,7 @@ export const getScriptDir = () => {
 };
 export const createShape = async (name, basePath = process.cwd()) => {
   let sourceFolder = getSourceFolder(basePath);
-  assertInsidePackage(basePath, sourceFolder, 'create-shape');
+  assertInsidePackage(sourceFolder, 'create-shape');
   let targetFolder = ensureFolderExists(sourceFolder, 'shapes');
   let {hyphenName, camelCaseName, underscoreName} = setNameVariables(name);
 
@@ -1728,7 +1717,7 @@ export const createShape = async (name, basePath = process.cwd()) => {
 };
 
 export const createSetComponent = async (name, basePath = process.cwd()) => {
-  assertInsidePackage(basePath, path.join(basePath, 'src'), 'create-set-component');
+  assertInsidePackage(path.join(basePath, 'src'), 'create-set-component');
   let targetFolder = ensureFolderExists(basePath, 'src', 'components');
   let {hyphenName, camelCaseName, underscoreName} = setNameVariables(name);
 
@@ -1766,7 +1755,7 @@ export const createSetComponent = async (name, basePath = process.cwd()) => {
 };
 export const createComponent = async (name, basePath = process.cwd()) => {
   let sourceFolder = getSourceFolder(basePath);
-  assertInsidePackage(basePath, sourceFolder, 'create-component');
+  assertInsidePackage(sourceFolder, 'create-component');
   let targetFolder = ensureFolderExists(sourceFolder, 'components');
   let {hyphenName, camelCaseName, underscoreName} = setNameVariables(name);
 
@@ -2434,6 +2423,15 @@ export const createPackage = async (
   const appRoot = findLinkedAppRoot(basePath);
   const decided = decideCreatePackageTarget({appRoot, options, isTTY});
   if (decided.kind === 'refuse') throw new CreatePackageError(decided.message);
+
+  // The root its IRIs are minted under: a malformed one is refused here, before
+  // anything is written or asked.
+  let root: ResolvedBaseUri | undefined;
+  try {
+    root = resolvePackageBaseUri({flag: options.baseUri, appRoot});
+  } catch (e) {
+    throw new CreatePackageError((e as Error).message);
+  }
   const decision =
     decided.kind === 'ask' ? await askPackageLocation(name) : decided;
 
@@ -2454,9 +2452,15 @@ export const createPackage = async (
     }),
   );
 
+  log(
+    root
+      ? `Base URI ${root.baseUri} (from ${root.source}): shapes mint ${root.baseUri}shape/<package>/<Name>`
+      : `No base URI (no --base-uri, and no LINKED_BASE_URI in the environment or the app's .env.local / .env): ` +
+          `IRIs fall back to the default root https://linked.cm/`,
+  );
   for (const [i, {kind, name: packageName}] of packages.entries()) {
     const targetFolder = targets[i];
-    await scaffoldPackage(packageName, kind, targetFolder, uriBase);
+    await scaffoldPackage(packageName, kind, targetFolder, uriBase, root?.baseUri);
     const skipped = () =>
       log(`Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`);
     if (decision.kind === 'outside') {
@@ -2515,12 +2519,15 @@ async function scaffoldPackage(
   kind: ScaffoldKind,
   targetFolder: string,
   uriBase?: string,
+  baseUri?: string,
 ) {
   // An ontology package `foo-ont` holds the ontology `foo`: that slug names its
   // files and its prefix, and its terms mint `{root}ont/foo/{Term}`.
   const ontologySlug = kind === 'ontology' ? ontologySlugFor(name) : undefined;
   if (!uriBase) {
-    uriBase = defaultOntologyNamespace(ontologySlug ?? name);
+    uriBase = baseUri
+      ? `${baseUri}ont/${ontologySlug ?? bareName(name)}/`
+      : defaultOntologyNamespace(ontologySlug ?? name);
   }
   setVariable('uri_base', asNamespace(uriBase));
 
@@ -2562,6 +2569,11 @@ async function scaffoldPackage(
       .map((f) => path.join(targetFolder, f))
       .map((file) => replaceVariablesInFile(file)),
   );
+
+  if (baseUri) {
+    const packageTs = path.join(targetFolder, 'src', 'package.ts');
+    fs.writeFileSync(packageTs, withBaseUri(fs.readFileSync(packageTs, 'utf8'), baseUri));
+  }
 
   if (kind !== 'ontology') return;
   //rename these to a file name similar to the ontology slug

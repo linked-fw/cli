@@ -1,7 +1,7 @@
 // `create-shape`, `create-component`, `create-set-component` and `create-ontology`
-// write a file that imports `../package.js`. An app root registers no package
-// (it is a linkedApp, not a linkedPackage), so there they refuse instead of
-// writing a broken import.
+// write a file that imports `../package.js`. Where there is no src/package.ts (a
+// new app root registers no package) they refuse instead of writing a broken
+// import. A linkedApp that does have one, as CN does, is served as before.
 //
 // cli-methods pulls in ora, which is ESM-only.
 jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
@@ -17,7 +17,7 @@ import {
 } from '../../src/cli-methods';
 import {CreatePackageError} from '../../src/utils/createPackageLocation';
 
-describe('create-shape and friends at an app root', () => {
+describe('create-shape and friends need a src/package.ts', () => {
   let app: string;
 
   beforeEach(() => {
@@ -40,20 +40,22 @@ describe('create-shape and friends at an app root', () => {
   ];
 
   for (const [command, run] of commands) {
-    test(`${command} refuses where there is no src/package.ts, and writes nothing`, async () => {
+    test(`${command} refuses at a linkedApp root without src/package.ts, and writes nothing`, async () => {
       await expect(run('Thing', app)).rejects.toThrow(CreatePackageError);
       await expect(run('Thing', app)).rejects.toThrow(/inside a package \(packages\/<name>\)/);
       expect(fs.readdirSync(path.join(app, 'src'))).toEqual([]);
     });
   }
 
-  test('an app is refused by its manifest, even when a template clone still has src/package.ts', async () => {
+  // CN is itself a linkedApp that keeps its shapes at its root, with a real
+  // src/package.ts: a linkedApp manifest alone is no reason to refuse.
+  test('a linkedApp WITH src/package.ts is allowed (CN keeps its shapes at its root)', async () => {
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
-      `export const {linkedShape} = linkedPackage('app');\n`,
+      `export const {linkedShape} = linkedPackage('create-now');\n`,
     );
-    await expect(createShape('Thing', app)).rejects.toThrow(/is a linked app, not a package/);
-    expect(fs.existsSync(path.join(app, 'src', 'shapes'))).toBe(false);
+    await createShape('Thing', app);
+    expect(fs.existsSync(path.join(app, 'src', 'shapes', 'thing.ts'))).toBe(true);
   });
 
   test('create-shape writes the shape in a package', async () => {
@@ -67,5 +69,13 @@ describe('create-shape and friends at an app root', () => {
     expect(fs.readFileSync(path.join(app, 'src', 'shapes', 'index.ts'), 'utf8')).toContain(
       './thing.js',
     );
+    // The template compiles against core: core exports no `NamedNode` (TS2305), so the
+    // shape must not import one. It is the getter-only form.
+    const shape = fs.readFileSync(path.join(app, 'src', 'shapes', 'thing.ts'), 'utf8');
+    expect(shape).not.toMatch(/NamedNode/);
+    expect(shape).toContain(`import {Shape} from '@_linked/core/shapes/Shape';`);
+    expect(shape).toContain(`import {linkedShape} from '../package.js';`);
+    expect(shape).toMatch(/@linkedShape\s+export class Thing extends Shape/);
+    expect(shape).not.toContain('${');
   });
 });

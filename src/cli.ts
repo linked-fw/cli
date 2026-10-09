@@ -162,6 +162,8 @@ const REMOTE_HELP =
   "The new repository's origin; also written to repository.url. Implies --location packages-local.";
 const PUSH_HELP = 'Push the first commit to --remote.';
 const SKIP_INSTALL_HELP = 'Write the files only: no install, no build, no git.';
+const BASE_URI_HELP =
+  "The root the package's IRIs are minted under: linkedPackage(name, {baseUri}), shapes at <uri>shape/<package>/<Name>, ontology terms at <uri>ont/<slug>/<Term>. Inside an app it defaults to LINKED_BASE_URI from the environment, then the app's .env.local, then its .env; with none of them the package declares no root and falls back to https://linked.cm/.";
 const WHERE_HELP =
   "Inside an app, it goes in packages/ (part of the app's repository) or packages-local/ (its own git repository, linked with `linked localize`); without --location, --remote or --push you are asked, on a terminal.";
 
@@ -171,7 +173,8 @@ const withPackageOptions = (command: Command) =>
     .option('--location <where>', LOCATION_HELP)
     .option('--remote <git-url>', REMOTE_HELP)
     .option('--push', PUSH_HELP)
-    .option('--skip-install', SKIP_INSTALL_HELP);
+    .option('--skip-install', SKIP_INSTALL_HELP)
+    .option('--base-uri <uri>', BASE_URI_HELP);
 
 withPackageOptions(
   program

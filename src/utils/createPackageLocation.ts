@@ -32,6 +32,11 @@ export interface CreatePackageOptions {
   kind?: PackageKind;
   /** Write the files only: no install, no build, no git. */
   skipInstall?: boolean;
+  /**
+   * The root the package's IRIs are minted under. Inside an app it defaults to the
+   * app's `LINKED_BASE_URI`; see `./packageBaseUri.js`.
+   */
+  baseUri?: string;
 }
 
 /**

@@ -45,9 +45,18 @@ live in its packages. A linked package is one of two kinds:
 `create-package` asks which on a terminal; `--kind ontology|assets|both` answers it (`both`
 creates the pair), and without a terminal and without `--kind` it exits 1 and says so.
 `create-ont-package` and `create-asset-package` are the two kinds spelled out. The suffix is
-never doubled: `create-ont-package foo-ont` creates `foo-ont`. `create-shape`, `create-component`,
-`create-set-component` and `create-ontology` refuse at an app root (no `src/package.ts`) instead
-of writing an import of a package that does not exist: run them inside `packages/<name>`.
+never doubled: `create-ont-package foo-ont` creates `foo-ont`. Every package they create has
+`"linkedPackage": true`. `create-shape`, `create-component`, `create-set-component` and
+`create-ontology` refuse where there is no `src/package.ts` (a new app root has none) instead of
+writing an import of a package that does not exist: run them inside `packages/<name>`. An app that
+does have a `src/package.ts` at its root is served as before.
+
+A package's IRIs are minted under a root: `linkedPackage(name, {baseUri})`, shapes at
+`{baseUri}shape/<package>/<Name>`, an ontology package's terms at `{baseUri}ont/<slug>/<Term>`.
+The root is, first match wins: `--base-uri <uri>`; inside an app, `LINKED_BASE_URI` from the
+shell, then from the app's `.env.local`, then its `.env` (the variable the app template documents
+for this). With none of them the package declares no root, falls back to `https://linked.cm/`,
+and the command prints one line saying so.
 
 Inside an app (a `package.json` with `"linkedApp": true` above the current directory),
 `create-package` puts the package in one of two places, and asks which on a terminal:
