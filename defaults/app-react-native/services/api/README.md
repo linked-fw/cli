@@ -39,9 +39,9 @@ that port is the one Docker Compose publishes for this repo's `fuseki` service.
 
 ## Dependencies
 
-`react-dom` is a direct dependency although the API renders no pages: `LinkedServer` imports `react-dom/server`
-at load time, and the root React is 19.2.3 (for `apps/mobile`), so `@_linked/server`'s own `react-dom` 18 is
-nested where Vite SSR cannot resolve it. Pinning `react-dom` 19.2.3 here hoists it next to the root React.
+`react` and `react-dom` are direct dependencies although the API renders no pages: `LinkedServer` imports
+`react-dom/server` at load time, and `@_linked/server` takes both as peers. They are pinned to the React that
+`apps/mobile` uses (19.2.3), so npm installs one copy of each at the root instead of the newest release.
 
 `linked start` finds the hoisted `app-shapes` workspace and runs in workspace mode: Vite loads `app-shapes` from
 `src` through its `development` export condition, while published packages such as `@_linked/core` and

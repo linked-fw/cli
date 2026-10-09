@@ -1,7 +1,8 @@
 // Example PersonOverview — demonstrates @_linked/react's data binding:
 // linkedSetComponent for the list (auto-runs the query, injects results and
 // an injected _refresh); linkedComponent for each row (see PersonPreview).
-// After Person.create the form calls _refresh() to re-run the list query.
+// The list refetches by itself after Person.create; the form also calls the
+// list's _refresh() through context, to show how to re-run a query by hand.
 // A React Native port of the web app-template's example (linked-fw/app-template).
 //
 // `linkedSetComponent` checks LinkedStorage when this module loads, so storage is imported first.
