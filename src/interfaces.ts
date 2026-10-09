@@ -92,7 +92,7 @@ export interface LinkedServerConfig {
 export interface LinkedConfig {
   /**
    * CSS processing mode (shared by the Vite build and the server for SSR)
-   * - 'tailwind': Use Tailwind CSS v4 with @tailwindcss/postcss. Still supports CSS Modules for .module.css files
+   * - 'tailwind': Use Tailwind CSS v4 via the @tailwindcss/vite plugin. Still supports CSS Modules for .module.css files
    * - 'postcss': Use PostCSS with nesting support and CSS Modules for .module.css files
    * @default 'postcss'
    */

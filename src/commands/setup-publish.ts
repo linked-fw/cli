@@ -82,7 +82,10 @@ export type SetupPublishOptions = {
  * - .gitignore entries for node_modules, lib, yarn.lock, src-compiled-artifacts
  * - package.json: @changesets/cli + @changesets/changelog-github devDeps,
  *   publishConfig: {access: public}
- * - package-lock.json generated via npm install --package-lock-only
+ * - .npmrc: allow-remote=all, plus legacy-peer-deps=true in linked-cm (see npmrcSettings);
+ *   keys the repo already sets are left alone
+ * - renovate.json extending <org>/renovate-config, unless the repo has a Renovate config
+ * - package-lock.json refreshed via npm install --package-lock-only, keeping existing resolutions
  *
  * With --configure-github: if `gh` CLI is available and authenticated, also applies the uniform
  * branch-protection profile on main and enables auto-merge.
@@ -138,7 +141,16 @@ export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void
       ),
     );
   }
-  await copyWorkflows(cwd, workflowOrg);
+  const requireTests = hasTestScript(pkgJson);
+  if (!requireTests) {
+    console.warn(
+      chalk.yellow(
+        '  ⚠ package.json has no `test` script, so pr.yml is written with require-tests: false.\n' +
+          '    Set it to true in .github/workflows/pr.yml once the package has a test suite.',
+      ),
+    );
+  }
+  await copyWorkflows(cwd, {workflowOrg, requireTests});
 
   // 2. Changesets config + README
   await copyChangesetConfig(cwd, repoSlug);
@@ -152,15 +164,21 @@ export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void
   // 5. package.json patches
   await patchPackageJson(pkgJsonPath, pkgJson, repoSlug);
 
-  // 6. npm install --package-lock-only to generate lockfile (if not present)
+  // 6. .npmrc — before the lockfile step, which must resolve under the same settings as CI
+  await updateNpmrc(cwd, workflowOrg);
+
+  // 7. renovate.json stub extending the org's shared policy
+  await writeRenovateConfig(cwd, workflowOrg);
+
+  // 8. npm install --package-lock-only to generate lockfile (if not present)
   await ensureLockfile(cwd);
 
-  // 7. Optional: configure GitHub branch protection
+  // 9. Optional: configure GitHub branch protection
   if (opts.configureGithub) {
     await configureGithub(repoSlug);
   }
 
-  // 8. Optional: grant a GitHub team push access
+  // 10. Optional: grant a GitHub team push access
   if (opts.grantTeam) {
     await grantTeamAccess(repoSlug, opts.grantTeam);
   }
@@ -191,14 +209,31 @@ async function resolveRepoSlug(cwd: string, pkgJson: any): Promise<string> {
   return 'OWNER/REPO';
 }
 
-async function copyWorkflows(cwd: string, workflowOrg: string): Promise<void> {
+/**
+ * Whether the package has a `test` script for the PR check to run. `require-tests: true` turns a
+ * missing script into a failure, so it is only safe to write once one exists — and a fresh
+ * `create-package` scaffold has none.
+ */
+export function hasTestScript(pkgJson: {scripts?: Record<string, unknown>}): boolean {
+  const test = pkgJson.scripts?.test;
+  return typeof test === 'string' && test.trim() !== '';
+}
+
+export type WorkflowVars = {workflowOrg: string; requireTests: boolean};
+
+export function renderWorkflow(template: string, vars: WorkflowVars): string {
+  return template
+    .replace(/\{\{WORKFLOW_ORG\}\}/g, vars.workflowOrg)
+    .replace(/\{\{REQUIRE_TESTS\}\}/g, String(vars.requireTests));
+}
+
+async function copyWorkflows(cwd: string, vars: WorkflowVars): Promise<void> {
   const srcDir = path.join(TEMPLATE_ROOT, 'github', 'workflows');
   const dstDir = path.join(cwd, '.github', 'workflows');
   fs.mkdirpSync(dstDir);
 
   for (const file of WORKFLOW_FILES) {
-    let content = fs.readFileSync(path.join(srcDir, file), 'utf8');
-    content = content.replace(/\{\{WORKFLOW_ORG\}\}/g, workflowOrg);
+    const content = renderWorkflow(fs.readFileSync(path.join(srcDir, file), 'utf8'), vars);
     fs.writeFileSync(path.join(dstDir, file), content);
     console.log(chalk.green('  ✓') + ` .github/workflows/${file}`);
   }
@@ -274,6 +309,99 @@ async function updateGitignore(cwd: string): Promise<void> {
   console.log(chalk.green('  ✓') + ' .gitignore');
 }
 
+/**
+ * The `.npmrc` settings a package repo needs so that a local `npm install` resolves the same tree
+ * as its org's shared workflows and Renovate.
+ *
+ * - `allow-remote=all`: npm 12 defaults `allow-remote` to `none` and then refuses the registry
+ *   tarball of a bundled dependency (`@tailwindcss/oxide-wasm32-wasi` is in most of the fleet),
+ *   failing `npm install` with EALLOWREMOTE. npm 11, which CI runs, accepts the setting.
+ * - `legacy-peer-deps=true`, linked-cm only: its workflows install with
+ *   `npm ci --legacy-peer-deps`. linked-fw's install strictly, and its Renovate policy requires
+ *   locks to be resolved under CI's peer rules — so writing it there would be the mismatch.
+ */
+export function npmrcSettings(workflowOrg: string): string[] {
+  const settings = ['allow-remote=all'];
+  if (workflowOrg === 'linked-cm') settings.push('legacy-peer-deps=true');
+  return settings;
+}
+
+/**
+ * Appends each setting whose key the existing `.npmrc` does not set. A key that is already set
+ * keeps its value: the repo may have a reason, and silently flipping it would change installs.
+ */
+export function mergeNpmrc(existing: string, settings: string[]): string {
+  const keyOf = (line: string) => line.split('=')[0].trim();
+  const present = new Set(
+    existing
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#') && !line.startsWith(';'))
+      .map(keyOf),
+  );
+  const missing = settings.filter((setting) => !present.has(keyOf(setting)));
+  if (missing.length === 0) return existing;
+  const base = existing === '' || existing.endsWith('\n') ? existing : existing + '\n';
+  return base + missing.join('\n') + '\n';
+}
+
+async function updateNpmrc(cwd: string, workflowOrg: string): Promise<void> {
+  const npmrcPath = path.join(cwd, '.npmrc');
+  const existing = fs.existsSync(npmrcPath) ? fs.readFileSync(npmrcPath, 'utf8') : '';
+  const next = mergeNpmrc(existing, npmrcSettings(workflowOrg));
+  if (next === existing) {
+    console.log(chalk.gray('  · .npmrc already has the required settings'));
+    return;
+  }
+  fs.writeFileSync(npmrcPath, next);
+  console.log(chalk.green('  ✓') + ' .npmrc');
+}
+
+// Every location Renovate reads a repo config from. If any exists, the repo has a config of its
+// own and setup-publish leaves it alone.
+const RENOVATE_CONFIG_FILES = [
+  'renovate.json',
+  'renovate.json5',
+  '.github/renovate.json',
+  '.github/renovate.json5',
+  '.gitlab/renovate.json',
+  '.gitlab/renovate.json5',
+  '.renovaterc',
+  '.renovaterc.json',
+  '.renovaterc.json5',
+];
+
+/**
+ * The three-line stub every package repo carries: the policy itself lives in the org's
+ * `renovate-config` repo, so one edit there reaches the whole fleet.
+ */
+export function renovateStub(workflowOrg: string): string {
+  return (
+    JSON.stringify(
+      {
+        $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+        extends: [`local>${workflowOrg}/renovate-config`],
+      },
+      null,
+      2,
+    ) + '\n'
+  );
+}
+
+async function writeRenovateConfig(cwd: string, workflowOrg: string): Promise<void> {
+  if (workflowOrg === 'OWNER') {
+    console.warn(chalk.yellow('  ⚠ Skipped renovate.json: the repo org is unknown.'));
+    return;
+  }
+  const existing = RENOVATE_CONFIG_FILES.find((file) => fs.existsSync(path.join(cwd, file)));
+  if (existing) {
+    console.log(chalk.gray(`  · ${existing} exists — left as is`));
+    return;
+  }
+  fs.writeFileSync(path.join(cwd, 'renovate.json'), renovateStub(workflowOrg));
+  console.log(chalk.green('  ✓') + ` renovate.json (extends ${workflowOrg}/renovate-config)`);
+}
+
 async function patchPackageJson(
   pkgJsonPath: string,
   pkgJson: any,
@@ -329,11 +457,11 @@ export function applyPackageJsonPatches(pkgJson: any, repoSlug: string): boolean
 
   pkgJson.devDependencies = pkgJson.devDependencies || {};
   if (!pkgJson.devDependencies['@changesets/cli']) {
-    pkgJson.devDependencies['@changesets/cli'] = '^2.29.8';
+    pkgJson.devDependencies['@changesets/cli'] = '^3.0.0';
     modified = true;
   }
   if (!pkgJson.devDependencies['@changesets/changelog-github']) {
-    pkgJson.devDependencies['@changesets/changelog-github'] = '^0.5.2';
+    pkgJson.devDependencies['@changesets/changelog-github'] = '^1.0.0';
     modified = true;
   }
 
@@ -353,10 +481,15 @@ async function ensureLockfile(cwd: string): Promise<void> {
   const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-setup-'));
   const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-setup-cache-'));
   try {
-    const pkgJsonPath = path.join(cwd, 'package.json');
-    fs.copyFileSync(pkgJsonPath, path.join(tmpBase, 'package.json'));
+    // The existing lockfile comes along so its resolutions are kept (only what package.json just
+    // gained is resolved), and .npmrc so the lock is resolved under the repo's own settings —
+    // allow-remote for npm 12, and legacy-peer-deps exactly where the org's CI installs that way.
+    for (const file of ['package.json', 'package-lock.json', '.npmrc']) {
+      const src = path.join(cwd, file);
+      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(tmpBase, file));
+    }
     await execp(
-      `npm install --legacy-peer-deps --package-lock-only --cache ${cacheDir}`,
+      `npm install --package-lock-only --ignore-scripts --cache ${cacheDir}`,
       false,
       true,
       {cwd: tmpBase},

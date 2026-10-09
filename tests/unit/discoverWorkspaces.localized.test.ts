@@ -84,3 +84,63 @@ describe('discoverWorkspaces with a localized checkout', () => {
     expect(match?.srcDir).toBe(path.join(real, 'src'));
   });
 });
+
+// Two localized packages where one depends on the other: A's checkout has its
+// own `npm install`, so `packages-local/a/node_modules/@fixture/b` is a
+// registry copy of B (lib only, no `src/`). The walk reaches that copy through
+// A before it reaches the app's own `@fixture/b`, which is the localized B.
+// Measured in a scratch app with `@_linked/dcat` and `@_linked/dcmi` localized:
+// the table held only dcat, so Vite served the localized dcmi from `lib/`, and
+// dcat's own import of dcmi went to the nested registry copy.
+describe('discoverWorkspaces with two localized checkouts, one depending on the other', () => {
+  let tmp: string;
+  let app: string;
+
+  beforeEach(() => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'linked-localized-pair-')));
+    app = path.join(tmp, 'app');
+    writeJson(path.join(app, 'package.json'), {
+      name: 'app',
+      private: true,
+      workspaces: ['packages/*'],
+      // Alphabetical, as npm writes it: A is walked first.
+      dependencies: {'@fixture/a': '^1.0.0', '@fixture/b': '^1.0.0'},
+    });
+    const a = path.join(app, 'packages-local', '_fixture-a');
+    const b = path.join(app, 'packages-local', '_fixture-b');
+    makePackage(a, {
+      name: '@fixture/a',
+      version: '1.0.0',
+      linkedPackage: true,
+      dependencies: {'@fixture/b': '^1.0.0'},
+    });
+    makePackage(b, {name: '@fixture/b', version: '1.0.0', linkedPackage: true});
+    // A's own install: a published, lib-only copy of B.
+    writeJson(path.join(a, 'node_modules', '@fixture', 'b', 'package.json'), {
+      name: '@fixture/b',
+      version: '1.0.0',
+      linkedPackage: true,
+    });
+    const nm = path.join(app, 'node_modules', '@fixture');
+    fs.mkdirSync(nm, {recursive: true});
+    fs.symlinkSync(a, path.join(nm, 'a'), 'dir');
+    fs.symlinkSync(b, path.join(nm, 'b'), 'dir');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, {recursive: true, force: true});
+  });
+
+  it('registers both checkouts, at their realpaths', async () => {
+    const entries = await discoverWorkspaces([], app);
+    expect(
+      entries
+        .filter((e) => e.name.startsWith('@fixture/'))
+        .map((e) => [e.name, path.relative(app, e.srcDir)])
+        .sort(),
+    ).toEqual([
+      ['@fixture/a', path.join('packages-local', '_fixture-a', 'src')],
+      ['@fixture/b', path.join('packages-local', '_fixture-b', 'src')],
+    ]);
+  });
+});

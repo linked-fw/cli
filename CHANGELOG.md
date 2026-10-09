@@ -1,5 +1,143 @@
 # Changelog
 
+## 1.45.5
+
+### Patch Changes
+
+- [#243](https://github.com/linked-fw/cli/pull/243) [`8b31574`](https://github.com/linked-fw/cli/commit/8b315745bd10a8ff6be43103756fd12e664ff59a) Thanks [@flyon](https://github.com/flyon)! - A localized checkout's install (`linked localize`, `--relink`, `--reinstall`) now passes `--include=dev`. It runs from the app's npm lifecycle hooks, which inherit the outer command's config as `npm_config_*`, so `npm install --omit=dev` at the app root used to make the checkout skip its devDependencies and stop building.
+
+## 1.45.4
+
+### Patch Changes
+
+- [#239](https://github.com/linked-fw/cli/pull/239) [`09e7fc7`](https://github.com/linked-fw/cli/commit/09e7fc73b5812d38a9803670abca9aa08860b324) Thanks [@flyon](https://github.com/flyon)! - `linked build-all` reports a failing package and exits non-zero. Previously, when a package's own `build` script exited non-zero, `build-all` counted the package as built, printed it under "Successfully built" and exited 0. It now prints the package's build output, lists it under "Failed to build" and exits 1, including when the failed package has no dependents or is the last one left.
+
+## 1.45.3
+
+### Patch Changes
+
+- [#132](https://github.com/linked-fw/cli/pull/132) [`283e7ad`](https://github.com/linked-fw/cli/commit/283e7adfaa9f10bbf6c1d4ca90a9b708542c576b) Thanks [@abdipramana](https://github.com/abdipramana)! - Preserve validated release object paths exactly when publishing app artifacts, preventing file-store sanitization from breaking the URLs embedded in production bundles.
+
+## 1.45.2
+
+### Patch Changes
+
+- [#214](https://github.com/linked-fw/cli/pull/214) [`684cd26`](https://github.com/linked-fw/cli/commit/684cd26d626e63b42bd1b4b5aff0f35955cdc47e) Thanks [@carlenmy](https://github.com/carlenmy)! - The Node CSS loader now names package stylesheets in the mode the app actually runs in. It runs on Node's module-hooks thread, which copies `process.env` when `launch.js` registers it, before the CLI loads the app's `.env`. So a `NODE_ENV=development` that came only from `.env` (or `.env-cmdrc.json`) never reached it, and externalised packages such as `@_linked/primitives` were server-rendered with production class names while the dev client used dev names, which caused a hydration mismatch. `launch.js` now resolves the mode before registering the hooks (shell, then `.env`, then the `.env-cmdrc.json` profile, then `development` for `linked start`) and passes it to the loader through `register(url, {data})`. Production naming is unchanged.
+
+## 1.45.1
+
+### Patch Changes
+
+- [#236](https://github.com/linked-fw/cli/pull/236) [`275c719`](https://github.com/linked-fw/cli/commit/275c719dc32985146299971803396f4755a8cf8c) Thanks [@flyon](https://github.com/flyon)! - `linked localize` no longer leaves a `package-lock.json` diff in the checkouts it reinstalls. Every install it runs inside a checkout (localize, `--adopt`, `--relink`'s reinstall, `--reinstall`) is now `npm install --no-save`: it installs what the checkout's committed lockfile says and writes neither its `package.json` nor its `package-lock.json`. A plain `npm install` rewrote the lockfile in the dialect of whichever npm was first on PATH — Node 22's bundled npm 10.9.9 dropped every `"libc"` field an npm 12 lockfile records — and synced any lockfile header a release had bumped. To change a checkout's dependencies, run `npm install <dep>` inside it on purpose.
+
+## 1.45.0
+
+### Minor Changes
+
+- [#234](https://github.com/linked-fw/cli/pull/234) [`8e9ee5a`](https://github.com/linked-fw/cli/commit/8e9ee5a6e9e8c20fd9245932a42a40d405bff15e) Thanks [@flyon](https://github.com/flyon)! - `linked create-package` scaffolds an ontology package, an asset package or both; a new app is not a package.
+
+  - **Two kinds of package.** An ontology package `<name>-ont` holds exactly one ontology (`src/ontologies/<name>.ts` and its register sibling) and no shapes, components or backend. Its ontology slug is `<name>`, without `-ont`, so its terms mint `https://linked.cm/ont/<name>/{Term}` (or `<uri_base>{Term}` when a namespace is given). An asset package `<name>-assets` holds shapes, components and a backend (`src/shapes`, `src/backend.ts`, the barrels) and no ontology. Both are ordinary linked packages (`linkedPackage: true`).
+  - **`linked create-ont-package <name>`** and **`linked create-asset-package <name>`** create one kind each. **`linked create-package <name>`** asks which on a terminal; `--kind ontology|assets|both` answers it, and `both` creates the pair. Without a terminal and without `--kind` it exits 1 and names the flag, as `--location` does. `--kind both` refuses `--remote`: one repository cannot hold two packages. `--location`, `--remote` and `--push` work for all three commands, and `--skip-install` writes the files only.
+  - **With `--kind both --location packages` the asset package depends on the ontology package:** a regular `dependencies` entry `"<name>-ont": "^<its version>"`, as Create Now's project scaffold writes, which npm workspaces link locally. With `packages-local` or outside an app it gets no such entry (`npm install` would fail with E404 on the unpublished `-ont` package); one line says to run `npm install <name>-ont` once it is published. A package created on its own gets no such entry.
+  - **The suffix is never doubled:** `create-ont-package foo-ont` creates `foo-ont`, and `@acme/foo` becomes `@acme/foo-ont`.
+  - **`linked create-app` no longer rewrites `src/package.ts`.** A new app is a `linkedApp`, not a linked package: its root registers no package, so `create-app` stamps `package.json`, the env files and the process names and leaves `src/` alone.
+  - **Every created package has `"linkedPackage": true`.**
+  - **A package created inside an app is minted under the app's root:** `linkedPackage(name, {baseUri})`, and an ontology package's namespace is `{baseUri}ont/<name>/`. The root comes from `--base-uri <uri>`, else `LINKED_BASE_URI` in the shell, else the app's `.env.local`, else its `.env`. A malformed root is refused before anything is written. With no root the package declares none and mints under `https://linked.cm/`, the normal default; that is no warning, one informational line says so: `Shapes and terms in <package> mint under https://linked.cm/. They resolve once the package is published (npx linked publish, coming soon).`
+  - **`create-shape`, `create-component`, `create-set-component` and `create-ontology` refuse where there is no `src/package.ts`** (a new app root has none) with `run this inside a package (packages/<name>)`, instead of writing a file whose `../package.js` import cannot resolve. An app with its own root `src/package.ts` (create-now) is served as before.
+  - **The `create-shape` template compiles:** it imported `NamedNode` from `@_linked/core`, which core does not export (TS2305). It is the getter-only shape form now.
+  - The templates moved with the kinds: `defaults/package/` is the asset package, whose manifest, tsconfigs, dotfiles and `src/package.ts` every kind shares, and `defaults/package-ontology/` holds the example ontology. The template files create-now reads from `defaults/package/` (`package.json`, the tsconfigs, `src/shapes/index.ts`, `src/backend.ts`) are where they were.
+  - `create-component` and `create-set-component` resolve their templates from the built CLI again (they looked one directory too high).
+
+- [#234](https://github.com/linked-fw/cli/pull/234) [`362f890`](https://github.com/linked-fw/cli/commit/362f890941c973d257bcbd1218f0b78ffcf3ea23) Thanks [@flyon](https://github.com/flyon)! - Apps now get a `dependencies` relink hook next to `postinstall`, so `npm update`, `npm install <pkg>`, `npm uninstall` and `npm dedupe` keep localized links. npm runs a root `postinstall` only on a bare `npm install` / `npm ci`, but runs a root `dependencies` script after any command that changes `node_modules`. `linked create-package` sets up both scripts, and `linked localize` / `--adopt` add whichever is missing when they record a package (an existing script is kept and the command appended with `&&`; a script that already relinks, including the old `linked-localize --relink` spelling, is left alone).
+
+## 1.44.1
+
+### Patch Changes
+
+- [#232](https://github.com/linked-fw/cli/pull/232) [`494a99c`](https://github.com/linked-fw/cli/commit/494a99c6fc0f1b6a2d5b3d2f9a2a01506b8f6793) Thanks [@flyon](https://github.com/flyon)! - `@types/node` is no longer installed into consumers. It was declared as a runtime dependency (`^20.12.7`), which forced a second, older copy of the Node typings into every project that installed the CLI — even ones that already declare a newer `@types/node`. It is now a development dependency of the CLI only (`^24.0.0`, matching the Node 24 runtime).
+
+  Nothing the CLI scaffolds relies on it: the app, package and React Native templates each declare their own `@types/node`. If your project's `tsconfig.json` lists `"types": ["node"]` (or imports the CLI's Node-facing helpers such as `vite-config`, whose declarations use `NodeJS.ProcessEnv`) and does not declare `@types/node` itself, add it to your own `devDependencies`.
+
+## 1.44.0
+
+### Minor Changes
+
+- [#228](https://github.com/linked-fw/cli/pull/228) [`9ce571f`](https://github.com/linked-fw/cli/commit/9ce571f92dcd48eed31af064f2fcff706fc66a93) Thanks [@flyon](https://github.com/flyon)! - `linked localize`: the one-copy check is cheap again, and pruning no longer breaks a checkout's own build.
+
+  - **The run-time check (before `linked start`, `script`, `call`, `build-all`, and `linked localize --ensure`) is fast when copies are kept.** It now makes the same per-copy decision as pruning, without removing anything, and only prunes when that decision removes something. Candidates are looked up directly, and the ranges other installed packages ask are read from npm's hidden lockfile (`node_modules/.package-lock.json`) instead of walking each tree. Measured on an app with 21 localized checkouts and 54 kept copies: 6.6 s → about 40–50 ms. Its one line of output now goes to stderr.
+  - **A copy is kept when removing it would change what its own dependencies resolve to.** If any of its `dependencies`, `peerDependencies` or `optionalDependencies` (or the `@types/` package TypeScript takes for one) resolves, from the copy's place in the checkout, to a different version than from the app's copy, the copy stays. Previously a checkout that kept React 18 for its own range could lose a renderer library to the app's copy, which then saw React 19's types, and the checkout's own `tsc` failed. If a checkout is in that state, `linked localize --reinstall <package>` restores it.
+  - **Candidates are per checkout.** In checkout A, a candidate is a localized sibling, `react`/`react-dom`, or one of A's own runtime dependencies that the app provides. A devDependency of A is never removed just because another checkout depends on the same package at runtime.
+  - **One command converges.** A prune repeats (at most 5 passes) until nothing more can go, so a second `--ensure` has nothing left to do.
+  - **`--no-prune` is remembered.** Localizing or adopting with `--no-prune` records `"prune": false` on that entry in `local-packages.json` (an optional field, still schema version 1). From then on `--relink`, `--reinstall` and the run-time check leave that checkout's `node_modules` alone. Localizing it again without the flag turns pruning back on. `--ensure --no-prune` does nothing.
+  - **`--ensure` takes no package names.** Given names, it exits 2 instead of silently ignoring them. Use `--reinstall <package>` for one checkout.
+  - **Kept copies are summarised, one line per checkout** (`kept N own copies the app's cannot replace: react@18.3.1 (app 19.2.0), …`), instead of one warning per copy. `linked localize --list` now gives each kept copy's reason, shows `prune: off` for a `"prune": false` checkout, and counts kept copies in its summary.
+  - The client dependency scan never lists `react-native` (added to its default deny list): a web build never loads it, and esbuild cannot parse its Flow source.
+
+## 1.43.1
+
+### Patch Changes
+
+- [#225](https://github.com/linked-fw/cli/pull/225) [`1b8e157`](https://github.com/linked-fw/cli/commit/1b8e157a3d28e232f7fe4df4db6ac6a248f41f44) Thanks [@flyon](https://github.com/flyon)! - Packages created with `create-package` now publish only the files consumers need: the template's `package.json` has `"files": ["lib", "CHANGELOG.md"]`, so their tarballs no longer include `.github/`, `.changeset/`, tests or tsconfig files.
+
+## 1.43.0
+
+### Minor Changes
+
+- [#224](https://github.com/linked-fw/cli/pull/224) [`51d38d1`](https://github.com/linked-fw/cli/commit/51d38d1392afd212e6c5b656d343a8f581cc42bf) Thanks [@flyon](https://github.com/flyon)! - `linked setup-publish` now also sets up what every linked-cm package needed by hand:
+
+  - an `.npmrc` with `allow-remote=all` (npm 12 otherwise fails `npm install` with EALLOWREMOTE on bundled tarballs), plus `legacy-peer-deps=true` in linked-cm, whose CI installs that way. Keys the repo already sets are kept.
+  - a `renovate.json` stub extending `<org>/renovate-config`, unless the repo already has a Renovate config.
+  - `@changesets/cli` ^3 and `@changesets/changelog-github` ^1, the versions the fleet runs.
+
+  The lockfile step now keeps the existing lockfile's resolutions and resolves under the repo's `.npmrc`, instead of re-resolving from scratch with `--legacy-peer-deps` everywhere.
+
+## 1.42.0
+
+### Minor Changes
+
+- [#222](https://github.com/linked-fw/cli/pull/222) [`4f7ce0c`](https://github.com/linked-fw/cli/commit/4f7ce0ca420d585eb1e286281c122638362de2ae) Thanks [@flyon](https://github.com/flyon)! - Localize is now part of the cli. `linked localize` and `linked delocalize` no longer load the separate `@_linked/localize` package, which is no longer a dependency and will be deprecated in favour of `linked localize`; its `linked-localize` binary is not replaced. The guide is in `docs/localize.md`.
+
+  New:
+
+  - `linked localize --ensure` removes every localized checkout's own copy of a package the app provides and exits 0. It never runs npm and prints nothing when there is nothing to remove — for an app's npm `pre*` scripts.
+  - `linked localize --reinstall <pkg>` runs `npm install` inside that package's checkout and then prunes it. Use it instead of a hand-run `npm install` in a checkout.
+  - A run-time one-copy check before `linked start`, `linked script`, `linked call` and `linked build-all`: stat-only, it removes a checkout's own copy of what the app provides with one line of output.
+  - `linked localize --list` shows directories in `packages-local/` that `local-packages.json` does not record, as `UNRECORDED` (they do not fail `--check`).
+
+  One rule now says what the app provides: the localized packages, plus their runtime dependencies (`dependencies`, `peerDependencies`, `optionalDependencies`) that the app has at a version satisfying every localized range, plus `react` and `react-dom`. Pruning, the run-time check and Vite's `resolve.dedupe` all use it.
+
+  Behaviour change: pruning now also removes a checkout's own copy of tooling or other runtime dependencies the app provides in range (for example `vite` or `typescript` declared in `dependencies`); the checkout resolves the app's copy instead. devDependencies are no longer candidates.
+
+## 1.41.1
+
+### Patch Changes
+
+- [#220](https://github.com/linked-fw/cli/pull/220) [`e695372`](https://github.com/linked-fw/cli/commit/e695372eba7d3635643789fd5aff0ff05884ded1) Thanks [@flyon](https://github.com/flyon)! - Remove the unused `postcss`, `postcss-url` and `@tailwindcss/postcss` dependencies. Tailwind is compiled by `@tailwindcss/vite` (still a dependency), and Vite brings its own `postcss`.
+
+## 1.41.0
+
+### Minor Changes
+
+- [#218](https://github.com/linked-fw/cli/pull/218) [`b8cdfbd`](https://github.com/linked-fw/cli/commit/b8cdfbd6b3312b81f1c913fbf12d7c7c4e50e1d2) Thanks [@flyon](https://github.com/flyon)! - `linked setup-publish` now writes `require-tests: true` into `pr.yml` when package.json has a `test` script, matching how every linked-cm package repo is set up. A package without one (a fresh `create-package` scaffold) still gets `false`, with a warning to flip it once a suite exists. Previously the stub always said `false`, so a package's tests could disappear without CI noticing.
+
+## 1.40.1
+
+### Patch Changes
+
+- [#216](https://github.com/linked-fw/cli/pull/216) [`2f9a3b5`](https://github.com/linked-fw/cli/commit/2f9a3b5e668e638d94384f6996ba4336d28b60d8) Thanks [@flyon](https://github.com/flyon)! - Remove unused dependencies: express, open, postcss-import, postcss-nested, postcss-preset-env
+
+## 1.40.0
+
+### Minor Changes
+
+- [#211](https://github.com/linked-fw/cli/pull/211) [`c268b22`](https://github.com/linked-fw/cli/commit/c268b22efc68384470e90dc391729dcf5911d185) Thanks [@flyon](https://github.com/flyon)! - `linked localize` now leaves one copy of each framework package. A checkout's install leaves its own `@_linked/core` (pinned by the checkout's lockfile, often older than the app's) and a registry copy of any localized sibling in its `node_modules`, and plain Node and `tsx` loaded those: measured with three localized linked packages, three cores in one process, and a localized package that never saw its localized sibling. `@_linked/localize` 0.3.0 removes a checkout's copies of what the app provides after every install and on every `--relink`; this CLI requires it and tells it what the app provides: the linked packages it has installed (by their `linkedPackage` flag, not their scope), `react` and `react-dom`. A copy is removed only when the app's version satisfies the checkout's range (a localized sibling always counts); otherwise it is kept, with a warning. Measured afterwards: one core in Node, `tsx` and Vite SSR, and every checkout still builds — `npx linked build` in a checkout runs the app's `linked` — and passes its tests. `--no-prune` turns it off.
+
+### Patch Changes
+
+- [#211](https://github.com/linked-fw/cli/pull/211) [`01d3dc0`](https://github.com/linked-fw/cli/commit/01d3dc02b68245b79e1bb2855e96f969d5942026) Thanks [@flyon](https://github.com/flyon)! - The dev resolver registers every localized package as source, including one that another localized package depends on. The dependency walk used to key "visited" on the package name and go depth-first, so reaching a checkout's own `node_modules` copy of a sibling (a lib-only registry install) first hid the app's localized checkout of that sibling: Vite served it from `lib/`, and the depending checkout's imports went to its nested copy. The walk is now breadth-first and keyed on the installed directory.
+
+- [#211](https://github.com/linked-fw/cli/pull/211) [`c268b22`](https://github.com/linked-fw/cli/commit/c268b22efc68384470e90dc391729dcf5911d185) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` dedupes what localization can duplicate, in every mode: every localized package (from `local-packages.json`), every runtime dependency a localized checkout declares that the app has at a version satisfying that checkout's range, and `react`/`react-dom`. Before, it deduped only `@_linked/server-utils` and `@_linked/react`, and only in a standalone app, so an app with a localized package had Vite resolve `@_linked/core` from that checkout's own `node_modules`: its dev SSR backend loaded one core per copy (three, measured). A dependency whose range the app does not satisfy is left out and reported in the dev log, and so is a name a registry install nests its own copy of, because a dedupe hands every importer the app's copy without checking versions. A standalone app's `optimizeDeps.exclude` now picks linked packages by their `linkedPackage` flag rather than the `@_linked/` scope, and the legacy `lincd: true` flag is no longer read anywhere.
+
 ## 1.39.0
 
 ### Minor Changes

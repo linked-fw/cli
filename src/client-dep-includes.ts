@@ -113,11 +113,17 @@ const IGNORED_SOURCE_DIR = new Set([
   '__fixtures__',
 ]);
 /**
- * Never listed, whoever imports them. `typescript` is a peer of packages that
- * analyse source at build time (translation key sync); it declares a `browser`
- * field, so it passes the server-only test, and pre-bundling it costs seconds.
+ * Never listed, whoever imports them.
+ *
+ * - `typescript` is a peer of packages that analyse source at build time
+ *   (translation key sync); it declares a `browser` field, so it passes the
+ *   server-only test, and pre-bundling it costs seconds.
+ * - `react-native` reaches the scan from a package with a native entry whose
+ *   own install carries it (a localized checkout's devDependencies). A web
+ *   build never loads it, and its published source is Flow, which esbuild
+ *   cannot parse: listing it fails the dev server's dependency optimizer.
  */
-export const DEFAULT_DENY: (string | RegExp)[] = ['typescript'];
+export const DEFAULT_DENY: (string | RegExp)[] = ['typescript', 'react-native'];
 /** A server-only check stops after this many files of one dependency. */
 const MAX_DEP_FILES = 400;
 

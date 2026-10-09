@@ -10,7 +10,11 @@ import fs from 'fs-extra';
 import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
+import {isLinkedPackageJson} from './installed-packages.js';
+import {readManifest} from './localize/manifest.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
+// Shared with the CSS loader's mode resolution, which must pick the same profiles.
+import {readEnvNamesFromArgv} from './loader-mode.js';
 import type {PackageDetails} from './interfaces.js';
 
 /**
@@ -141,13 +145,6 @@ const loadEnvCmdrc = async (
   }
 };
 
-const readEnvNamesFromArgv = (): string[] => {
-  const args = process.argv.slice(2);
-  const envIndex = args.indexOf('--env');
-  if (envIndex === -1) return [];
-  return (args[envIndex + 1] || '').split(',').filter(Boolean);
-};
-
 /**
  * Discover and load the app's storage-config bootstrap file. Tries the
  * canonical `linked.backend.storage.{ts,js}` first, then legacy paths.
@@ -194,7 +191,7 @@ export async function loadBackendStorageConfig(): Promise<any> {
 export interface LocalPackage extends PackageDetails {
   /** Where the walk found it. */
   source: 'workspace' | 'local-packages-dir';
-  /** `linkedPackage: true`, or the legacy `lincd: true`. */
+  /** `linkedPackage: true` — see `isLinkedPackageJson`. */
   isLinkedPackage: boolean;
   /** `linkedApp: true` — built by `linked build-app`, not `linked build`. */
   isApp: boolean;
@@ -352,10 +349,8 @@ function addPackage(
     path: packagePath,
     packageName: pack.name,
     source,
-    // `lincd: true` is the pre-rename spelling of the same flag and is still
-    // honoured by `linked build-package`; honouring it here too keeps the two
-    // from disagreeing about what a linked package is.
-    isLinkedPackage: pack.linkedPackage === true || pack.lincd === true,
+    // The one definition, shared with `linked build-package`.
+    isLinkedPackage: isLinkedPackageJson(pack),
     isApp: pack.linkedApp === true,
     hasBuildScript: !!pack.scripts?.build,
   });
@@ -422,27 +417,15 @@ function filterPackagesByDependencyTree(
 }
 
 /**
- * localize's manifest filename (`MANIFEST_FILENAME` in `@_linked/localize`).
- * Repeated rather than imported: that package is ESM-only and loaded lazily,
- * and this runs synchronously while planning a build.
- */
-const LOCALIZE_MANIFEST = 'local-packages.json';
-
-/**
  * The package names recorded in the app's `local-packages.json` — what
- * `linked localize` has linked. Read tolerantly: localize owns that file and
- * refuses a malformed one loudly, so here a missing or unreadable file is
- * simply "nothing localized".
+ * `linked localize` has linked — read with localize's own reader. Read
+ * tolerantly: `linked localize` refuses a malformed file (and warns about a
+ * malformed entry) loudly, so here a missing or unusable file is simply
+ * "nothing localized", and a malformed entry is skipped without a word.
  */
 export function localizedPackageNames(appRootPath: string): string[] {
   try {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(appRootPath, LOCALIZE_MANIFEST), 'utf8'),
-    );
-    const packages = manifest?.packages;
-    return packages && typeof packages === 'object' && !Array.isArray(packages)
-      ? Object.keys(packages)
-      : [];
+    return Object.keys(readManifest(appRootPath, {warn: () => {}}).entries);
   } catch {
     return [];
   }
@@ -505,7 +488,7 @@ export function planBuildAll(rootPath = './', appRoot?: string): BuildAllPlan {
     const appPackageJson = getPackageJSON(appRoot);
     const isAppWithLinkedDeps =
       appPackageJson &&
-      appPackageJson.lincd !== true &&
+      !isLinkedPackageJson(appPackageJson) &&
       [
         ...Object.keys(appPackageJson.dependencies || {}),
         ...localizedPackageNames(appRoot),

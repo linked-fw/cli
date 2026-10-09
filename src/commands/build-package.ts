@@ -3,13 +3,14 @@ import fs from 'fs';
 import path from 'path';
 import {execp} from '../utils.js';
 import {detectPackageManager} from '../utils/packageManager.js';
+import {isLinkedPackageJson} from '../installed-packages.js';
 
 /**
  * Given any file or directory path, walk up to find the nearest package.json
  * and run `linked build` in that package's directory. This is the editor-hook
  * variant of build: the caller knows a file path, we figure out the package.
  *
- * Only rebuilds packages flagged `linkedPackage: true` (or legacy `lincd: true`).
+ * Only rebuilds packages flagged `linkedPackage: true`.
  */
 export async function buildPackageByPath(filePath: string): Promise<void> {
   let currentPath = path.isAbsolute(filePath)
@@ -24,7 +25,7 @@ export async function buildPackageByPath(filePath: string): Promise<void> {
     const pkgJsonPath = path.join(currentPath, 'package.json');
     if (fs.existsSync(pkgJsonPath)) {
       const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-      const isLinked = pkgJson.linkedPackage === true || pkgJson.lincd === true;
+      const isLinked = isLinkedPackageJson(pkgJson);
 
       if (!isLinked) {
         console.log(

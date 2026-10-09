@@ -8,13 +8,16 @@ Command-line tools for the `@_linked/*` packages and apps.
 npm install --save-dev @_linked/cli
 ```
 
-## Binaries
+## Binary
 
-Three executables ship in this package:
+One executable ships in this package: `linked`. (`lnk`, `lincd` and `lincd-cli` were dropped in
+[#40](https://github.com/linked-fw/cli/pull/40).)
 
-- `linked` — primary command
-- `lnk` — short alias for `linked`
-- `lincd` — deprecated alias; prints a warning and forwards to `linked`. Will be removed in a future major release.
+In a project that has `@_linked/cli` installed — any linked app, including Create Now — run it as
+`npx linked <command>`. Everywhere else, name the package: `npx @_linked/cli <command>`.
+A bare `npx linked` outside such a project does **not** reach this CLI: npm resolves it to the
+unrelated `linked` package on the registry, which has no binary, and fails with
+`could not determine executable to run`.
 
 ## Commands
 
@@ -24,10 +27,63 @@ Run `linked --help` for the full list. The commonly used ones:
 
 ```bash
 linked create-app <name>          # scaffold a new app (interactive)
-linked create-package <name>      # scaffold a new linkedPackage
+linked create-package <name>      # scaffold an ontology package, an asset package or both
+linked create-ont-package <name>  # <name>-ont: one ontology, no shapes or components
+linked create-asset-package <name># <name>-assets: shapes, components and a backend
 linked create-shape <name>        # add a shape file to the current package
 linked create-component <name>    # add a React component file
 ```
+
+An app is a `linkedApp`, not a linked package: its root registers no package, and its shapes
+live in its packages. A linked package is one of two kinds:
+
+- an **ontology package**, `<name>-ont` — exactly one ontology (`src/ontologies/<name>.ts`), no
+  shapes, components or backend. Its ontology slug is `<name>` (without `-ont`), so its terms
+  mint `https://linked.cm/ont/<name>/{Term}`, or `<uri_base>{Term}` when a namespace is given.
+- an **asset package**, `<name>-assets` — shapes, components and a backend, and no ontology.
+
+`create-package` asks which on a terminal; `--kind ontology|assets|both` answers it (`both`
+creates the pair), and without a terminal and without `--kind` it exits 1 and says so.
+With `both` and `--location packages`, the asset package depends on the ontology package
+(`"<name>-ont": "^<version>"`), which npm workspaces link locally. Anywhere else (`packages-local`
+or outside an app) it gets no such entry, because `npm install` would look the unpublished `-ont`
+package up in the registry and fail with E404; one line says to run `npm install <name>-ont` in
+the asset package once the ontology package is published.
+`create-ont-package` and `create-asset-package` are the two kinds spelled out. The suffix is
+never doubled: `create-ont-package foo-ont` creates `foo-ont`. Every package they create has
+`"linkedPackage": true`. `create-shape`, `create-component`, `create-set-component` and
+`create-ontology` refuse where there is no `src/package.ts` (a new app root has none) instead of
+writing an import of a package that does not exist: run them inside `packages/<name>`. An app that
+does have a `src/package.ts` at its root is served as before.
+
+A package's IRIs are minted under a root: `linkedPackage(name, {baseUri})`, shapes at
+`{baseUri}shape/<package>/<Name>`, an ontology package's terms at `{baseUri}ont/<slug>/<Term>`.
+The root is, first match wins: `--base-uri <uri>`; inside an app, `LINKED_BASE_URI` from the
+shell, then from the app's `.env.local`, then its `.env`. With none of them the package declares
+no root and mints under `https://linked.cm/`, the normal root for an open-source package. That is
+not a warning; the command prints one informational line:
+`Shapes and terms in <package> mint under https://linked.cm/. They resolve once the package is
+published (npx linked publish, coming soon).`
+
+Inside an app (a `package.json` with `"linkedApp": true` above the current directory),
+`create-package` puts the package in one of two places, and asks which on a terminal:
+
+```bash
+linked create-package @_linked/foo --location packages        # part of the app's repository
+linked create-package @_linked/foo --location packages-local  # a repository of its own
+linked create-package @_linked/foo --remote <git-url> [--push] # the same, with an origin
+```
+
+- `packages/foo` — a workspace member: added to the app's `dependencies` (and `packages/*` to its
+  `workspaces` if missing), installed at the app root.
+- `packages-local/_linked-foo` — the name `linked localize` uses. `git init` and a first commit,
+  `origin` and `repository.url` from `--remote`, pushed with `--push`; then installed, built,
+  linked and recorded by `linked localize --adopt`. It is not added to the app's `dependencies`
+  until it is published. `--remote` or `--push` imply this location.
+
+Any of the three flags skips the question. With none of them and no terminal, it exits 1 and says
+which flag to pass. An existing target folder is refused. Outside an app nothing changes: the
+package goes in `./packages/`, `./modules/` or the current directory, and installs on its own.
 
 ### Building
 
@@ -139,9 +195,10 @@ release is never marked complete, and re-running `publish-app` resumes it.
 
 **The store must keep keys verbatim.** A release object has to be stored under exactly the key it
 was given, or the URLs baked into the bundle point at nothing, so publishing passes
-`preventDuplicates: false` and fails with a clear message if the store reports a different location.
-`@_linked/server`'s `LocalFileStore` lowercases the keys it is handed, so an app publishing to it
-needs lowercase asset filenames (`rollupOptions.output.hashCharacters: 'hex'` in `vite.config`).
+`preventDuplicates: false` and `preservePath: true`. A compatible store preserves the safe relative
+key exactly and rejects absolute or traversal paths. Publishing fails with a clear message if the
+store reports a different location. `@_linked/server`'s `LocalFileStore` supports this contract;
+stores that do not support exact keys cannot publish a linked release.
 
 **Cache policy follows the origin, not the filename.** Files listed in the Vite manifest are
 content-hashed by construction and get `public, max-age=31536000, immutable`. Everything else —
@@ -204,31 +261,42 @@ linked app-doctor                 # in an app: check optimizeDeps.include and Re
 
 ### Developing a dependency from a git checkout
 
-`linked localize` clones an npm dependency, installs inside the checkout, builds
-it with `linked build` and symlinks it into `node_modules` — **without** touching
-`package.json` or `package-lock.json`, so the manifest still describes the
-released dependency and CI is unaffected.
+`linked localize` clones an npm dependency, installs inside the checkout, builds it with
+`linked build` and symlinks it into `node_modules` — **without** touching `package.json` or
+`package-lock.json`, so the manifest still describes the released dependency and CI is unaffected.
+Full guide: [docs/localize.md](docs/localize.md).
 
 ```bash
 linked localize @_linked/rdfs     # clone, install, build, symlink into node_modules
 linked localize                   # report what is localized (same as --list)
 linked localize --list --check    # exit 1 when something recorded is not actually linked
 linked localize --relink          # recreate the recorded symlinks — run this from postinstall
+linked localize @_linked/rdfs --adopt  # link a checkout already in packages-local/_linked-rdfs, no clone
+linked localize --reinstall @_linked/rdfs  # npm install inside the checkout, then prune it
+linked localize --ensure          # remove checkouts' own copies of what the app provides; exit 0 (no names)
 linked delocalize @_linked/rdfs   # unlink and forget, keeping the checkout
 linked delocalize --purge         # undo everything and delete the checkouts
 ```
 
-Name packages exactly as npm names them (`@_linked/rdfs`, `lodash`): the
-repository is read from the package's published `repository` field, so there is
-no short-name expansion and no org guessing. `--dir` moves the checkout
-directory (default `packages-local`), `--repo`/`--subdir` cover a package whose
-published metadata does not point at the right place, and `--build "<cmd>"`
-replaces `linked build` (an empty string builds nothing). A failing build only
-warns — a package whose build is broken is usually why you localized it.
+Checkouts go in `packages-local/` under the npm name with the scope flattened:
+`@_linked/rdfs` → `packages-local/_linked-rdfs`. `--list` also flags a directory there that
+`local-packages.json` does not record (`UNRECORDED`).
 
-The work is done by [`@_linked/localize`](https://www.npmjs.com/package/@_linked/localize),
-which is dependency-free and framework-agnostic; this CLI only supplies the
-build command.
+**One copy of each package the app provides.** A checkout's own install leaves its own copies of
+what it depends on, and Node loads those instead of the app's. One rule says what the app provides:
+the localized packages, plus every runtime dependency (`dependencies`, `peerDependencies`,
+`optionalDependencies`) a localized checkout declares that the app has at a version satisfying
+every localized range, plus `react` and `react-dom`. After every install in a checkout and on every
+`--relink`, each checkout's own copies of its siblings, of react/react-dom and of its own runtime
+dependencies in that set are removed — unless a range that loads the copy misses the app's version,
+or removing it would change what its own dependencies resolve to (kept copies are summarised per
+checkout; `--list` says why). `linked start`, `script`, `call` and `build-all` re-check first (tens
+of milliseconds; one line on stderr when it removes something), and `createViteConfig` derives
+Vite's `resolve.dedupe` from the same rule. `--no-prune` at localize/adopt is recorded
+(`"prune": false`) and leaves that checkout's `node_modules` as npm left them from then on.
+
+Localize used to be the separate `@_linked/localize` package (binary `linked-localize`), which is
+being retired; `linked localize` replaces it.
 
 ### Registry / dev utilities
 
@@ -300,7 +368,8 @@ Templates live in `defaults/`:
 
 - `defaults/app-with-backend/` — used by `linked create-app`
 - `defaults/app-static/` — minimal static app
-- `defaults/package/` — used by `linked create-package`
+- `defaults/package/` — the asset package of `linked create-package` / `create-asset-package`; its manifest, tsconfigs, dotfiles and `src/package.ts` are shared by every kind
+- `defaults/package-ontology/` — what an ontology package (`create-ont-package`) gets on top of the shared files: the example ontology, its register sibling and its data
 - `defaults/setup-publish/` — caller workflows + changeset files written by `linked setup-publish` (`main`-only; `--dual-branch` is a deprecated no-op)
 
 ### `linked create-app` template structure
@@ -375,4 +444,4 @@ Metro iOS bundle. It builds nothing itself, needs network and takes several minu
 
 ## Repository
 
-`linked-cm/cli` on GitHub. License: MPL-2.0.
+`linked-fw/cli` on GitHub. License: MPL-2.0.

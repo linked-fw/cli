@@ -5,6 +5,7 @@ import {builtinModules} from 'module';
 import * as path from 'path';
 import ts from 'typescript';
 import type {PackageDetails} from './interfaces.js';
+import {isLinkedPackageJson} from './installed-packages.js';
 
 import {findNearestPackageJsonSync} from 'find-nearest-package-json';
 import * as glob from 'glob';
@@ -220,7 +221,7 @@ export var getLINCDDependencies = function (
         let [modulePackageJson, modulePath] = getModulePackageJSON(dependency);
         checkedPackages.add(dependency);
 
-        if (modulePackageJson?.lincd) {
+        if (isLinkedPackageJson(modulePackageJson)) {
           lincdPackagePaths.push([
             modulePackageJson.name,
             modulePath,
