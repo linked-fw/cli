@@ -343,6 +343,26 @@ test('ensure installs with --no-save, so the checkout keeps its committed lockfi
   );
 });
 
+test('ensure installs with --include=dev, whatever the outer npm command omitted', (t) => {
+  // ensure runs from the app's npm lifecycle hooks, and npm exports the outer
+  // command's config to them as npm_config_*: `npm install --omit=dev` at the
+  // app root arrives as npm_config_omit=dev, and an inner `npm install` that
+  // inherits it skips the checkout's devDependencies -- its compiler among
+  // them, so the checkout no longer builds. `--include=dev` wins over omit.
+  const appRoot = consumer(t);
+  const a = checkout(appRoot, '@fw/a', {devDependencies: {tool: '^1.0.0'}});
+  record(appRoot, {'@fw/a': a});
+  const deps = stubbed(appRoot, () => ok());
+
+  assert.equal(ensure({path: 'packages-local/fw-a'}, deps), 0, deps.output());
+  const [install] = deps.npmCalls();
+  assert.equal(install.args[0], 'install');
+  assert.ok(
+    install.args.includes('--include=dev'),
+    `npm ${install.args.join(' ')} would inherit npm_config_omit=dev and skip devDependencies`,
+  );
+});
+
 test('ensure with {prune: false} only installs', (t) => {
   const appRoot = consumer(t);
   appHas(appRoot, '@fw/core', '2.25.0');
