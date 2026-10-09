@@ -2461,6 +2461,13 @@ export const createPackage = async (
   for (const [i, {kind, name: packageName}] of packages.entries()) {
     const targetFolder = targets[i];
     await scaffoldPackage(packageName, kind, targetFolder, uriBase, root?.baseUri);
+    if (kind === 'assets' && packageKind === 'both') {
+      // The pair is one unit: the asset package's shapes use the ontology
+      // created with it. `ontology` comes first in `scaffoldKinds`, so its
+      // package.json is already written.
+      const ontIndex = packages.findIndex((p) => p.kind === 'ontology');
+      dependOnOntologyPackage(targetFolder, packages[ontIndex].name, targets[ontIndex]);
+    }
     const skipped = () =>
       log(`Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`);
     if (decision.kind === 'outside') {
@@ -2476,6 +2483,18 @@ export const createPackage = async (
     }
   }
 };
+
+/**
+ * Declare the ontology package as a regular dependency of the asset package,
+ * at `^` its version — the same entry Create Now's project scaffold writes.
+ */
+function dependOnOntologyPackage(assetsFolder: string, ontName: string, ontFolder: string) {
+  const {version} = fs.readJsonSync(path.join(ontFolder, 'package.json'));
+  const pkgPath = path.join(assetsFolder, 'package.json');
+  const pkg = fs.readJsonSync(pkgPath);
+  pkg.dependencies = {...pkg.dependencies, [ontName]: `^${version}`};
+  fs.writeJsonSync(pkgPath, pkg, {spaces: 2});
+}
 
 /** Where a package goes, given where create-package was told to put it. */
 async function packageTargetFolder(

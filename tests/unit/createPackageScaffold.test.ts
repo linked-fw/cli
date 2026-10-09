@@ -155,6 +155,23 @@ describe('createPackage kinds', () => {
     }
   });
 
+  test('both makes the asset package depend on the ontology package it was created with', async () => {
+    await createPackage('@acme/planning', undefined, tmp, {kind: 'both', skipInstall: true});
+    const ont = JSON.parse(read(tmp, 'planning-ont', 'package.json'));
+    const assets = JSON.parse(read(tmp, 'planning-assets', 'package.json'));
+    expect(assets.dependencies['@acme/planning-ont']).toBe(`^${ont.version}`);
+    expect(assets.devDependencies?.['@acme/planning-ont']).toBeUndefined();
+    expect(assets.peerDependencies?.['@acme/planning-ont']).toBeUndefined();
+    // The dependency runs one way: the ontology package depends on no asset package.
+    expect(ont.dependencies['@acme/planning-assets']).toBeUndefined();
+  });
+
+  test('an asset package created on its own depends on no ontology package', async () => {
+    await createPackage('planning', undefined, tmp, {kind: 'assets', skipInstall: true});
+    const assets = JSON.parse(read(tmp, 'planning-assets', 'package.json'));
+    expect(Object.keys(assets.dependencies).filter((d) => d.endsWith('-ont'))).toEqual([]);
+  });
+
   test('a name that already carries the suffix is not doubled', async () => {
     await createPackage('planning-ont', undefined, tmp, {kind: 'ontology', skipInstall: true});
     await createPackage('planning-assets', undefined, tmp, {kind: 'assets', skipInstall: true});
