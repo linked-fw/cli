@@ -120,6 +120,31 @@ describe('build-all with a failing package', () => {
     expect(text()).not.toMatch(/Successfully built: .*@probe\/a/);
   }, 30000);
 
+  it('summary shows an excerpt of why each package failed', async () => {
+    makePackage(
+      pkgDir('a'),
+      '@probe/a',
+      'echo "src/index.ts(3,7): error TS2322: probe type error" && exit 2',
+    );
+    makePackage(
+      pkgDir('b'),
+      '@probe/b',
+      'echo "Error: probe thrown error" 1>&2 && exit 1',
+    );
+    makePackage(pkgDir('c'), '@probe/c', 'echo built');
+
+    await run();
+
+    // The excerpts come after the "Failed to build" line, i.e. in the summary,
+    // not only inline where each failure happened.
+    const summary = text().slice(text().search(/Failed to build:/));
+    expect(summary).toMatch(
+      /@probe\/a:\n.*\| src\/index\.ts\(3,7\): error TS2322: probe type error/,
+    );
+    expect(summary).toMatch(/@probe\/b:\n.*\| Error: probe thrown error/);
+    expect(summary).not.toMatch(/@probe\/c:/);
+  }, 30000);
+
   it('exits 1 when the only package fails', async () => {
     makePackage(pkgDir('a'), '@probe/a', 'exit 2');
 

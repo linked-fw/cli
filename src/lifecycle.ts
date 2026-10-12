@@ -444,6 +444,49 @@ export interface BuildAllPlan {
   skipped: SkippedPackage[];
 }
 
+/** The package whose `linked` bin the other packages' build scripts run. */
+export const BUILD_TOOL_PACKAGE = '@_linked/cli';
+
+/** How `build-all` orders the build tool against everything else. */
+export interface BuildToolOrder {
+  /** The build tool, when it is among the packages to build. */
+  tool?: PackageDetails;
+  /** Whether to build `tool` now, alone, before anything else starts. */
+  buildToolFirst: boolean;
+  /** Everything else, built afterwards in dependency order. */
+  rest: Map<string, PackageDetails>;
+  /** The `--from` to apply to `rest`: cleared once it has been reached at the tool. */
+  from?: string;
+}
+
+/**
+ * Take the build tool (`@_linked/cli`) out of the dependency-ordered build.
+ *
+ * Every other package's `build` script runs `linked build`, which is THIS
+ * package's `lib/`. Built in parallel with them, its `rimraf ./lib` pulled that
+ * `lib/` out from under their builds (`ENOENT …/lib/esm/installed-packages.js`),
+ * and whatever was built before it ran a stale cli. So when it is in the set it
+ * is built first and alone, and the rest only once it has succeeded.
+ *
+ * `--from` reads the tool as the first package in the order: `--from` the tool
+ * builds it and then everything; `--from` anything else resumes past it, so it
+ * is not rebuilt.
+ */
+export function orderBuildToolFirst(
+  packages: Map<string, PackageDetails>,
+  from?: string,
+): BuildToolOrder {
+  const tool = packages.get(BUILD_TOOL_PACKAGE);
+  if (!tool) return {buildToolFirst: false, rest: packages, from};
+  const rest = new Map(packages);
+  rest.delete(BUILD_TOOL_PACKAGE);
+  if (!from) return {tool, buildToolFirst: true, rest};
+  if (from === BUILD_TOOL_PACKAGE) {
+    return {tool, buildToolFirst: true, rest, from: undefined};
+  }
+  return {tool, buildToolFirst: false, rest, from};
+}
+
 /**
  * Decide what `build-all` builds.
  *
