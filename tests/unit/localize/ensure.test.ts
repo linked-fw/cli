@@ -8,7 +8,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import semver from 'semver';
 
 import {providedPackages} from '../../../src/localize/provided.js';
 import {checkOneCopy, ensure, reinstall} from '../../../src/localize/ensure.js';
@@ -19,8 +18,6 @@ import {
   EXIT_INSTALL_FAILED,
   EXIT_REFUSED,
 } from '../../../src/localize/errors.js';
-import {localizedDedupe} from '../../../src/localized-dedupe.js';
-import {readInstalledPkg} from '../../../src/installed-packages.js';
 import {fail, makeConsumer, ok, rm, stubbed, test} from './helpers.js';
 
 function consumer(t) {
@@ -73,101 +70,8 @@ function noRun(appRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// The rule: parity with the localizedDedupe that shipped before it existed.
+// The rule (provided.ts).
 // ---------------------------------------------------------------------------
-
-/** localizedDedupe as it was before `providedPackages` (cli 1.41.1), verbatim in behaviour. */
-async function legacyLocalizedDedupe(appRoot) {
-  const FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
-  const readJson = (f) => {
-    try {
-      return JSON.parse(fs.readFileSync(f, 'utf8'));
-    } catch {
-      return null;
-    }
-  };
-  const sat = (v, r) => {
-    try {
-      return semver.validRange(r) !== null && semver.satisfies(v, r);
-    } catch {
-      return false;
-    }
-  };
-  const manifest = readJson(path.join(appRoot, 'local-packages.json'));
-  const localized = Object.keys(manifest?.packages ?? {}).filter((n) =>
-    fs.existsSync(path.join(appRoot, 'node_modules', n, 'package.json')),
-  );
-  const names = new Set<string>(localized);
-  const skipped: any[] = [];
-  const asks = new Map<string, any[]>();
-  for (const from of localized) {
-    const pkg =
-      readJson(path.join(appRoot, 'node_modules', from, 'package.json')) ?? {};
-    for (const field of FIELDS) {
-      for (const [dep, range] of Object.entries<string>(pkg[field] ?? {})) {
-        if (names.has(dep)) continue;
-        const l = asks.get(dep) ?? [];
-        if (!l.some((a) => a.from === from)) l.push({from, range});
-        asks.set(dep, l);
-      }
-    }
-  }
-  const nestedMap = new Map<string, string>();
-  const nm = path.join(appRoot, 'node_modules');
-  const pkgNames = (dir) => {
-    let e: string[];
-    try {
-      e = fs.readdirSync(dir);
-    } catch {
-      return [];
-    }
-    const out: string[] = [];
-    for (const x of e) {
-      if (x.startsWith('.')) continue;
-      if (x.startsWith('@')) {
-        try {
-          for (const s of fs.readdirSync(path.join(dir, x)))
-            out.push(`${x}/${s}`);
-        } catch {}
-      } else out.push(x);
-    }
-    return out;
-  };
-  const walk = (dir, depth) => {
-    for (const n of pkgNames(dir)) {
-      const d = path.join(dir, n);
-      let st;
-      try {
-        st = fs.lstatSync(d);
-      } catch {
-        continue;
-      }
-      if (st.isSymbolicLink()) continue;
-      if (depth > 0 && !nestedMap.has(n))
-        nestedMap.set(n, path.relative(path.dirname(nm), d));
-      walk(path.join(d, 'node_modules'), depth + 1);
-    }
-  };
-  if (asks.size) walk(nm, 0);
-  for (const [name, ranges] of asks) {
-    const app = await readInstalledPkg(name, appRoot);
-    if (!app?.json?.version) continue;
-    const unmet = ranges.filter((a) => !sat(app.json.version, a.range));
-    if (unmet.length)
-      skipped.push({
-        name,
-        reason: 'range',
-        asks: unmet,
-        appVersion: app.json.version,
-      });
-    else if (nestedMap.has(name))
-      skipped.push({name, reason: 'nested', nestedAt: nestedMap.get(name)});
-    else names.add(name);
-  }
-  for (const name of ['react', 'react-dom'])
-    if (await readInstalledPkg(name, appRoot)) names.add(name);
-  return {names: [...names].sort(), skipped};
-}
 
 /** Every branch of the rule in one app. */
 function ruleFixture(t) {
@@ -219,38 +123,6 @@ function ruleFixture(t) {
   });
   return appRoot;
 }
-
-const bySkip = (s) =>
-  [...s].sort((x, y) =>
-    `${x.name}:${x.reason}`.localeCompare(`${y.name}:${y.reason}`),
-  );
-
-test('rule parity: localizedDedupe gives exactly what it gave before providedPackages existed', async (t) => {
-  const appRoot = ruleFixture(t);
-  const before = await legacyLocalizedDedupe(appRoot);
-  const now = await localizedDedupe(appRoot);
-  assert.deepEqual(now.names, before.names);
-  assert.deepEqual(bySkip(now.skipped), bySkip(before.skipped));
-  // and the fixture really does exercise every branch
-  assert.deepEqual(before.names, [
-    '@fw/a',
-    '@fw/b',
-    '@fw/core',
-    'react',
-    'react-dom',
-  ]);
-  assert.deepEqual(
-    before.skipped.map((s) => `${s.name}:${s.reason}`).sort(),
-    [
-      'lodash:nested',
-      'motion:range',
-      'odd:range',
-      'react-dom:nested',
-      'react:range',
-      'zod:range',
-    ].sort(),
-  );
-});
 
 test('the rule itself keeps what only Vite must drop: a dependency some registry install nests', (t) => {
   const appRoot = ruleFixture(t);

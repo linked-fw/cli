@@ -437,6 +437,29 @@ Tasks:
 **Validation — quick gate:** tsc exits 0; `npx jest --config jest.config.cjs tests/unit/viteDedupe.test.ts tests/unit/buildAll tests/unit/discoverWorkspaces tests/unit/localize`
 passes.
 
+**Result:** `resolve.dedupe` is `['@_linked/server-utils', '@_linked/react']` standalone and `[]`
+otherwise (React is no longer listed: npm dedupes members like any workspace); `localized-dedupe.ts`,
+its re-export and the skipped-range warning are gone, as is the SSR loader fixture only its test
+used. `provided.ts` stays until P3 (prune and the localize index still import it), so
+`readInstalledPkgSync`/`isWorkspaceRootSync` stay too; its header no longer names Vite.
+`localizedPackageNames` keeps its name and now returns `localMembers(appRoot)` names, so every
+checkout in `packages-local/` counts as localized (a leftover `local-packages.json` is ignored).
+`orderBuildToolFirst(packages, from?, dependenciesOf?)` returns `{pre, tool, rest, start, from}`:
+`start` (`'pre' | 'tool' | 'rest'`) replaces `buildToolFirst`, `from` applies inside `start`, a name
+in no group goes to `rest` (which reports it, as before); the closure is depth-first over
+`dependencies` and cuts a cycle back to the cli. `buildAll` is now `async` and builds `pre`, then
+the cli alone ("Building @_linked/cli alone: …", was "first"), then `rest`; `buildInDependencyOrder`
+resolves to whether all were built and, for a group with more to follow, prints the summary only
+on failure, followed by a stop note naming the cli. Comments that said `packages-local/` is in no
+glob now say "in an app not set up yet" (`lifecycle.ts`, `vite-config.ts`, two discovery tests).
+Deviations: `ensure.test.ts` lost its parity test against `localizedDedupe` (the module it compared
+is gone; the file goes in P3); `buildAllDiscovery`'s "dependency tree" skip moved to a new
+workspace member `@w/unrelated`, since an undeclared checkout is now built; a glob-plus-checkout case
+was also added to `discoverWorkspaces.localized.test.ts` (Vite's discovery). Validation: `tsc -p
+tsconfig-esm.json --noEmit` exit 0; quick gate (incl. `localizeCommand`, `createPackageLocation`)
+24 suites / 254 tests passed in ~9–18 s; full `npm run test:unit` 66 suites / 752 tests passed in
+12.2 s.
+
 ### P3 — Commands rewrite and removals (CLI)
 
 Tasks:

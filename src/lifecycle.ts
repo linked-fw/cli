@@ -11,7 +11,7 @@ import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
 import {isLinkedPackageJson} from './installed-packages.js';
-import {readManifest} from './localize/manifest.js';
+import {localMembers} from './localize/members.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 // Shared with the CSS loader's mode resolution, which must pick the same profiles.
 import {readEnvNamesFromArgv} from './loader-mode.js';
@@ -200,11 +200,10 @@ export interface LocalPackage extends PackageDetails {
 }
 
 /**
- * Directory holding localized checkouts (`linked localize`). It is
- * deliberately in NO workspace glob — that is the whole point of the design,
- * since npm learning about these checkouts is what made their predecessor
- * under `packages/` a trap — so any walk of `workspaces` alone cannot see it
- * and has to be told about it separately.
+ * Directory holding localized checkouts (`linked localize`). An app set up by
+ * `linked localize` lists `packages-local/*` in its `workspaces`, so a walk of
+ * the globs finds them as workspace members; it is still walked on its own for
+ * an app that has not been set up yet (no glob, or no `workspaces` at all).
  */
 export const LOCAL_PACKAGES_DIR = 'packages-local';
 
@@ -235,8 +234,10 @@ export function getLincdPackages(
  *
  * Two sources, because the workspace globs are not the whole picture any more:
  *
- *   1. the `workspaces` field (negations honoured — see ./workspace-globs.js);
- *   2. `packages-local/`, the localized checkouts, which is in no glob.
+ *   1. the `workspaces` field (negations honoured — see ./workspace-globs.js),
+ *      which includes `packages-local/*` in an app set up for localizing;
+ *   2. `packages-local/`, the localized checkouts, for an app whose globs do
+ *      not reach it. A checkout a glob already found is not added twice.
  *
  * Nothing is filtered out here. Callers decide what they can act on and are
  * expected to SAY what they skipped and why.
@@ -292,8 +293,8 @@ function checkLocalPackagesDir(
     if (entry.startsWith('.')) continue;
     const packagePath = path.join(dir, entry);
     if (!fs.statSync(packagePath).isDirectory()) continue;
-    // A checkout that some glob already picked up must not appear twice —
-    // duplicates would be built twice and counted twice.
+    // A checkout a glob already picked up (`packages-local/*`) must not
+    // appear twice — duplicates would be built twice and counted twice.
     if (already.has(path.resolve(packagePath))) continue;
     addPackage(packagePath, 'local-packages-dir', res);
   }
@@ -417,18 +418,12 @@ function filterPackagesByDependencyTree(
 }
 
 /**
- * The package names recorded in the app's `local-packages.json` — what
- * `linked localize` has linked — read with localize's own reader. Read
- * tolerantly: `linked localize` refuses a malformed file (and warns about a
- * malformed entry) loudly, so here a missing or unusable file is simply
- * "nothing localized", and a malformed entry is skipped without a word.
+ * The names of the app's localized checkouts — every directory in
+ * `packages-local/` with a named `package.json` (localize/members.ts). Nothing
+ * there is simply "nothing localized".
  */
 export function localizedPackageNames(appRootPath: string): string[] {
-  try {
-    return Object.keys(readManifest(appRootPath, {warn: () => {}}).entries);
-  } catch {
-    return [];
-  }
+  return localMembers(appRootPath).map((member) => member.name);
 }
 
 /** A package `build-all` found but will not build, and why not. */
@@ -447,44 +442,84 @@ export interface BuildAllPlan {
 /** The package whose `linked` bin the other packages' build scripts run. */
 export const BUILD_TOOL_PACKAGE = '@_linked/cli';
 
+/** Where `build-all` starts: everything in the groups before it is passed over. */
+export type BuildToolStart = 'pre' | 'tool' | 'rest';
+
 /** How `build-all` orders the build tool against everything else. */
 export interface BuildToolOrder {
+  /**
+   * What the build tool depends on, transitively, among the packages to build
+   * (a localized `@_linked/core`), in dependency order. Built before it.
+   */
+  pre: Map<string, PackageDetails>;
   /** The build tool, when it is among the packages to build. */
   tool?: PackageDetails;
-  /** Whether to build `tool` now, alone, before anything else starts. */
-  buildToolFirst: boolean;
   /** Everything else, built afterwards in dependency order. */
   rest: Map<string, PackageDetails>;
-  /** The `--from` to apply to `rest`: cleared once it has been reached at the tool. */
+  /** The first group to build; the groups before it are passed over (`--from`). */
+  start: BuildToolStart;
+  /** The `--from` to apply inside `start` (`pre` or `rest`); unset when the build starts at its top. */
   from?: string;
 }
 
+/** The package names a package's `dependencies` field lists. */
+function declaredDependencies(pkg: PackageDetails): string[] {
+  return Object.keys(getPackageJSON(pkg.path, false)?.dependencies || {});
+}
+
 /**
- * Take the build tool (`@_linked/cli`) out of the dependency-ordered build.
+ * Split the build around the build tool (`@_linked/cli`).
  *
  * Every other package's `build` script runs `linked build`, which is THIS
  * package's `lib/`. Built in parallel with them, its `rimraf ./lib` pulled that
  * `lib/` out from under their builds (`ENOENT …/lib/esm/installed-packages.js`),
  * and whatever was built before it ran a stale cli. So when it is in the set it
- * is built first and alone, and the rest only once it has succeeded.
+ * is built alone, and the rest only once it has succeeded.
  *
- * `--from` reads the tool as the first package in the order: `--from` the tool
- * builds it and then everything; `--from` anything else resumes past it, so it
- * is not rebuilt.
+ * It cannot be built FIRST, though: a localized `@_linked/core` it depends on
+ * must have its `lib/` before the tool's `tsc` runs. So the tool's own
+ * dependencies among the packages to build (`pre`, the transitive closure of
+ * `dependencies`) go before it, in dependency order. They build with the tool
+ * as it was before this run, which is what a fresh checkout's `npm run build`
+ * does too.
+ *
+ * `--from` reads the order as `pre`, then the tool, then `rest`: it resumes
+ * inside whichever group holds the package and passes over the groups before
+ * it. A name in none of them goes to `rest`, which reports it.
  */
 export function orderBuildToolFirst(
   packages: Map<string, PackageDetails>,
   from?: string,
+  dependenciesOf: (pkg: PackageDetails) => string[] = declaredDependencies,
 ): BuildToolOrder {
   const tool = packages.get(BUILD_TOOL_PACKAGE);
-  if (!tool) return {buildToolFirst: false, rest: packages, from};
+  if (!tool) {
+    return {pre: new Map(), rest: packages, start: from ? 'rest' : 'pre', from};
+  }
+
+  // Depth-first, dependencies before dependents, so `pre` is in build order.
+  // A cycle back to the tool (or within `pre`) is cut where it closes.
+  const pre = new Map<string, PackageDetails>();
+  const visiting = new Set<string>([BUILD_TOOL_PACKAGE]);
+  const visit = (pkg: PackageDetails) => {
+    for (const dep of dependenciesOf(pkg)) {
+      const depPkg = packages.get(dep);
+      if (!depPkg || visiting.has(dep) || pre.has(dep)) continue;
+      visiting.add(dep);
+      visit(depPkg);
+      pre.set(dep, depPkg);
+    }
+  };
+  visit(tool);
+
   const rest = new Map(packages);
   rest.delete(BUILD_TOOL_PACKAGE);
-  if (!from) return {tool, buildToolFirst: true, rest};
-  if (from === BUILD_TOOL_PACKAGE) {
-    return {tool, buildToolFirst: true, rest, from: undefined};
-  }
-  return {tool, buildToolFirst: false, rest, from};
+  for (const name of pre.keys()) rest.delete(name);
+
+  if (!from) return {pre, tool, rest, start: 'pre'};
+  if (pre.has(from)) return {pre, tool, rest, start: 'pre', from};
+  if (from === BUILD_TOOL_PACKAGE) return {pre, tool, rest, start: 'tool'};
+  return {pre, tool, rest, start: 'rest', from};
 }
 
 /**

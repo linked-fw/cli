@@ -18,7 +18,6 @@ import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
-import {describeSkipped, localizedDedupe} from './localized-dedupe.js';
 import {
   discoverInstalledLinkedPackages,
   isLinkedPackageJson,
@@ -471,8 +470,8 @@ export async function discoverWorkspaces(
     }
   }
 
-  // 2. Linked deps installed as source — including a localized checkout that is
-  //    in no workspace glob. Shared with the `linked start` watch set; see
+  // 2. Linked deps installed as source — including a localized checkout in an
+  //    app whose globs do not cover `packages-local/*` yet. Shared with the `linked start` watch set; see
   //    discoverLinkedSourceDependencies above. Glob entries win on a name clash.
   for (const entry of await discoverLinkedSourceDependencies(cwd)) {
     if (seen.has(entry.name)) continue;
@@ -622,15 +621,6 @@ export function ssrNoExternal(
 const STANDALONE_DEDUPE = ['@_linked/server-utils', '@_linked/react'];
 
 /**
- * `resolve.dedupe` for every mode: the localized packages, what their checkouts
- * import that the app has at a version they accept, and React — see
- * `localizedDedupe`. Duplicates come from localization (a checkout's own
- * `node_modules`), so that is what is detected; an app with nothing localized
- * dedupes only React.
- */
-export {localizedDedupe} from './localized-dedupe.js';
-
-/**
  * The `process.env.*` values inlined into the browser bundle — and only there.
  * See the `environments.client.define` note in `createViteConfig` for why the
  * server environment must not receive them.
@@ -664,11 +654,6 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     // (CN monorepo or its workspace-member clones) this is false and none
     // of the standalone-gated branches below apply.
     const isStandalone = isDev && workspaces.length === 0;
-    const dedupe = await localizedDedupe(process.cwd());
-    if (isDev) {
-      const skippedLine = describeSkipped(dedupe.skipped);
-      if (skippedLine) console.warn(skippedLine);
-    }
 
     // The app's published framework deps — excluded from Vite's dep-optimizer below
     // (`optimizeDeps.exclude`) so the browser's native ESM graph loads ONE copy of each.
@@ -870,16 +855,16 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // conditions at Vite's defaults there (undefined = untouched), keeping
       // CN dev byte-for-byte unchanged.
       //
-      // DEDUPE, every mode: see `localizedDedupe`. Standalone also keeps its two
-      // context-holding packages even when they are not found on disk, so the two
-      // `ssrLoadModule` loads (LinkedServer + the app graph) resolve to ONE
-      // `server-utils`/`react` instance — otherwise their `AppContext` objects
-      // differ and `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
+      // DEDUPE, standalone only: its two context-holding packages, even when
+      // they are not found on disk, so the two `ssrLoadModule` loads
+      // (LinkedServer + the app graph) resolve to ONE `server-utils`/`react`
+      // instance — otherwise their `AppContext` objects differ and
+      // `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
+      // Localized checkouts need no dedupe: they are workspace members
+      // (`packages-local/*`), so npm links and dedupes them like any other.
       resolve: {
         ...(isStandalone ? {conditions: ['module', 'node']} : {}),
-        dedupe: [
-          ...new Set([...(isStandalone ? STANDALONE_DEDUPE : []), ...dedupe.names]),
-        ],
+        dedupe: isStandalone ? [...STANDALONE_DEDUPE] : [],
       },
       // `ssr.external` is a minimal allowlist of
       // npm deps that genuinely can't (or shouldn't) go through Vite's

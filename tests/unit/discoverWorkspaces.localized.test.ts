@@ -3,11 +3,12 @@ import os from 'os';
 import path from 'path';
 import {discoverWorkspaces} from '../../src/vite-config';
 
-// A LOCALIZED package (`semantu localize`) is a git checkout in the app's
-// `packages-local/<pkg>` that is in NO workspace glob, reachable only through
-// the `node_modules/<name>` symlink the localizer writes. The dependency pass
-// must register it — that is the mechanism the dev loop rests on — but it must
-// register it under the checkout's REAL path.
+// A LOCALIZED package (`linked localize`) is a git checkout in the app's
+// `packages-local/<pkg>`. In an app set up by `linked localize` the
+// `packages-local/*` glob covers it; in one that is not set up yet it is in no
+// workspace glob, reachable only through its `node_modules/<name>` symlink.
+// The dependency pass must register it then, but under the checkout's REAL
+// path.
 //
 // Registering the `node_modules` spelling instead makes Vite serve one file
 // under two ids (`/node_modules/@fixture/pkg/src/…` from this table,
@@ -35,7 +36,7 @@ describe('discoverWorkspaces with a localized checkout', () => {
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'linked-localized-')));
     app = path.join(tmp, 'app');
     // The app is a workspace root whose globs cover `packages/*` only —
-    // `packages-local/` is deliberately outside every glob.
+    // `packages-local/` is outside every glob (not set up yet).
     writeJson(path.join(app, 'package.json'), {
       name: 'app',
       private: true,
@@ -55,6 +56,17 @@ describe('discoverWorkspaces with a localized checkout', () => {
   });
 
   it('registers the checkout exactly once, at its realpath', async () => {
+    const entries = await discoverWorkspaces([], app);
+    const matches = entries.filter((e) => e.name === '@fixture/pkg');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].srcDir).toBe(path.join(checkout, 'src'));
+  });
+
+  it('registers it once, at its realpath, when the `packages-local/*` glob covers it', async () => {
+    const appPkgPath = path.join(app, 'package.json');
+    const appPkg = JSON.parse(fs.readFileSync(appPkgPath, 'utf8'));
+    appPkg.workspaces = ['packages/*', 'packages-local/*'];
+    writeJson(appPkgPath, appPkg);
     const entries = await discoverWorkspaces([], app);
     const matches = entries.filter((e) => e.name === '@fixture/pkg');
     expect(matches).toHaveLength(1);

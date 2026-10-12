@@ -6,10 +6,10 @@ import {discoverWorkspacePackages} from '../../src/commands/start';
 // The HMR watch set feeds `onSourceChange(name)` — the dispose-and-re-index
 // cycle that replaces a package's registered backend providers. Built from
 // `workspaces` alone it cannot contain a LOCALIZED checkout
-// (`packages-local/<pkg>`, in no workspace glob, reachable only through its
-// `node_modules` symlink), so `workspacePackageForPath` returns null for it and
-// the backend keeps serving the instance it registered at boot: the edit is
-// reloaded by Vite and then has no effect.
+// (`packages-local/<pkg>`) in an app whose globs do not cover it yet,
+// reachable only through its `node_modules` symlink. `workspacePackageForPath`
+// then returns null for it and the backend keeps serving the instance it
+// registered at boot: the edit is reloaded by Vite and then has no effect.
 //
 // The watch set must therefore be discovered the same way `discoverWorkspaces`'
 // dependency pass is — walk dependencies + devDependencies, keep
@@ -60,7 +60,7 @@ describe('discoverWorkspacePackages with a localized checkout', () => {
       linkedPackage: true,
     });
 
-    // The localized checkout: in no glob, reachable only via node_modules.
+    // The localized checkout: in no glob (app not set up), reachable only via node_modules.
     checkout = path.join(app, 'packages-local', 'pkg');
     makePackage(checkout, {name: '@fixture/pkg', version: '1.0.0', linkedPackage: true});
     link(checkout, path.join(app, 'node_modules', '@fixture', 'pkg'));

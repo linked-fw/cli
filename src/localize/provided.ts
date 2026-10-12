@@ -1,7 +1,7 @@
 /**
  * THE rule for what an app provides to its localized checkouts -- the one list
- * that pruning (prune.ts), the run-time one-copy check (ensure.ts) and Vite's
- * `resolve.dedupe` (`../localized-dedupe.ts`) all start from.
+ * that pruning (prune.ts) and the run-time one-copy check (ensure.ts) start
+ * from.
  *
  * - every localized package the app has installed -- always, whatever a range
  *   says: the live checkout is the point of localizing it, for every importer;

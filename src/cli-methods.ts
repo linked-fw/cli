@@ -1065,7 +1065,7 @@ function runBuildScript(
     });
 }
 
-export function buildAll(options) {
+export async function buildAll(options): Promise<void> {
   console.log(
     'Building all linked packages of this repository in order of dependencies',
   );
@@ -1078,38 +1078,59 @@ export function buildAll(options) {
     return;
   }
 
-  // The build tool goes first and alone: every other build runs it.
+  // The build tool's own dependencies, then the tool alone (every other build
+  // runs it), then the rest. See `orderBuildToolFirst`.
   const order = orderBuildToolFirst(plan.build, options?.from);
   const sync = options?.sync || false;
 
   // Successfully built (or deliberately passed over by --from).
   const done: Set<PackageDetails> = new Set();
 
-  if (!order.tool) {
-    return buildInDependencyOrder(order.rest, order.from, sync, done);
-  }
   const tool = order.tool;
-  if (!order.buildToolFirst) {
-    log(chalk.blue('skipping ' + tool.packageName));
-    done.add(tool);
-    return buildInDependencyOrder(order.rest, order.from, sync, done);
+  if (!tool) {
+    await buildInDependencyOrder(order.rest, order.from, sync, done);
+    return;
+  }
+  const passOver = (pkg: PackageDetails) => {
+    log(chalk.blue('skipping ' + pkg.packageName));
+    done.add(pkg);
+  };
+  const plural = (n: number) => `${n} package${n === 1 ? '' : 's'}`;
+
+  if (order.start === 'pre' && order.pre.size > 0) {
+    const names = [...order.pre.keys()].join(', ');
+    const them = order.pre.size === 1 ? 'it' : 'them';
+    console.log(
+      chalk.blue(`Building ${names} first: ${tool.packageName} depends on ${them}.`),
+    );
+    const built = await buildInDependencyOrder(order.pre, order.from, sync, done, {
+      stopNote:
+        `${tool.packageName} needs ${names}, so build-all stopped before it and ` +
+        `the other ${plural(order.rest.size)}, which build with it. ` +
+        `Fix the failure and run build-all again.`,
+    });
+    if (!built) return;
+  } else {
+    order.pre.forEach(passOver);
   }
 
-  // This process has already loaded every module `build-all` uses (the
-  // command's code is imported statically), so the tool's `rimraf ./lib`
-  // cannot pull anything out from under it.
-  console.log(
-    chalk.blue(
-      `Building ${tool.packageName} first: the other packages build with it.`,
-    ),
-  );
-  return runBuildScript(tool).then((res) => {
+  if (order.start === 'rest') {
+    passOver(tool);
+  } else {
+    // This process has already loaded every module `build-all` uses (the
+    // command's code is imported statically), so the tool's `rimraf ./lib`
+    // cannot pull anything out from under it.
+    console.log(
+      chalk.blue(
+        `Building ${tool.packageName} alone: the other packages build with it.`,
+      ),
+    );
+    const res = await runBuildScript(tool);
     if (typeof res === 'undefined') {
-      const others = order.rest.size;
       console.error(
         chalk.red(
           `${tool.packageName} failed to build, so build-all stopped before ` +
-            `the other ${others} package${others === 1 ? '' : 's'}: they build with it. ` +
+            `the other ${plural(order.rest.size)}: they build with it. ` +
             `Fix ${tool.packageName} and run build-all again.`,
         ),
       );
@@ -1121,20 +1142,35 @@ export function buildAll(options) {
         (res === false ? chalk.redBright(' (with warnings)') : ''),
     );
     done.add(tool);
-    if (order.rest.size === 0) {
-      printBuildAllSummary(done, new Set(), new Map(), [], new Map());
-      return;
-    }
-    return buildInDependencyOrder(order.rest, order.from, sync, done);
-  });
+  }
+
+  if (order.rest.size === 0) {
+    printBuildAllSummary(done, new Set(), new Map(), [], new Map());
+    return;
+  }
+  await buildInDependencyOrder(
+    order.rest,
+    order.start === 'rest' ? order.from : undefined,
+    sync,
+    done,
+  );
 }
 
+/**
+ * Build `lincdPackages` in dependency order, in parallel where they allow it.
+ * Resolves to whether every package was built (or passed over by `from`).
+ *
+ * The last group of a run prints the end-of-run summary. A group with more to
+ * follow (`then`) prints it only when something failed, followed by
+ * `then.stopNote`, since nothing after it can be built.
+ */
 function buildInDependencyOrder(
   lincdPackages: Map<string, PackageDetails>,
   from: string | undefined,
   sync: boolean,
   done: Set<PackageDetails>,
-) {
+  then?: {stopNote: string},
+): Promise<boolean> {
   let startFrom: string;
   //by default start building
   let building: boolean = true;
@@ -1158,7 +1194,8 @@ function buildInDependencyOrder(
   progressUpdate(lincdPackages.size + ' packages left');
 
   let packagesLeft = lincdPackages.size;
-  // `done` may already hold the build tool, built before this ran.
+  let allBuilt = false;
+  // `done` may already hold earlier groups (the build tool and what it needs).
   const doneBefore = done.size;
   const finished = runOnPackagesGroupedByDependencies(
     lincdPackages,
@@ -1289,14 +1326,21 @@ function buildInDependencyOrder(
         }
       }
 
-      printBuildAllSummary(done, failed, notBuilt, unscheduled, failureOutput);
-      if (failed.size > 0 || notBuilt.size > 0 || unscheduled.length > 0) {
-        process.exit(1);
+      const problems =
+        failed.size > 0 || notBuilt.size > 0 || unscheduled.length > 0;
+      if (problems || !then) {
+        printBuildAllSummary(done, failed, notBuilt, unscheduled, failureOutput);
       }
+      if (problems) {
+        if (then) console.error(chalk.red(then.stopNote));
+        process.exit(1);
+        return;
+      }
+      allBuilt = true;
     },
     sync,
   );
-  return finished;
+  return finished.then(() => allBuilt);
 }
 
 /**
