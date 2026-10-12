@@ -5,7 +5,7 @@ summary: >
   the working tree stays clean, and localize shrinks to clone/adopt/park/list plus a drift check.
   Pruning, relink, ensure, the provided rule and the localize Vite dedupe are removed. Spans this
   repo and Create Now.
-status: Review
+status: Implementation
 source: docs/backlog/009-localize-on-npm-workspaces.md
 ---
 
@@ -832,6 +832,45 @@ leaves the lockfile alone; app in a repo subdirectory; drift printed once for tw
 unchanged hidden lockfile; post-merge with no checkouts does not run npm; pre-commit refuses when a
 staged manifest cannot be read; a staged deletion passes; the old unguarded script is upgraded.
 **Quick gate:** tsc; `tests/unit/localize`.
+
+**Result:** `hooks/manifests.cjs` (new): `workspaceGlobs`, `trackedGlobs`, `manifestPathspecs`
+(`package.json` + `<glob>/package.json` per glob; array and `{packages}` forms; `./` and trailing
+`/` dropped; negations and any `packages-local/…` glob skipped), `expandGlobs` (per segment, `*`
+`?` `**`), `localMembers` and the shared `LEAK` rule. `hooks/drift.cjs` (new) is the drift
+implementation, ported unchanged (same `Drift` shape, rules and `describeDrift` strings); importers
+are `.`, the expanded tracked globs, then the checkouts; `semver` is `require`d from the hook's
+location, and without it no range is checked. `src/localize/drift.ts` is a typed wrapper that finds
+`hooks/drift.cjs` upwards from itself (works from `src/` under jest and from `lib/esm/` after a
+build, checked) and loads it with `createRequire`; `drift.test.ts` passes unchanged.
+`lock-at-rest.cjs` runs on `require` (no `process.exit`), works from `process.cwd()` with
+`--relative` diffs, checks `manifestPathspecs`, restores from the index when the staged lockfile
+passes the leak rule and from HEAD when it leaks (a lockfile not in the index is left, with a
+line), always adds "changes to dependencies … need `linked delocalize` first", reports drift
+in-process only when `node_modules/.package-lock.json` mtime/size differ from
+`node_modules/.cache/linked-localize/drift-stamp`, and opens `/dev/tty` on the first write.
+`git-hook.cjs`: app dir = cwd; post-merge/post-checkout return before any git or npm call when
+`packages-local/` holds no member; `manifestPathspecs` + `package-lock.json`; pre-commit uses
+`--diff-filter=d --relative`, reads `:./<file>`, and refuses (exit 1, names the git error and
+`--no-verify`) when listing or reading fails. `LOCK_AT_REST_COMMAND` is the guarded `node -e`
+form; set-up replaces a whole `&&` step that is `[npx] linked localize --relink` or the unguarded
+hook (a regex on the script, since the guard itself contains `&&`). Also: `--check`'s help and
+`list.ts`'s header no longer say lock-at-rest runs it; `semver.ts`'s header points at `drift.cjs`.
+Deviations: drift falls back to `packages/*` for an app with no `workspaces` (keeps
+`drift.test.ts` unchanged; `manifestPathspecs` has no such fallback); pre-commit also fails closed
+when it cannot list the staged files. Tests: `manifests.test.ts` (5); `hooks.test.ts` +12 (index vs
+HEAD restore, `apps/*` change, app in a subdirectory for lock-at-rest/pre-commit/post-checkout,
+drift once then again, guarded command via `sh -c` without and with the cli, post-merge without
+checkouts, unreadable staged manifest via a `git` shim on PATH failing `show`, staged deletion, a
+leak without the glob), the existing install tests now have a checkout; `app-setup.test.ts` +2.
+An eight-mutation pass on the hooks (HEAD-only restore, no members guard, fail-open read, no
+`--diff-filter`, no stamp, root-only pathspecs ×2, glob-only leak rule) — each caught. Validation:
+`npx tsc -p tsconfig-esm.json --noEmit` exit 0; `npx jest --config jest.config.cjs
+tests/unit/localize` 13 suites / 154 tests passed; `node --check` exit 0 for all four hooks; the
+`require` grep lists `child_process`, `fs`, `path` and the optional `semver`; `npm run test:unit`
+63 suites / 711 tests passed (11.4 s); `npm run build` exit 0, `npm pack --dry-run` lists the four
+hooks. Notes for P8: the shim must `cd` to the app directory and keep `GIT_DIR`/`GIT_INDEX_FILE`
+usable there (git may export a relative `GIT_DIR`); `docs/localize.md` still describes the
+unguarded command, the `--list --check` call from lock-at-rest and `packages/*`.
 
 ### P8 — Commands: app root, set-up capture, purge, hooksPath, stale text (CLI)
 Findings 1 (`core.hooksPath` skip + print, worktree warning), 5, 8, 9 (purge), 11, 16, and

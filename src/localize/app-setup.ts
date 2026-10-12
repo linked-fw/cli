@@ -27,12 +27,23 @@ export interface SetupChange {
 }
 
 export const WORKSPACE_GLOB = `${LOCAL_DIR}/*`;
-/** What the app's `postinstall` and `dependencies` run. A path, not `linked`: see hooks/lock-at-rest.cjs. */
+/**
+ * What the app's `postinstall` and `dependencies` run: the hook by its path,
+ * not through `linked` (see hooks/lock-at-rest.cjs), and only when the cli is
+ * installed -- `npm ci --omit=dev` leaves it out, and the install must not
+ * fail for that.
+ */
 export const LOCK_AT_REST_COMMAND =
-  'node node_modules/@_linked/cli/hooks/lock-at-rest.cjs';
+  `node -e "const p='node_modules/@_linked/cli/hooks/lock-at-rest.cjs';` +
+  `require('fs').existsSync(p)&&require(require('path').resolve(p))"`;
 const HOOK_SCRIPTS = ['postinstall', 'dependencies'] as const;
-/** What an app ran before checkouts were workspace members; the hook replaces it. */
-const OLD_RELINK = /^(npx )?linked localize --relink$/;
+/**
+ * Steps the hook replaces: what an app ran before checkouts were workspace
+ * members, and the hook's first, unguarded form. Matched as a whole step of
+ * an `&&` chain.
+ */
+const REPLACED_STEP =
+  /(^|&&)(\s*)(?:(?:npx )?linked localize --relink|node node_modules\/@_linked\/cli\/hooks\/lock-at-rest\.cjs)(\s*)(?=&&|$)/g;
 const IGNORED = [`${LOCAL_DIR}/`, `${PARKED_DIR}/`];
 
 /** Make the app ready for checkouts; returns what it changed. */
@@ -96,17 +107,20 @@ function setupPackageJson(appRoot: string): SetupChange[] {
 
 /**
  * The script with the hook in it: the hook alone for none, an old
- * `linked localize --relink` step replaced by it, anything else kept with the
- * hook after it. A script that already runs the hook is returned as it is.
+ * `linked localize --relink` step or the unguarded hook replaced by it,
+ * anything else kept with the hook after it. A script that already runs the
+ * hook (or runs `hooks/lock-at-rest.cjs` some other way) is returned as it is.
  */
 function withHook(script: string | undefined): string {
   if (script === undefined || !script.trim()) return LOCK_AT_REST_COMMAND;
+  if (script.includes(LOCK_AT_REST_COMMAND)) return script;
+  const replaced = script.replace(
+    REPLACED_STEP,
+    (_step, chain: string, before: string, after: string) =>
+      `${chain}${before}${LOCK_AT_REST_COMMAND}${after}`,
+  );
+  if (replaced !== script) return replaced;
   if (script.includes('hooks/lock-at-rest.cjs')) return script;
-  const steps = script.split('&&').map((s) => s.trim());
-  if (steps.some((s) => OLD_RELINK.test(s)))
-    return steps
-      .map((s) => (OLD_RELINK.test(s) ? LOCK_AT_REST_COMMAND : s))
-      .join(' && ');
   return `${script} && ${LOCK_AT_REST_COMMAND}`;
 }
 

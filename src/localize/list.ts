@@ -5,9 +5,9 @@
  * workspace member, every one in `.packages-local.parked/` is parked. A row
  * per checkout -- name, directory, branch, version -- then one line per drift.
  *
- * `--check` is what `hooks/lock-at-rest.cjs` runs after every install, so it
- * prints only the drift (nothing when there is none) and exits 1 when there is
- * any. Never writes.
+ * `--check` is for CI and scripts: it prints only the drift (nothing when
+ * there is none) and exits 1 when there is any. (The lock-at-rest hook reports
+ * drift itself, with `hooks/drift.cjs`.) Never writes.
  */
 import path from 'node:path';
 

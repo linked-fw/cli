@@ -1,6 +1,7 @@
 /**
- * The one range check localize makes: drift (drift.ts) asks whether a
- * checkout meets a declared range.
+ * The range check drift makes, for TypeScript callers: whether a checkout
+ * meets a declared range. `hooks/drift.cjs` applies the same rule in plain
+ * CommonJS for the hooks.
  */
 import semver from 'semver';
 

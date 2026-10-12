@@ -78,6 +78,33 @@ test('replaces linked localize --relink, appends to any other script, keeps one 
   assert.equal(scripts.dependencies, `${HOOK} && bar`);
 });
 
+test('the hook is guarded: it runs only when the cli is installed', () => {
+  assert.equal(
+    HOOK,
+    `node -e "const p='node_modules/@_linked/cli/hooks/lock-at-rest.cjs';require('fs').existsSync(p)&&require(require('path').resolve(p))"`,
+  );
+});
+
+test('upgrades the unguarded hook in place, alone or inside an && chain', (t) => {
+  const OLD = 'node node_modules/@_linked/cli/hooks/lock-at-rest.cjs';
+  const appRoot = consumer(t, {
+    workspaces: ['packages-local/*'],
+    scripts: {postinstall: OLD, dependencies: `foo && ${OLD} && bar`},
+  });
+  const changes = ensureAppSetup(appRoot);
+  assert.deepEqual(
+    changes.filter((c) => c.file === 'package.json').map((c) => c.what),
+    [`scripts.postinstall: "${OLD}" -> "${HOOK}"`, `scripts.dependencies: "foo && ${OLD} && bar" -> "foo && ${HOOK} && bar"`],
+  );
+  const text = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
+  const {scripts} = JSON.parse(text);
+  assert.equal(scripts.postinstall, HOOK);
+  assert.equal(scripts.dependencies, `foo && ${HOOK} && bar`);
+  // Written as JSON: the quotes inside the command are escaped, and it reads back unchanged.
+  assert.ok(text.includes(JSON.stringify(HOOK)));
+  assert.deepEqual(ensureAppSetup(appRoot), []);
+});
+
 test('keeps the indentation, key order and trailing newline', (t) => {
   const appRoot = consumer(t);
   const file = path.join(appRoot, 'package.json');

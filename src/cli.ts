@@ -528,7 +528,7 @@ program
   )
   .option(
     '--check',
-    'With --list: print only the drift, and exit 1 when there is any. What the lock-at-rest hook runs after every install.',
+    'With --list: print only the drift, and exit 1 when there is any (for CI and scripts).',
   )
   .option(
     '--adopt',
