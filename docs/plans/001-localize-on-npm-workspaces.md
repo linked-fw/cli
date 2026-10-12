@@ -110,6 +110,11 @@ review, by the developers.
   recorded in the CN how-to.
 - npm warns `allowScripts in workspace … is ignored` for checkouts. Harmless; documented, not
   silenced.
+- npm runs every checkout's `prepare`/`postinstall` on every root install. None is expensive
+  today; the localize doc asks checkouts to keep it that way.
+- `linked create-app` clones `linked-fw/app-template`, a separate repository, so new apps get the
+  glob and hooks only when that template changes. Proposed as a follow-up backlog item; until
+  then the first `linked localize` in an app performs the setup (D8).
 
 ## Plan
 
