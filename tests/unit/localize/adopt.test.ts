@@ -51,9 +51,14 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
   const appRoot = consumer(t, {}, {setUp: false});
   seed(appRoot, 'scope-thing', {name: '@scope/thing', version: '1.0.0'});
   let seenByLockOnly: boolean | null = null;
+  let asideDuringLockOnly: boolean | null = null;
   const deps = stubbed(appRoot, (inv) => {
-    if (inv.args.includes('--package-lock-only'))
+    if (inv.args.includes('--package-lock-only')) {
       seenByLockOnly = fs.existsSync(path.join(appRoot, 'packages-local/scope-thing'));
+      asideDuringLockOnly = fs.existsSync(
+        path.join(appRoot, 'packages-local/.setup-aside/scope-thing/package.json'),
+      );
+    }
     return branchMain(inv);
   });
 
@@ -75,7 +80,8 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
   );
   assert.equal(seenByLockOnly, false, 'npm made the set-up lockfile without the checkout');
   assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/scope-thing/package.json')), 'moved back');
-  assert.equal(fs.existsSync(path.join(appRoot, '.packages-local.setup')), false);
+  assert.equal(asideDuringLockOnly, true, 'set aside inside packages-local/, outside its glob');
+  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside')), false);
   const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
   assert.deepEqual(pkg.workspaces, ['packages-local/*']);
   assert.match(deps.output(), /@scope\/thing -> packages-local\/scope-thing \(branch main\)/);

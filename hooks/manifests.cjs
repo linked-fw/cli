@@ -109,6 +109,42 @@ function expandGlobs(appRoot, globs) {
 }
 
 /**
+ * Do the workspace `globs` match `rel` (a directory relative to the app, `/`-separated) the way
+ * `expandGlobs` would find it -- `*` and `?` within a segment, `**` across any depth, never into
+ * node_modules or a dot directory -- and does no negation (`!glob`) exclude it?
+ */
+function globsMatch(globs, rel) {
+  const target = rel.split('/').filter((s) => s !== '' && s !== '.');
+  if (!target.length) return false;
+  const matches = (segments, names) => {
+    if (!segments.length) return !names.length;
+    const [segment, ...rest] = segments;
+    if (segment === '**') {
+      if (matches(rest, names)) return true;
+      return names.length > 0 && wildcardName(names[0]) && matches(segments, names.slice(1));
+    }
+    if (!names.length) return false;
+    if (/[*?]/.test(segment)) {
+      if (!wildcardName(names[0]) || !segmentRegExp(segment).test(names[0])) return false;
+    } else if (segment !== names[0]) return false;
+    return matches(rest, names.slice(1));
+  };
+  const split = (g) => g.replace(/^\.\//, '').replace(/\/+$/, '').split('/').filter((s) => s !== '');
+  let included = false;
+  for (const glob of globs) {
+    if (glob.startsWith('!')) {
+      if (matches(split(glob.slice(1)), target)) return false;
+    } else if (!included && matches(split(glob), target)) included = true;
+  }
+  return included;
+}
+
+// What a wildcard segment may stand for: not node_modules, not a dot directory.
+function wildcardName(name) {
+  return !name.startsWith('.') && name !== 'node_modules';
+}
+
+/**
  * The checkouts npm links: every directory in `packages-local/` with a named package.json, as
  * `{name, version, dir}` with `dir` app-relative, sorted by name.
  */
@@ -141,5 +177,6 @@ module.exports = {
   trackedGlobs,
   manifestPathspecs,
   expandGlobs,
+  globsMatch,
   localMembers,
 };

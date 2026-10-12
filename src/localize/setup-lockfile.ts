@@ -15,8 +15,12 @@
  * (`EALLOWREMOTE`, fetching that package's tarball to read them). So when the
  * root entry already has both fields in place -- any app with workspaces and
  * an install script -- the edit is made here, and `null` sends the caller to
- * npm for the rest.
+ * npm for the rest. The edit replaces only the glob list, so it is exact only
+ * when the root entry's `workspaces` is what `package.json` had before the
+ * set-up; a lockfile already behind `package.json` there goes to npm too.
  */
+import {isDeepStrictEqual} from 'node:util';
+
 
 /** The dependency fields npm copies into the root entry; they must already agree. */
 const DEP_FIELDS = [
@@ -29,14 +33,19 @@ const DEP_FIELDS = [
 /**
  * @param lockText  the current `package-lock.json`
  * @param pkg       the app's `package.json` after the set-up
+ * @param workspacesBefore  `package.json`'s `workspaces` before the set-up
  * @returns the lockfile with the root entry's `workspaces` set to `pkg`'s, or
  *   null when the edit could not be exact: no v2/v3 root entry, no
  *   `workspaces` or `hasInstallScript` in it yet (npm decides where a new key
- *   goes), dependency fields that do not match (`package.json` has unlocked
- *   changes npm must resolve), or a layout `JSON.stringify` would not
- *   reproduce.
+ *   goes), a root `workspaces` that is not `workspacesBefore`, dependency
+ *   fields that do not match (`package.json` has unlocked changes npm must
+ *   resolve), or a layout `JSON.stringify` would not reproduce.
  */
-export function setupLockfileByEdit(lockText: string, pkg: any): string | null {
+export function setupLockfileByEdit(
+  lockText: string,
+  pkg: any,
+  workspacesBefore: unknown,
+): string | null {
   let lock: any;
   try {
     lock = JSON.parse(lockText);
@@ -47,6 +56,7 @@ export function setupLockfileByEdit(lockText: string, pkg: any): string | null {
   if (!root || typeof root !== 'object' || !(lock.lockfileVersion >= 2)) return null;
   if (!('workspaces' in root) || root.hasInstallScript !== true) return null;
   if (!pkg || pkg.workspaces === undefined) return null;
+  if (!isDeepStrictEqual(root.workspaces, workspacesBefore)) return null;
   for (const field of DEP_FIELDS) {
     if (!sameDeps(pkg[field], root[field])) return null;
   }

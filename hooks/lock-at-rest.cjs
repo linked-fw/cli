@@ -21,6 +21,8 @@ const {LEAK, localMembers, manifestPathspecs} = require('./manifests.cjs');
 const MAX_BUFFER = 256 * 1024 * 1024;
 const LOCKFILE = 'package-lock.json';
 const ADVICE = 'To change dependencies: npx linked delocalize, npm install <dep>, commit, then npx linked localize --parked.';
+// What marks a git hook `linked localize` wrote: the same text as HOOK_MARKER in src/localize/git-hooks.ts.
+const HOOK_MARKER = '# managed by linked localize';
 
 function run() {
   // npm runs lifecycle scripts from the package root: the app, which may sit below the git top
@@ -110,11 +112,39 @@ function run() {
     }
   }
 
-  // The drift report, from the hidden lockfile npm just wrote; only when its content changed since
-  // the last report, so the second of `postinstall` and `dependencies`, and an install that changed
-  // nothing, stay quiet. npm rewrites the file on every install, so its mtime says nothing: the
-  // stamp is a hash of the content. Report only.
-  function reportDrift() {
+  // A clone set up by hand (a bootstrap that copied packages-local/ in, or ran `npm install` only)
+  // never got the git hooks: no pre-commit refuses a leaked lockfile, and no npm install follows a
+  // pull. True when this is a work tree, `core.hooksPath` is unset (then the hooks are added by
+  // hand, see git-hooks.ts) and the hooks directory has no pre-commit of ours.
+  function hooksMissing() {
+    try {
+      if (git('rev-parse', '--is-inside-work-tree').trim() !== 'true') return false;
+    } catch {
+      return false;
+    }
+    try {
+      if (git('config', 'core.hooksPath').trim()) return false;
+    } catch {
+      /* unset */
+    }
+    let dir;
+    try {
+      dir = git('rev-parse', '--git-path', 'hooks').trim();
+    } catch {
+      return false;
+    }
+    try {
+      return !fs.readFileSync(path.resolve(root, dir, 'pre-commit'), 'utf8').includes(HOOK_MARKER);
+    } catch {
+      return true;
+    }
+  }
+
+  // The drift report and the missing-hooks notice, after the hidden lockfile npm just wrote; only
+  // when its content changed since the last report, so the second of `postinstall` and
+  // `dependencies`, and an install that changed nothing, stay quiet. npm rewrites the file on every
+  // install, so its mtime says nothing: the stamp is a hash of the content. Report only.
+  function report(members) {
     const nodeModules = path.join(root, 'node_modules');
     let content;
     try {
@@ -131,6 +161,11 @@ function run() {
     }
     const {driftProblems, describeDrift} = require('./drift.cjs');
     for (const d of driftProblems(root)) write(`[localize] drift: ${describeDrift(d)}\n`);
+    if (hooksMissing())
+      say(
+        `git hooks are not installed in this clone: run \`npx linked localize ${members[0].name} ` +
+          `--adopt --build ''\` once`,
+      );
     try {
       fs.mkdirSync(path.dirname(stampFile), {recursive: true});
       fs.writeFileSync(stampFile, stamp);
@@ -143,7 +178,7 @@ function run() {
     const members = localMembers(root);
     if (!members.length) return; // nothing localized: npm owns the lockfile as usual
     restore(members);
-    reportDrift();
+    report(members);
   } catch (e) {
     say(`skipped: ${e && e.message ? e.message : e}`);
   } finally {

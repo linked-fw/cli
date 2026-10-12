@@ -23,14 +23,18 @@ before `start`/`script`/`call`/`build-all`.
   prints what to commit: `git status` shows exactly `package.json`, `package-lock.json` and
   `.gitignore`. An app set up with the earlier unguarded hook command is upgraded. An `overrides`
   key naming a localized package is refused (exit 6). See `docs/localize.md`.
-- **App root.** `localize`, `delocalize`, `--list` and the drift report act on the topmost
-  directory whose `package.json` has `workspaces`, so they work from inside a member.
+- **App root.** `localize`, `delocalize`, `--list`, the drift report and `build-all` act on the
+  nearest directory whose `package.json` has `workspaces`, climbing further only through
+  ancestors whose globs match it, so they work from inside a member, and a git worktree nested in
+  the app (`.claude/worktrees/<wt>`) stays its own app.
 - **Git hooks** follow the app below the git top level, and under `core.hooksPath` (husky) nothing
   is written: localize prints the line to add to each hook. In a linked worktree it warns that the
-  hooks are shared; they act only in a work tree with checkouts.
+  hooks are shared; they act only in a work tree with checkouts. A clone with checkouts but no
+  hooks (put in by hand) gets a one-line notice from lock-at-rest naming the command that writes
+  them: `npx linked localize <name> --adopt --build ''`.
 - **New:** `linked delocalize` parks checkouts in `.packages-local.parked/` (`--purge` deletes, and
-  refuses with exit 6 -- was 5 -- on uncommitted changes, commits on any branch no remote has, a
-  stash, a checkout without `.git` or any failing git call; `--force` overrides);
+  refuses with exit 6 -- was 5 -- on uncommitted changes, commits no remote has (on any branch or
+  a detached HEAD), a stash, a checkout without `.git` or any failing git call; `--force` overrides);
   `linked localize <name>` or `--parked` takes them back. `--subdir` clones monorepos into
   `packages-local/.repos/`.
 - **Removed:** `--reinstall`, `--no-prune` and `localize --force`, together with pruning and the

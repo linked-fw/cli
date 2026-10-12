@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {ensureAppSetup} from '../../../src/localize/app-setup.js';
+import {installGitHooks} from '../../../src/localize/git-hooks.js';
 import {rm, test, tmpdir} from './helpers.js';
 
 const HOOKS = path.resolve(__dirname, '../../../hooks');
@@ -251,6 +252,80 @@ test('lock-at-rest: drift is reported once per change of the installed tree', (t
   fs.writeFileSync(hidden, tree('0.10.0'));
   r = node(LOCK_AT_REST, [], root);
   assert.match(r.stderr, /drift: second copy of localized @x\/a@0\.10\.0/);
+});
+
+/** What `npm install` leaves in node_modules: the hidden lockfile the report is stamped on. */
+function installedTree(root, extra = {}) {
+  const hidden = path.join(root, 'node_modules', '.package-lock.json');
+  fs.mkdirSync(path.dirname(hidden), {recursive: true});
+  fs.writeFileSync(
+    hidden,
+    json({
+      name: 'app',
+      lockfileVersion: 3,
+      packages: {
+        'packages-local/a': {name: '@x/a', version: '1.0.0'},
+        'node_modules/@x/a': {resolved: 'packages-local/a', link: true},
+        ...extra,
+      },
+    }),
+  );
+}
+
+const HOOKS_NOTICE =
+  /git hooks are not installed in this clone: run `npx linked localize @x\/a --adopt --build ''` once/;
+
+test('lock-at-rest: a clone with checkouts but no git hooks is told how to install them, once', (t) => {
+  const root = app(t);
+  member(root);
+  installedTree(root);
+  let r = node(LOCK_AT_REST, [], root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, HOOKS_NOTICE);
+  assert.equal(r.stderr.match(new RegExp(HOOKS_NOTICE.source, 'g'))?.length, 1);
+  r = node(LOCK_AT_REST, [], root); // `dependencies` after `postinstall`
+  assert.equal(r.stderr, '', 'not again for the same install');
+
+  // A pre-commit that is not ours does not count.
+  fs.writeFileSync(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+  installedTree(root, {'node_modules/left': {version: '1.0.0'}});
+  r = node(LOCK_AT_REST, [], root);
+  assert.match(r.stderr, HOOKS_NOTICE);
+});
+
+test('lock-at-rest: no hooks notice once localize wrote the hooks, or under core.hooksPath, or with nothing localized', (t) => {
+  const withHooks = app(t);
+  member(withHooks);
+  installedTree(withHooks);
+  // As localize writes them, without the developer's git config (a global core.hooksPath).
+  const saved = {...process.env};
+  Object.assign(process.env, {GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1'});
+  let installed;
+  try {
+    installed = installGitHooks(withHooks);
+  } finally {
+    for (const k of ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM']) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+  assert.ok(installed.written.some((f) => f.endsWith('pre-commit')));
+  let r = node(LOCK_AT_REST, [], withHooks);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /git hooks are not installed/);
+
+  const husky = app(t);
+  member(husky);
+  installedTree(husky);
+  git(husky, 'config', 'core.hooksPath', '.husky/_');
+  r = node(LOCK_AT_REST, [], husky);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /git hooks are not installed/);
+
+  const none = app(t);
+  installedTree(none);
+  r = node(LOCK_AT_REST, [], none);
+  assert.equal(r.stderr, '');
 });
 
 test('lock-at-rest: the guarded command is a silent no-op without the cli, and runs the hook with it', (t) => {

@@ -3,7 +3,8 @@ summary: >
   `linked localize` / `linked delocalize` — develop an npm dependency from a git checkout that the
   app's `"packages-local/*"` workspace glob makes a member, so npm links and dedupes it. How it
   works (glob, lock-at-rest hook, git hooks incl. core.hooksPath/husky and worktrees, drift check),
-  the app root, the one-step app set-up and what to commit, commands, purge rules, monorepos (`.repos/`), building (incl. the cli), drift, parking, changing
+  the app root (nested worktrees stay their own), the one-step app set-up, what to commit and
+  `.setup-aside/` recovery, the missing-hooks notice, commands, purge rules, monorepos (`.repos/`), building (incl. the cli), drift, parking, changing
   dependencies while localized, Docker/CI, migrating from the old localize, exit codes.
 ---
 
@@ -94,10 +95,15 @@ exactly as npm names them (`@_linked/rdfs`, `lodash`); there are no short names.
 `.packages-local.parked/` is parked. There is no other file.
 
 **The app root.** `localize`, `delocalize`, `--list` and the drift report before `linked start`
-act on the topmost directory above (or at) the current one whose `package.json` has `workspaces`,
-preferring one that is not itself a linked package — the same root `build-all` uses. So running
-them inside `packages/foo` sets up and installs the app, not the member. An app with no
-`workspaces` yet is the current directory (the set-up adds them).
+act on the app root, the same one `build-all` uses: the nearest directory above (or at) the
+current one whose `package.json` has `workspaces`, then each higher one with `workspaces` whose
+globs match it (as npm would find it: `*` within a segment, `**` across depth, no dot directories,
+negations honoured). The first ancestor whose globs do not match ends the climb. Of that chain the
+topmost one that is not itself a linked package wins. So running them inside `packages/foo` sets up
+and installs the app, not the member, while a git worktree nested in the app
+(`<app>/.claude/worktrees/<wt>`, which no app glob matches) is its own app: a command run there
+never touches the main checkout. An app with no `workspaces` yet is the current directory (the
+set-up adds them).
 
 **The dependency manifests** are the app's `package.json` and one per workspace member, from the
 app's own `workspaces` globs (`packages/*`, `apps/*`, …; `packages-local/*` excluded). The hooks
@@ -136,11 +142,14 @@ cannot give. So when the set-up changed `package.json`, localize makes that lock
 anything is cloned, keeps it, and writes it back after the main install:
 
 - **An app with `workspaces` and an install script already** (the root entry of its lockfile has
-  both keys): the root entry's `workspaces` is set to `package.json`'s — an edit, offline and
-  exact. This is the usual case.
+  both keys, and its `workspaces` is exactly what `package.json` had before the set-up): the root
+  entry's `workspaces` is set to `package.json`'s — an edit, offline and exact. This is the usual
+  case. A lockfile already behind `package.json` there goes to npm instead.
 - **Otherwise** npm decides where the new keys go:
   `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` at the app root
-  (checkouts already in `packages-local/`, an adopted one, are moved aside for that call). A
+  (checkouts already in `packages-local/`, an adopted one, are moved into
+  `packages-local/.setup-aside/` for that call: still gitignored, and a dot directory, which the
+  `packages-local/*` glob skips). A
   lockfile-only resolve can record more than the set-up (on a large app, the bundled dependencies
   of an optional package for another platform), and npm 12 can refuse it (`EALLOWREMOTE`); the
   manual way below covers that.
@@ -156,6 +165,13 @@ The committed lockfile change is the root entry's `workspaces` gaining `"package
 installs exactly what they did before. During that first install lock-at-rest may warn that
 `package.json` differs from HEAD; the lockfile it is talking about is the one localize then
 replaces.
+
+**An interrupted run** (Ctrl-C during that npm call) can leave the checkouts in
+`packages-local/.setup-aside/`, where npm does not see them. The next `linked localize`,
+`delocalize` or `--list` moves them back first and says so in one line
+(`moved 1 checkout back from packages-local/.setup-aside/ into packages-local/ …`). If a checkout of
+the same directory name has appeared in `packages-local/` since, it refuses with exit 6, names it
+and moves nothing: keep one of the two and run it again.
 
 **When npm's step fails** (it cannot reach the registry, say), localize says so and prints the
 manual way instead, which still works:
@@ -217,8 +233,8 @@ saved elsewhere. It refuses with exit 6, and deletes nothing, when
 - the checkout (or the cloned monorepo it links into) has no `.git`;
 - any git call it makes fails — a git that cannot answer is not taken as "nothing unsaved";
 - `git status --porcelain` lists uncommitted changes (untracked files included);
-- `git log --branches --not --remotes` lists a commit: on **any** local branch, not only the
-  checked-out one, that no remote has;
+- `git log HEAD --branches --not --remotes` lists a commit that no remote has: on **any** local
+  branch, not only the checked-out one, or on a detached `HEAD`, which no branch holds;
 - `git stash list` is not empty.
 
 `--force` deletes anyway, and says what it overrode.
@@ -279,10 +295,14 @@ without `linked`:
 (cd packages-local/_linked-cli && npm run build)
 npm rebuild @_linked/cli --ignore-scripts             # link node_modules/.bin/linked
 npx linked build-all                                  # everything, now with the built cli
+npx linked localize @_linked/cli --adopt --build ''   # install the git hooks, nothing rebuilt
 ```
 
-Check `ls -l node_modules/.bin/linked` before the last line: without the link, `npx linked`
-offers to install the npm package `linked`, which is something else.
+Check `ls -l node_modules/.bin/linked` before `build-all`: without the link, `npx linked`
+offers to install the npm package `linked`, which is something else. Only a localize run writes
+the git hooks, so any clone whose checkouts arrived some other way (by hand, a copy, a plain
+`npm install`) ends with that last line, for any one checkout's name; until then lock-at-rest says
+so after each install (see [Git hooks](#git-hooks)).
 
 ## Drift
 
@@ -366,6 +386,18 @@ tree without the cli installed skips it rather than blocking git.
 A `pre-commit`, `post-merge` or `post-checkout` you wrote yourself is left alone and reported;
 without ours there, run `npm install` after pulls that change dependencies.
 
+**A clone without the hooks.** Only `linked localize` writes them, so a clone whose checkouts were
+put in some other way has none, and nothing stops a leaked lockfile from being committed. When
+checkouts are present, `core.hooksPath` is unset and the hooks directory has no `pre-commit` of
+ours, lock-at-rest prints, once per install that changed the tree (with the drift report):
+
+```
+[lock-at-rest] git hooks are not installed in this clone: run `npx linked localize @_linked/core --adopt --build ''` once
+```
+
+That run (any checkout's name; `--build ''` builds nothing) writes the hooks and runs one
+`npm install`. Under `core.hooksPath` the notice stays quiet: add the lines localize prints there.
+
 ## `npm ci` with checkouts present fails
 
 `npm ci` refuses (`EUSAGE`, lockfile out of sync): the committed lockfile does not list the
@@ -440,8 +472,8 @@ holding its own pruned `node_modules` must not sit next to members.
    set-up, runs one `npm install` and builds each checkout.
 6. Commit the set-up: `package.json`, `package-lock.json` and `.gitignore`, as printed. With
    checkouts present, the set-up's lockfile is an edit of its root entry, or made with them
-   moved aside for one `npm install --package-lock-only` (see [Set-up](#set-up)); if that fails,
-   use the manual steps printed there.
+   moved into `packages-local/.setup-aside/` for one `npm install --package-lock-only` (see
+   [Set-up](#set-up)); if that fails, use the manual steps printed there.
 
 ## What it never does
 
@@ -449,8 +481,8 @@ holding its own pruned `node_modules` must not sit next to members.
 - edit `overrides`, your dependencies, a checkout's `package.json` or its lockfile
 - commit anything (the set-up is reported for you to commit)
 - clone over an existing directory, or overwrite a git hook it did not write
-- delete a checkout with uncommitted changes, unpushed commits on any branch or a stash, or one
-  git cannot check (without `--force`)
+- delete a checkout with uncommitted changes, unpushed commits (on any branch or a detached
+  `HEAD`) or a stash, or one git cannot check (without `--force`)
 - write into a `core.hooksPath` directory
 - guess a repository URL
 

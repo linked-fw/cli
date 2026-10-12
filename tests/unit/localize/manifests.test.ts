@@ -8,7 +8,7 @@ import path from 'node:path';
 
 import {makeConsumer, rm, test} from './helpers.js';
 
-const {manifestPathspecs, expandGlobs, trackedGlobs, LEAK} = require(
+const {manifestPathspecs, expandGlobs, globsMatch, trackedGlobs, LEAK} = require(
   path.resolve(__dirname, '../../../hooks/manifests.cjs'),
 );
 
@@ -62,4 +62,21 @@ test('the leak rule: a checkout entry, not the glob', () => {
   assert.ok(LEAK.test('"packages-local/a": {'));
   assert.ok(LEAK.test('"resolved": "packages-local/_linked-core"'));
   assert.ok(!LEAK.test('"workspaces": ["packages/*", "packages-local/*"]'));
+});
+
+test('globsMatch: a directory the globs would find, as expandGlobs walks them', () => {
+  const globs = ['./packages/*', 'apps/**/', 'tools/c?i', '!packages/skip'];
+  for (const rel of ['packages/foo', 'apps/web', 'apps/a/b', 'tools/cli'])
+    assert.equal(globsMatch(globs, rel), true, rel);
+  for (const rel of [
+    'packages/skip', // negated
+    'packages/foo/bar', // `*` is one segment
+    '.claude/worktrees/wt', // a worktree nested in the app
+    'packages/.hidden', // wildcards skip dot directories
+    'apps/node_modules/x',
+    'tools/cli2',
+    '',
+  ])
+    assert.equal(globsMatch(globs, rel), false, rel);
+  assert.equal(globsMatch(['.claude/worktrees/*'], '.claude/worktrees/wt'), true, 'named literally');
 });

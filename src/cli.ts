@@ -578,7 +578,7 @@ program
   )
   .option(
     '--force',
-    'With --purge, delete even a checkout with unsaved work (uncommitted changes, commits on a branch no remote has, a stash) or one git cannot check.',
+    'With --purge, delete even a checkout with unsaved work (uncommitted changes, commits no remote has, on a branch or a detached HEAD, a stash) or one git cannot check.',
   )
   .action(async (packages: string[], options) => {
     const {runDelocalize} = await import('./commands/localize.js');

@@ -387,7 +387,7 @@ test('delocalize --purge refuses on unpushed commits, and --force deletes', (t) 
 
   const deps = stubbed(appRoot, unpushed);
   assert.equal(delocalize(['@x/a'], {purge: true}, deps), 6);
-  assert.match(deps.output(), /1 commit on a branch no remote has/);
+  assert.match(deps.output(), /1 commit no remote has/);
   assert.ok(fs.existsSync(dir), 'kept');
   assert.equal(deps.npmCalls().length, 0, 'nothing changed, nothing installed');
 
@@ -499,4 +499,40 @@ test('a leftover local-packages.json gets one migration hint and is otherwise ig
   assert.equal(list({}, deps), 0);
   assert.equal(deps.warns.length, 1);
   assert.match(deps.warns[0], /local-packages\.json is no longer read/);
+});
+
+// --- an interrupted set-up -------------------------------------------------
+
+test('checkouts an interrupted set-up left in packages-local/.setup-aside are moved back first', (t) => {
+  for (const command of ['list', 'delocalize', 'localize'] as const) {
+    const appRoot = consumer(t);
+    seedCheckout(appRoot, 'packages-local/.setup-aside/x-a', {name: '@x/a', version: '1.0.0'});
+    const deps = stubbed(appRoot, (inv) =>
+      inv.cmd === 'git' && inv.args[0] === 'symbolic-ref' ? ok('main\n') : undefined,
+    );
+    if (command === 'list') assert.equal(list({}, deps), 0, deps.output());
+    // Nothing named so: the restored checkout is what is parked.
+    if (command === 'delocalize') assert.equal(delocalize([], {}, deps), 0, deps.output());
+    if (command === 'localize')
+      assert.equal(localize(['@x/a'], {}, deps), 6, 'then refused as already there');
+    assert.match(
+      deps.output(),
+      /moved 1 checkout back from packages-local\/\.setup-aside\/ into packages-local\//,
+      command,
+    );
+    assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside')), false, command);
+    const home = command === 'delocalize' ? '.packages-local.parked/x-a' : 'packages-local/x-a';
+    assert.ok(fs.existsSync(path.join(appRoot, home, 'package.json')), `${command}: ${home}`);
+  }
+});
+
+test('a leftover that clashes with a checkout of the same name refuses (exit 6) and moves nothing', (t) => {
+  const appRoot = consumer(t);
+  seedCheckout(appRoot, 'packages-local/.setup-aside/x-a', {name: '@x/a', version: '1.0.0'});
+  seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '2.0.0'});
+  const deps = stubbed(appRoot);
+  assert.equal(list({}, deps), 6);
+  assert.match(deps.output(), /packages-local\/x-a now exists too.*Nothing was moved/s);
+  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside/x-a/package.json')));
+  assert.equal(deps.calls.length, 0);
 });

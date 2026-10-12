@@ -7,14 +7,21 @@
  *
  * `--check` is for CI and scripts: it prints only the drift (nothing when
  * there is none) and exits 1 when there is any. (The lock-at-rest hook reports
- * drift itself, with `hooks/drift.cjs`.) Never writes.
+ * drift itself, with `hooks/drift.cjs`.) It writes nothing, except that
+ * checkouts an interrupted set-up left in `packages-local/.setup-aside/` are
+ * moved back first, as `localize` and `delocalize` do.
  */
 import path from 'node:path';
 
 import {describeDrift, driftProblems} from './drift.js';
 import type {Drift} from './drift.js';
 import {EXIT_DRIFT} from './errors.js';
-import {currentBranch, legacyManifestHint} from './localize.js';
+import {
+  currentBranch,
+  legacyManifestHint,
+  reportError,
+  restoreSetAside,
+} from './localize.js';
 import {localMembers, parkedMembers} from './members.js';
 import type {Member} from './members.js';
 import type {Deps} from './run.js';
@@ -42,6 +49,11 @@ export function collect(deps: Deps): {rows: ListRow[]; drift: Drift[]} {
 
 export function list(opts: {check?: boolean}, deps: Deps): number {
   legacyManifestHint(deps);
+  try {
+    restoreSetAside(deps);
+  } catch (e) {
+    return reportError(e, deps);
+  }
   if (opts.check) {
     const drift = driftProblems(deps.appRoot);
     for (const d of drift) deps.warn(`[localize] drift: ${describeDrift(d)}`);

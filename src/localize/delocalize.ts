@@ -16,15 +16,21 @@
  *
  * `--purge` deletes the checkout instead of parking it. It fails closed:
  * unless `--force`, it refuses (exit 6) when the checkout is not a git
- * repository, when any git call fails, and on uncommitted changes, commits on
- * any branch that no remote has, or a stash.
+ * repository, when any git call fails, and on uncommitted changes, commits
+ * that no remote has (on any branch or a detached HEAD), or a stash.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
 import {EXIT_INSTALL_FAILED, EXIT_REFUSED, EXIT_WARNED} from './errors.js';
 import {checkoutRepoRoot, existsOrLink, isInside, isSymlink, moveEntry} from './fsops.js';
-import {INSTALL_ARGS, legacyManifestHint, tail} from './localize.js';
+import {
+  INSTALL_ARGS,
+  legacyManifestHint,
+  reportError,
+  restoreSetAside,
+  tail,
+} from './localize.js';
 import {
   LOCAL_DIR,
   PARKED_DIR,
@@ -40,6 +46,11 @@ export function delocalize(
   deps: Deps,
 ): number {
   legacyManifestHint(deps);
+  try {
+    restoreSetAside(deps);
+  } catch (e) {
+    return reportError(e, deps);
+  }
   const members = localMembers(deps.appRoot);
   let code = 0;
   const targets: Member[] = [];
@@ -175,9 +186,9 @@ function purgeRefusal(repo: string, deps: Deps): string | null {
       what: (n) => `${n} uncommitted change${n === 1 ? '' : 's'}`,
     },
     {
-      // Every local branch, not only the checked-out one, against every remote.
-      args: ['log', '--oneline', '--branches', '--not', '--remotes'],
-      what: (n) => `${n} commit${n === 1 ? '' : 's'} on a branch no remote has`,
+      // HEAD (a detached one has no branch) and every local branch, against every remote.
+      args: ['log', '--oneline', 'HEAD', '--branches', '--not', '--remotes'],
+      what: (n) => `${n} commit${n === 1 ? '' : 's'} no remote has`,
     },
     {
       args: ['stash', 'list'],

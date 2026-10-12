@@ -8,10 +8,7 @@
  * module loads it and gives it types, so `--list`, the check before `linked
  * start` and the hook report the same thing by the same rules.
  */
-import fs from 'node:fs';
-import {createRequire} from 'node:module';
-import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {requireHook} from './hook-module.js';
 
 export type Drift =
   | {kind: 'second-copy'; name: string; version: string; at: string}
@@ -33,37 +30,13 @@ interface DriftModule {
   describeDrift: (d: Drift) => string;
 }
 
-/**
- * `hooks/drift.cjs` in this package: two levels up from `src/localize/`,
- * three from `lib/esm/localize/`, so it is looked for upwards.
- */
-function hookFile(): string {
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  for (;;) {
-    const candidate = path.join(dir, 'hooks', 'drift.cjs');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir)
-      throw new Error(
-        `[localize] hooks/drift.cjs not found above ${fileURLToPath(import.meta.url)}`,
-      );
-    dir = parent;
-  }
-}
-
-function load(): DriftModule {
-  const file = hookFile();
-  const mod: DriftModule = createRequire(import.meta.url)(file);
-  if (
-    typeof mod?.driftProblems !== 'function' ||
-    typeof mod.describeDrift !== 'function' ||
-    !Array.isArray(mod.SINGLETONS)
-  )
-    throw new Error(`[localize] ${file} does not export the drift check`);
-  return mod;
-}
-
-const hook = load();
+const hook = requireHook<DriftModule>(
+  'drift.cjs',
+  (mod) =>
+    typeof mod.driftProblems === 'function' &&
+    typeof mod.describeDrift === 'function' &&
+    Array.isArray(mod.SINGLETONS),
+);
 
 /**
  * One copy each, app-wide, localized or not: they hold registries of classes

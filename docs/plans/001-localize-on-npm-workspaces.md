@@ -1059,6 +1059,42 @@ hooks notice once when members exist and no marked pre-commit, nothing when the 
 **Quick gate:** tsc; `tests/unit/localize tests/unit/localizeCommand.test.ts tests/unit/buildAll`;
 `npm run test:unit`; `npm run build`.
 
+**Result:** (1) `findWorkspaceRoot` takes the nearest ancestor with `workspaces`, then climbs
+through each higher one with `workspaces` whose globs match the root so far, stopping at the first
+that does not; of that chain the topmost non-linked-package wins. Matching is the new
+`globsMatch(globs, rel)` in `hooks/manifests.cjs` (segment-wise like `expandGlobs`: `*`/`?`, `**`,
+no dot or node_modules under a wildcard, `!` negations), loaded from TS through the new
+`src/localize/hook-module.ts` (`requireHook`, now also used by `drift.ts`), so one implementation.
+`build-all` already took `findWorkspaceRoot`, so it follows. Tests: worktree at
+`<app>/.claude/worktrees/wt` → itself (and its member → it); `<app>/packages/bar` → `<app>`;
+negation and `**`. (2) Set-up moves every non-dot entry of `packages-local/` into
+`packages-local/.setup-aside/` (plain renames, so a `.repos` link keeps its text) and back;
+`restoreSetAside` at the start of `runLocalize` (localize/adopt/`--parked`), `delocalize` and
+`list` moves a leftover back with one line (`moved 1 checkout back from
+packages-local/.setup-aside/ into packages-local/, where an interrupted set-up left it.`), or
+refuses exit 6 naming the clashing `packages-local/<dir>` and moving nothing. Dot dirs skipped,
+re-measured on npm 12.2.0: `packages-local/.setup-aside/package.json` and
+`.setup-aside/x/package.json` present, `npm install --package-lock-only` → lockfile lists only
+`"packages-local/*"` and `"packages-local/vis"`. Tests: leftover restored by list/delocalize/
+localize; clash refused; adopt sees the checkout in `.setup-aside/` during the lock-only call.
+(3) purge: `git log --oneline HEAD --branches --not --remotes`; message now `N commit(s) no
+remote has`. Test: commit on a detached HEAD → exit 6. (4) `setupLockfileByEdit(lock, pkg,
+workspacesBefore)`: null unless `isDeepStrictEqual(root.workspaces, workspacesBefore)`;
+`runLocalize` reads `workspaces` before `ensureAppSetup`. Tests: extra glob, none before,
+reordered → null. (5) lock-at-rest: inside the stamp-gated report (so once per install that
+changed the tree, quiet for the second script and no-op installs; shows on first install), when
+members exist, it is a work tree, `core.hooksPath` is unset and `<git-path hooks>/pre-commit`
+lacks `# managed by linked localize`: `[lock-at-rest] git hooks are not installed in this clone:
+run \`npx linked localize <first member> --adopt --build ''\` once`. Tests: notice once, again
+for a foreign pre-commit; none after `installGitHooks`, under `core.hooksPath`, or with no
+members. (6) `docs/localize.md`: app-root rule, `.setup-aside/` + recovery, edit condition, purge
+`HEAD`, bootstrap recipe ends with `npx linked localize @_linked/cli --adopt --build ''`, a
+"clone without the hooks" paragraph; changeset wording (app root, notice, purge). Gate: `npx tsc
+-p tsconfig-esm.json --noEmit` exit 0; `npx jest --config jest.config.cjs tests/unit/localize
+tests/unit/localizeCommand.test.ts tests/unit/buildAll` → `Test Suites: 19 passed, 19 total`,
+`Tests: 217 passed, 217 total`; `npm run test:unit` → `Test Suites: 66 passed, 66 total`,
+`Tests: 744 passed, 744 total`; `npm run build` exit 0.
+
 ### P12 — CN how-to line
 `docs/how-to/develop-a-linked-package-locally.md`: the bootstrap/migration steps end with
 `npx linked localize <name> --adopt --build ''` to install hooks; mention the lock-at-rest notice.

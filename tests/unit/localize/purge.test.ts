@@ -2,8 +2,8 @@
  * `delocalize --purge` against real git: it deletes a checkout only when git
  * says its work is saved elsewhere, and refuses (exit 6) whenever it cannot
  * tell -- no `.git`, a git that fails -- or the work is not: uncommitted
- * changes, a commit on any branch no remote has, a stash. `--force` deletes
- * anyway. npm is stubbed; git is not.
+ * changes, a commit no remote has (on any branch or a detached HEAD), a
+ * stash. `--force` deletes anyway. npm is stubbed; git is not.
  */
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -114,7 +114,16 @@ test('a commit on another branch that no remote has: refused, though main is pus
   git(checkout, 'add', '-A');
   git(checkout, 'commit', '-q', '-m', 'wip');
   git(checkout, 'checkout', '-q', 'main');
-  refuses(appRoot, checkout, /1 commit on a branch no remote has/);
+  refuses(appRoot, checkout, /1 commit no remote has/);
+});
+
+test('a commit on a detached HEAD that no remote has: refused', (t) => {
+  const {appRoot, checkout} = pushedCheckout(t);
+  git(checkout, 'checkout', '-q', '--detach');
+  fs.writeFileSync(path.join(checkout, 'wip.txt'), 'x');
+  git(checkout, 'add', '-A');
+  git(checkout, 'commit', '-q', '-m', 'detached wip');
+  refuses(appRoot, checkout, /1 commit no remote has/);
 });
 
 test('a stash: refused, and --force deletes', (t) => {

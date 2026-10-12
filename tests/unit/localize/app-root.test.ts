@@ -1,6 +1,7 @@
 /**
- * `findAppRoot`: the topmost directory whose package.json has `workspaces`
- * (preferring one that is not a linked package), else where the command ran.
+ * `findAppRoot`: the nearest directory whose package.json has `workspaces`,
+ * then up through each ancestor whose globs match it (preferring one that is
+ * not a linked package), else where the command ran.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -50,4 +51,31 @@ test('no workspaces anywhere: where it ran (an app before its set-up); unreadabl
   assert.equal(findWorkspaceRoot(app), null);
   assert.equal(findAppRoot(app), app);
   assert.equal(findAppRoot(path.join(app, 'broken')), path.join(app, 'broken'));
+});
+
+test('a git worktree nested in the app, which no app glob matches, is its own app', (t) => {
+  const app = tmpdir('localize-app-root-');
+  t.after(() => rm(app));
+  write(app, {name: 'app', workspaces: ['packages/*', 'packages-local/*']});
+  const wt = path.join(app, '.claude', 'worktrees', 'wt');
+  write(wt, {name: 'app', workspaces: ['packages/*', 'packages-local/*']});
+  const member = path.join(wt, 'packages', 'foo');
+  write(member, {name: 'foo'});
+  assert.equal(findAppRoot(wt), wt);
+  assert.equal(findAppRoot(member), wt, 'a member of the worktree');
+  assert.equal(findAppRoot(path.join(app, 'packages', 'bar')), app);
+});
+
+test('the climb stops at the first ancestor whose globs do not match, and honours negations', (t) => {
+  const top = tmpdir('localize-app-root-');
+  t.after(() => rm(top));
+  write(top, {name: 'top', workspaces: ['apps/*', '!apps/skip']});
+  for (const name of ['web', 'skip']) {
+    write(path.join(top, 'apps', name), {name, workspaces: ['packages/*']});
+  }
+  assert.equal(findAppRoot(path.join(top, 'apps', 'web')), top);
+  assert.equal(findAppRoot(path.join(top, 'apps', 'skip')), path.join(top, 'apps', 'skip'));
+  write(path.join(top, 'deep', 'a', 'b'), {name: 'b', workspaces: ['x/*']});
+  write(top, {name: 'top', workspaces: ['deep/**']});
+  assert.equal(findAppRoot(path.join(top, 'deep', 'a', 'b')), top, '** across depth');
 });

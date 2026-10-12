@@ -70,6 +70,13 @@ export const CLI_BUILD_COMMAND = 'npm run build';
 export const INSTALL_ARGS = ['install', '--no-audit', '--no-fund'];
 /** Where a cloned monorepo lives, inside `packages-local/` but outside its glob. */
 export const REPOS_DIR = `${LOCAL_DIR}/.repos`;
+/**
+ * Where the set-up's lockfile run puts the checkouts while npm makes it:
+ * inside the gitignored `packages-local/`, outside its glob (npm skips dot
+ * directories). A run interrupted there leaves them in it; the next
+ * `localize`, `delocalize` or `--list` moves them back (`restoreSetAside`).
+ */
+export const SETUP_ASIDE_DIR = `${LOCAL_DIR}/.setup-aside`;
 /** The app's lockfile, kept clean of checkouts. */
 export const LOCKFILE = 'package-lock.json';
 /** What an app recorded checkouts in before they were workspace members. */
@@ -126,6 +133,7 @@ export function runLocalize(
   legacyManifestHint(deps);
   let setupLock: string | undefined;
   try {
+    restoreSetAside(deps);
     checkDir(opts.dir);
     // The checkouts already there count too: the one install below covers them all.
     const localized = new Set([
@@ -144,10 +152,14 @@ export function runLocalize(
         EXIT_REFUSED,
       );
     }
+    const workspacesBefore = readJson(
+      path.join(deps.appRoot, 'package.json'),
+    )?.workspaces;
     const changes = ensureAppSetup(deps.appRoot);
     reportSetup(changes, deps);
     if (changes.some((c) => c.file === 'package.json'))
-      setupLock = captureSetupLockfile(changes, deps) ?? undefined;
+      setupLock =
+        captureSetupLockfile(changes, workspacesBefore, deps) ?? undefined;
   } catch (e) {
     return reportError(e, deps);
   }
@@ -367,32 +379,28 @@ export const SETUP_LOCK_ARGS = [
  * after the install. When the root entry already has `workspaces` and
  * `hasInstallScript`, it is an edit of that entry (setup-lockfile.ts: exact,
  * offline); otherwise npm makes the lockfile alone, with checkouts already in
- * `packages-local/` (an adopted one) moved aside for that one call.
+ * `packages-local/` (an adopted one) moved into `SETUP_ASIDE_DIR` for that
+ * one call.
  *
  * @returns the lockfile to write back, or null when it could not be made (the
  *   manual steps are printed instead).
  */
 function captureSetupLockfile(
   changes: SetupChange[],
+  workspacesBefore: unknown,
   deps: Deps,
 ): string | null {
-  const local = path.join(deps.appRoot, LOCAL_DIR);
-  const aside = path.join(deps.appRoot, `.${LOCAL_DIR}.setup`);
   const lockfile = path.join(deps.appRoot, LOCKFILE);
-  const edited = editedSetupLockfile(lockfile, deps);
+  const edited = editedSetupLockfile(lockfile, workspacesBefore, deps);
   if (edited !== null) return edited;
   const moveAside = localMembers(deps.appRoot).length > 0;
-  if (moveAside && existsOrLink(aside)) {
-    manualSetupSteps(changes, `${path.basename(aside)}/ is in the way`, deps);
-    return null;
-  }
   deps.log(`[localize] npm ${SETUP_LOCK_ARGS.join(' ')} (the set-up's lockfile)`);
-  if (moveAside) fs.renameSync(local, aside);
+  if (moveAside) setAside(deps);
   let r: RunResult;
   try {
     r = deps.run('npm', SETUP_LOCK_ARGS, {cwd: deps.appRoot});
   } finally {
-    if (moveAside) fs.renameSync(aside, local);
+    if (moveAside) moveBack(deps);
   }
   let text: string | null = null;
   try {
@@ -413,8 +421,75 @@ function captureSetupLockfile(
   return text;
 }
 
+/**
+ * Every entry of `packages-local/` but the dot directories, moved into
+ * `SETUP_ASIDE_DIR` as it is (a link keeps its text and works again once back).
+ */
+function setAside(deps: Pick<Deps, 'appRoot'>): void {
+  const local = path.join(deps.appRoot, LOCAL_DIR);
+  const aside = path.join(deps.appRoot, SETUP_ASIDE_DIR);
+  fs.mkdirSync(aside, {recursive: true});
+  for (const entry of fs.readdirSync(local)) {
+    if (entry.startsWith('.')) continue;
+    fs.renameSync(path.join(local, entry), path.join(aside, entry));
+  }
+}
+
+/** Everything in `SETUP_ASIDE_DIR` back into `packages-local/`; the directory goes. */
+function moveBack(deps: Pick<Deps, 'appRoot'>): number {
+  const local = path.join(deps.appRoot, LOCAL_DIR);
+  const aside = path.join(deps.appRoot, SETUP_ASIDE_DIR);
+  const entries = fs.readdirSync(aside);
+  for (const entry of entries)
+    fs.renameSync(path.join(aside, entry), path.join(local, entry));
+  fs.rmdirSync(aside);
+  return entries.length;
+}
+
+/**
+ * A set-up run that was interrupted while the checkouts were in
+ * `SETUP_ASIDE_DIR` left them there, where npm does not see them: move them
+ * back, saying so. Refuses, moving nothing, when `packages-local/` already
+ * has an entry of the same name.
+ */
+export function restoreSetAside(deps: Pick<Deps, 'appRoot' | 'log'>): void {
+  const aside = path.join(deps.appRoot, SETUP_ASIDE_DIR);
+  if (!existsOrLink(aside)) return;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(aside);
+  } catch {
+    throw new LocalizeError(
+      `${SETUP_ASIDE_DIR} is not a directory. Remove it and run this again.`,
+      EXIT_REFUSED,
+    );
+  }
+  const clashes = entries.filter((e) =>
+    existsOrLink(path.join(deps.appRoot, LOCAL_DIR, e)),
+  );
+  if (clashes.length) {
+    throw new LocalizeError(
+      `${SETUP_ASIDE_DIR}/ holds checkouts an interrupted set-up left there, but ` +
+        `${clashes.map((e) => `${LOCAL_DIR}/${e}`).join(', ')} now exist${clashes.length === 1 ? 's' : ''} ` +
+        `too. Keep one of each, move the other out of ${LOCAL_DIR}/, and run this again. ` +
+        `Nothing was moved.`,
+      EXIT_REFUSED,
+    );
+  }
+  const n = moveBack(deps);
+  if (n)
+    deps.log(
+      `[localize] moved ${n} checkout${n === 1 ? '' : 's'} back from ${SETUP_ASIDE_DIR}/ into ` +
+        `${LOCAL_DIR}/, where an interrupted set-up left ${n === 1 ? 'it' : 'them'}.`,
+    );
+}
+
 /** The set-up's lockfile as an edit of the root entry, written now; null when npm must make it. */
-function editedSetupLockfile(lockfile: string, deps: Deps): string | null {
+function editedSetupLockfile(
+  lockfile: string,
+  workspacesBefore: unknown,
+  deps: Deps,
+): string | null {
   let current: string;
   try {
     current = fs.readFileSync(lockfile, 'utf8');
@@ -424,6 +499,7 @@ function editedSetupLockfile(lockfile: string, deps: Deps): string | null {
   const text = setupLockfileByEdit(
     current,
     readJson(path.join(deps.appRoot, 'package.json')),
+    workspacesBefore,
   );
   if (text === null) return null;
   fs.writeFileSync(lockfile, text);
