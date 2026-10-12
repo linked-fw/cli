@@ -1290,3 +1290,21 @@ fallback now escaped twice; `npx`/`tsc`/`linked`/`NPM.CMD`/`…\npx.cmd` twice, 
 `npm.cmd` when absent; `..foo` inside on posix and win32, `..`, `../x` and another drive not).
 Gate: `npx tsc -p tsconfig-esm.json --noEmit` exit 0; `npm run test:unit` → `Test Suites: 68
 passed, 68 total`, `Tests: 780 passed, 780 total`; `npm run build` exit 0.
+
+## REVIEW
+
+Wrapup outcomes.
+
+- **Tidy pass** (`104f6ee`): dead code removed — `src/localize/semver.ts` (the range check lives in
+  `hooks/drift.cjs`; `satisfies` is re-exported from `drift.ts`), the `SINGLETONS` export, internal
+  helpers no longer exported, `src/localize/index.ts` trimmed to the commands, drift, members,
+  set-up, app root, resolve, deps and exit codes; comments brought up to date; the consuming
+  product's name removed from code, comments and docs; the changeset rewritten (adoption steps,
+  commands and flags, exit codes, hooks, lock-at-rest, drift, build-all, Windows, removed deep
+  imports). `a9b6250` limits the formatting changes to files this branch wrote.
+- **Final validation:** `npx tsc -p tsconfig-esm.json --noEmit` clean; `npm run test:unit` 68
+  suites / 780 tests; `npm run build` OK; `npm run test:template` 22 tests (last run in P15).
+- **PR readiness:** the cli PR is ready. The consuming app's PR depends on this release (it needs
+  `hooks/` and `--list --check`). Order: merge the cli PR → release → bump `@_linked/cli` in the
+  app → fresh-clone `npm ci` without `packages-local/` → merge the app's PR. Then the developers'
+  one-week trial and the migration of their existing checkouts.
