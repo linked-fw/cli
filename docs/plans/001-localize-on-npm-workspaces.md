@@ -558,6 +558,27 @@ deprecated flags.
 mentions only the deprecation notes; every command and flag in `src/cli.ts`'s localize/delocalize
 options appears in `docs/localize.md`; `npx changeset status` lists `@_linked/cli` minor.
 
+**Result:** `docs/localize.md` rewritten (problem, how it works, set-up, commands, monorepos,
+building incl. the cli/core bootstrap, drift with a fix per kind, changing dependencies while
+localized, pulls and branch switches, `npm ci` with checkouts, Docker/CI with the leak grep, a
+checkout's own lockfile, migration, what it never does, exit codes, programmatic use — `index.ts`
+still exports `localize`/`adopt`/`localizeParked`/`delocalize`/`list`/`defaultDeps`/drift). README's
+localize section and create-package `packages-local` bullet updated; the `-ont` E404 text (:48) is
+unchanged because create-package still leaves that entry out. Changeset
+`.changeset/localize-on-npm-workspaces.md` (`minor`). The set-up commit sequence was measured in a
+scratch app against this build: `localize --repo` (set-up printed, lockfile left listing
+`packages-local/x-dep`) → `delocalize` (`npm ci` exits 0 but does not rewrite the lockfile) →
+`npm install` (diff: root `workspaces` += `"packages-local/*"` and `hasInstallScript: true`) →
+commit → `localize --parked` → `git status` clean; a `range-miss` showed in `--list` and
+`--list --check` exited 1. Deviations: the bootstrap recipe for two unbuilt checkouts uses core's
+`npm run compile` (plain `tsc`) and was not run; the doc prefers localizing core first in its own
+command. Found, not changed (code, not docs): a refused `--purge` exits 5 (`delocalize` returns
+`EXIT_WARNED`) while `errors.ts` lists "unpushed work" under 6 — the doc states 5; `cli.ts`'s
+create-package `--location` help (~:160) still says "linked and recorded by `linked localize`".
+Validation: the grep lists only deprecation/migration lines (README:296; localize.md:93, 141,
+142, 324–336, 356); all 12 options from `localize --help`/`delocalize --help` appear in
+`docs/localize.md`; `npx changeset status` lists `@_linked/cli` at minor.
+
 ### P5 — CN changes
 
 Tasks (in `CN`): everything under "Files expected to change → CN" except the `@_linked/cli` range
