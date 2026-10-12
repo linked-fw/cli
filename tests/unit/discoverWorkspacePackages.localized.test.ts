@@ -21,11 +21,7 @@ function writeJson(file: string, json: unknown) {
   fs.writeFileSync(file, JSON.stringify(json, null, 2));
 }
 
-function makePackage(
-  root: string,
-  json: Record<string, unknown>,
-  withSrc = true,
-) {
+function makePackage(root: string, json: Record<string, unknown>, withSrc = true) {
   writeJson(path.join(root, 'package.json'), json);
   if (withSrc) {
     fs.mkdirSync(path.join(root, 'src'), {recursive: true});
@@ -44,9 +40,7 @@ describe('discoverWorkspacePackages with a localized checkout', () => {
   let checkout: string;
 
   beforeEach(() => {
-    tmp = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'linked-watchset-')),
-    );
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'linked-watchset-')));
     app = path.join(tmp, 'app');
     writeJson(path.join(app, 'package.json'), {
       name: 'app',
@@ -68,11 +62,7 @@ describe('discoverWorkspacePackages with a localized checkout', () => {
 
     // The localized checkout: in no glob (app not set up), reachable only via node_modules.
     checkout = path.join(app, 'packages-local', 'pkg');
-    makePackage(checkout, {
-      name: '@fixture/pkg',
-      version: '1.0.0',
-      linkedPackage: true,
-    });
+    makePackage(checkout, {name: '@fixture/pkg', version: '1.0.0', linkedPackage: true});
     link(checkout, path.join(app, 'node_modules', '@fixture', 'pkg'));
 
     // Control 1: a linked dep installed normally — published, so no `src/`.
@@ -122,9 +112,7 @@ describe('discoverWorkspacePackages with a localized checkout', () => {
   });
 
   it('keeps the app itself and its workspace-glob packages', async () => {
-    const names = (await discoverWorkspacePackages(app))
-      .map((p) => p.name)
-      .sort();
+    const names = (await discoverWorkspacePackages(app)).map((p) => p.name).sort();
     expect(names).toEqual(['@fixture/inglob', '@fixture/pkg', 'app']);
   });
 });

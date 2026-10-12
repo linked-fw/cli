@@ -11,8 +11,7 @@ import path from 'path';
 import {createPackage} from '../../src/cli-methods';
 import {CreatePackageError} from '../../src/utils/createPackageLocation';
 
-const read = (...parts: string[]) =>
-  fs.readFileSync(path.join(...parts), 'utf8');
+const read = (...parts: string[]) => fs.readFileSync(path.join(...parts), 'utf8');
 const exists = (...parts: string[]) => fs.existsSync(path.join(...parts));
 
 // Every file under a folder, relative, sorted: the tree a scaffold wrote.
@@ -36,17 +35,10 @@ describe('createPackage kinds', () => {
   beforeAll(() => {
     // The tests are scripted calls: no terminal, so nothing is ever prompted.
     ttyDescriptors = [process.stdin, process.stdout].map(
-      (stream) =>
-        Object.getOwnPropertyDescriptor(stream, 'isTTY') ?? {
-          value: undefined,
-          configurable: true,
-        },
+      (stream) => Object.getOwnPropertyDescriptor(stream, 'isTTY') ?? {value: undefined, configurable: true},
     );
     for (const stream of [process.stdin, process.stdout]) {
-      Object.defineProperty(stream, 'isTTY', {
-        value: false,
-        configurable: true,
-      });
+      Object.defineProperty(stream, 'isTTY', {value: false, configurable: true});
     }
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -67,10 +59,7 @@ describe('createPackage kinds', () => {
   });
 
   test('an ontology package holds one ontology and nothing else', async () => {
-    await createPackage('planning', undefined, tmp, {
-      kind: 'ontology',
-      skipInstall: true,
-    });
+    await createPackage('planning', undefined, tmp, {kind: 'ontology', skipInstall: true});
     const pkg = path.join(tmp, 'planning-ont');
 
     expect(tree(pkg)).toEqual([
@@ -93,52 +82,37 @@ describe('createPackage kinds', () => {
     expect(manifest.files).toEqual(['lib', 'CHANGELOG.md']);
 
     // The package is `planning-ont`; the ontology slug is `planning`.
-    expect(read(pkg, 'src/package.ts')).toContain(
-      `linkedPackage('planning-ont')`,
-    );
+    expect(read(pkg, 'src/package.ts')).toContain(`linkedPackage('planning-ont')`);
     expect(read(pkg, 'src/ontologies/planning.ts')).toContain(
       `createNameSpace('https://linked.cm/ont/planning/')`,
     );
     expect(read(pkg, 'src/ontologies/planning.register.ts')).toContain(
       `linkedOntology(terms, ns, 'planning', loadData, '../data/planning.json')`,
     );
-    expect(read(pkg, 'src/index.ts')).toContain(
-      `./ontologies/planning.register.js`,
-    );
+    expect(read(pkg, 'src/index.ts')).toContain(`./ontologies/planning.register.js`);
     expect(read(pkg, 'src/index.ts')).not.toContain(`import './shapes`);
-    expect(
-      JSON.parse(read(pkg, 'src/data/planning.json'))['@context'].planning,
-    ).toBe('https://linked.cm/ont/planning/');
+    expect(JSON.parse(read(pkg, 'src/data/planning.json'))['@context'].planning).toBe(
+      'https://linked.cm/ont/planning/',
+    );
 
     // No `${...}` placeholder survives.
     for (const file of tree(pkg)) {
-      expect([file, read(pkg, file)]).not.toEqual([
-        file,
-        expect.stringContaining('${'),
-      ]);
+      expect([file, read(pkg, file)]).not.toEqual([file, expect.stringContaining('${')]);
     }
   });
 
   test('an explicit uri_base is the ontology namespace, as before', async () => {
-    await createPackage(
-      'planning',
-      'https://acme.id.create.now/ont/planning',
-      tmp,
-      {
-        kind: 'ontology',
-        skipInstall: true,
-      },
-    );
+    await createPackage('planning', 'https://acme.id.create.now/ont/planning', tmp, {
+      kind: 'ontology',
+      skipInstall: true,
+    });
     expect(read(tmp, 'planning-ont', 'src/ontologies/planning.ts')).toContain(
       `createNameSpace('https://acme.id.create.now/ont/planning/')`,
     );
   });
 
   test('an asset package holds shapes, components and a backend, and no ontology', async () => {
-    await createPackage('planning', undefined, tmp, {
-      kind: 'assets',
-      skipInstall: true,
-    });
+    await createPackage('planning', undefined, tmp, {kind: 'assets', skipInstall: true});
     const pkg = path.join(tmp, 'planning-assets');
 
     expect(tree(pkg)).toEqual([
@@ -159,42 +133,25 @@ describe('createPackage kinds', () => {
     expect(manifest.linkedPackage).toBe(true);
     expect(manifest.files).toEqual(['lib', 'CHANGELOG.md']);
 
-    expect(read(pkg, 'src/package.ts')).toContain(
-      `linkedPackage('planning-assets')`,
-    );
+    expect(read(pkg, 'src/package.ts')).toContain(`linkedPackage('planning-assets')`);
     expect(read(pkg, 'src/index.ts')).toContain(`./shapes/index.js`);
     expect(read(pkg, 'src/index.ts')).not.toContain('ontolog');
     expect(read(pkg, 'src/backend.ts')).toContain(`./shapes/index.js`);
     for (const file of tree(pkg)) {
-      expect([file, read(pkg, file)]).not.toEqual([
-        file,
-        expect.stringContaining('${'),
-      ]);
+      expect([file, read(pkg, file)]).not.toEqual([file, expect.stringContaining('${')]);
     }
   });
 
   test('both creates the pair', async () => {
-    await createPackage('@acme/planning', undefined, tmp, {
-      kind: 'both',
-      skipInstall: true,
-    });
-    expect(
-      exists(tmp, 'planning-ont', 'src', 'ontologies', 'planning.ts'),
-    ).toBe(true);
-    expect(exists(tmp, 'planning-assets', 'src', 'shapes', 'index.ts')).toBe(
-      true,
-    );
-    expect(JSON.parse(read(tmp, 'planning-ont', 'package.json')).name).toBe(
-      '@acme/planning-ont',
-    );
+    await createPackage('@acme/planning', undefined, tmp, {kind: 'both', skipInstall: true});
+    expect(exists(tmp, 'planning-ont', 'src', 'ontologies', 'planning.ts')).toBe(true);
+    expect(exists(tmp, 'planning-assets', 'src', 'shapes', 'index.ts')).toBe(true);
+    expect(JSON.parse(read(tmp, 'planning-ont', 'package.json')).name).toBe('@acme/planning-ont');
     expect(JSON.parse(read(tmp, 'planning-assets', 'package.json')).name).toBe(
       '@acme/planning-assets',
     );
     for (const pkg of ['planning-ont', 'planning-assets']) {
-      expect([
-        pkg,
-        JSON.parse(read(tmp, pkg, 'package.json')).linkedPackage,
-      ]).toEqual([pkg, true]);
+      expect([pkg, JSON.parse(read(tmp, pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
     }
   });
 
@@ -202,26 +159,18 @@ describe('createPackage kinds', () => {
   // workspaces link the two: anywhere else `npm install` would look the
   // unpublished `-ont` package up in the registry and fail with E404.
   describe('the dependency of --kind both on its ontology package', () => {
-    const logged = () =>
-      (console.log as jest.Mock).mock.calls.map((c) => c.join(' ')).join('\n');
+    const logged = () => (console.log as jest.Mock).mock.calls.map((c) => c.join(' ')).join('\n');
     beforeEach(() => (console.log as jest.Mock).mockClear());
 
     test('--location packages: the asset package depends on the ontology package', async () => {
-      fs.outputJsonSync(path.join(tmp, 'package.json'), {
-        name: 'my-app',
-        linkedApp: true,
-      });
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
       await createPackage('@acme/planning', undefined, tmp, {
         kind: 'both',
         location: 'packages',
         skipInstall: true,
       });
-      const ont = JSON.parse(
-        read(tmp, 'packages', 'planning-ont', 'package.json'),
-      );
-      const assets = JSON.parse(
-        read(tmp, 'packages', 'planning-assets', 'package.json'),
-      );
+      const ont = JSON.parse(read(tmp, 'packages', 'planning-ont', 'package.json'));
+      const assets = JSON.parse(read(tmp, 'packages', 'planning-assets', 'package.json'));
       expect(assets.dependencies['@acme/planning-ont']).toBe(`^${ont.version}`);
       expect(assets.devDependencies?.['@acme/planning-ont']).toBeUndefined();
       expect(assets.peerDependencies?.['@acme/planning-ont']).toBeUndefined();
@@ -231,10 +180,7 @@ describe('createPackage kinds', () => {
     });
 
     test('--location packages-local: no dependency, and one line says how to add it', async () => {
-      fs.outputJsonSync(path.join(tmp, 'package.json'), {
-        name: 'my-app',
-        linkedApp: true,
-      });
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
       await createPackage('@acme/planning', undefined, tmp, {
         kind: 'both',
         location: 'packages-local',
@@ -243,13 +189,9 @@ describe('createPackage kinds', () => {
       const assetsDir = fs
         .readdirSync(path.join(tmp, 'packages-local'))
         .find((d) => d.endsWith('planning-assets'));
-      const assets = JSON.parse(
-        read(tmp, 'packages-local', assetsDir, 'package.json'),
-      );
+      const assets = JSON.parse(read(tmp, 'packages-local', assetsDir, 'package.json'));
       expect(assets.dependencies['@acme/planning-ont']).toBeUndefined();
-      expect(logged()).toMatch(
-        /once @acme\/planning-ont is published.*npm install @acme\/planning-ont/,
-      );
+      expect(logged()).toMatch(/once @acme\/planning-ont is published.*npm install @acme\/planning-ont/);
       // The app is set up for checkouts even with the install skipped: that is files.
       const app = JSON.parse(read(tmp, 'package.json'));
       expect(app.workspaces).toEqual(['packages-local/*']);
@@ -258,43 +200,25 @@ describe('createPackage kinds', () => {
     });
 
     test('standalone: no dependency, and one line says how to add it', async () => {
-      await createPackage('@acme/planning', undefined, tmp, {
-        kind: 'both',
-        skipInstall: true,
-      });
+      await createPackage('@acme/planning', undefined, tmp, {kind: 'both', skipInstall: true});
       const assets = JSON.parse(read(tmp, 'planning-assets', 'package.json'));
       expect(assets.dependencies['@acme/planning-ont']).toBeUndefined();
-      expect(logged()).toMatch(
-        /once @acme\/planning-ont is published.*npm install @acme\/planning-ont/,
-      );
+      expect(logged()).toMatch(/once @acme\/planning-ont is published.*npm install @acme\/planning-ont/);
     });
   });
 
   test('an asset package created on its own depends on no ontology package', async () => {
-    await createPackage('planning', undefined, tmp, {
-      kind: 'assets',
-      skipInstall: true,
-    });
+    await createPackage('planning', undefined, tmp, {kind: 'assets', skipInstall: true});
     const assets = JSON.parse(read(tmp, 'planning-assets', 'package.json'));
-    expect(
-      Object.keys(assets.dependencies).filter((d) => d.endsWith('-ont')),
-    ).toEqual([]);
+    expect(Object.keys(assets.dependencies).filter((d) => d.endsWith('-ont'))).toEqual([]);
   });
 
   test('a name that already carries the suffix is not doubled', async () => {
-    await createPackage('planning-ont', undefined, tmp, {
-      kind: 'ontology',
-      skipInstall: true,
-    });
-    await createPackage('planning-assets', undefined, tmp, {
-      kind: 'assets',
-      skipInstall: true,
-    });
+    await createPackage('planning-ont', undefined, tmp, {kind: 'ontology', skipInstall: true});
+    await createPackage('planning-assets', undefined, tmp, {kind: 'assets', skipInstall: true});
     expect(exists(tmp, 'planning-ont-ont')).toBe(false);
     expect(exists(tmp, 'planning-assets-assets')).toBe(false);
-    expect(JSON.parse(read(tmp, 'planning-ont', 'package.json')).name).toBe(
-      'planning-ont',
-    );
+    expect(JSON.parse(read(tmp, 'planning-ont', 'package.json')).name).toBe('planning-ont');
     expect(read(tmp, 'planning-ont', 'src/ontologies/planning.ts')).toContain(
       `createNameSpace('https://linked.cm/ont/planning/')`,
     );
@@ -302,35 +226,22 @@ describe('createPackage kinds', () => {
       'planning-assets',
     );
     for (const pkg of ['planning-ont', 'planning-assets']) {
-      expect([
-        pkg,
-        JSON.parse(read(tmp, pkg, 'package.json')).linkedPackage,
-      ]).toEqual([pkg, true]);
+      expect([pkg, JSON.parse(read(tmp, pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
     }
   });
 
   test('inside an app, --location packages wires the app even when the install is skipped', async () => {
-    fs.outputJsonSync(path.join(tmp, 'package.json'), {
-      name: 'my-app',
-      linkedApp: true,
-    });
+    fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
     await createPackage('planning', undefined, tmp, {
       kind: 'both',
       location: 'packages',
       skipInstall: true,
     });
-    expect(exists(tmp, 'packages', 'planning-ont', 'src', 'package.ts')).toBe(
-      true,
-    );
-    expect(
-      exists(tmp, 'packages', 'planning-assets', 'src', 'package.ts'),
-    ).toBe(true);
+    expect(exists(tmp, 'packages', 'planning-ont', 'src', 'package.ts')).toBe(true);
+    expect(exists(tmp, 'packages', 'planning-assets', 'src', 'package.ts')).toBe(true);
     const app = fs.readJsonSync(path.join(tmp, 'package.json'));
     expect(app.workspaces).toEqual(['packages/*']);
-    expect(app.dependencies).toEqual({
-      'planning-ont': '^1.0.0',
-      'planning-assets': '^1.0.0',
-    });
+    expect(app.dependencies).toEqual({'planning-ont': '^1.0.0', 'planning-assets': '^1.0.0'});
   });
 
   // A package created inside an app mints under the app's root, not linked.cm.
@@ -339,10 +250,7 @@ describe('createPackage kinds', () => {
     let warn: jest.SpyInstance;
     beforeEach(() => {
       delete process.env.LINKED_BASE_URI;
-      fs.outputJsonSync(path.join(tmp, 'package.json'), {
-        name: 'my-app',
-        linkedApp: true,
-      });
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
       warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       (console.log as jest.Mock).mockClear();
     });
@@ -352,15 +260,10 @@ describe('createPackage kinds', () => {
       warn.mockRestore();
     });
     const logged = () =>
-      [...(console.log as jest.Mock).mock.calls, ...warn.mock.calls]
-        .map((c) => c.join(' '))
-        .join('\n');
+      [...(console.log as jest.Mock).mock.calls, ...warn.mock.calls].map((c) => c.join(' ')).join('\n');
 
     test("comes from the app's .env and is declared in src/package.ts", async () => {
-      fs.writeFileSync(
-        path.join(tmp, '.env'),
-        'LINKED_BASE_URI=https://acme.id.create.now\n',
-      );
+      fs.writeFileSync(path.join(tmp, '.env'), 'LINKED_BASE_URI=https://acme.id.create.now\n');
       await createPackage('planning', undefined, tmp, {
         kind: 'both',
         location: 'packages',
@@ -379,30 +282,22 @@ describe('createPackage kinds', () => {
         `createNameSpace('https://acme.id.create.now/ont/planning/')`,
       );
       for (const pkg of [ont, assets]) {
-        expect([
-          pkg,
-          fs.readJsonSync(path.join(pkg, 'package.json')).linkedPackage,
-        ]).toEqual([pkg, true]);
+        expect([pkg, fs.readJsonSync(path.join(pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
       }
-      expect(logged()).toMatch(
-        /https:\/\/acme\.id\.create\.now\/ \(from \.env\)/,
-      );
+      expect(logged()).toMatch(/https:\/\/acme\.id\.create\.now\/ \(from \.env\)/);
     });
 
     test('--base-uri wins over the env file', async () => {
-      fs.writeFileSync(
-        path.join(tmp, '.env'),
-        'LINKED_BASE_URI=https://env.example.org/\n',
-      );
+      fs.writeFileSync(path.join(tmp, '.env'), 'LINKED_BASE_URI=https://env.example.org/\n');
       await createPackage('planning', undefined, tmp, {
         kind: 'assets',
         location: 'packages',
         skipInstall: true,
         baseUri: 'https://flag.example.org',
       });
-      expect(
-        read(tmp, 'packages', 'planning-assets', 'src/package.ts'),
-      ).toContain(`{baseUri: "https://flag.example.org/"}`);
+      expect(read(tmp, 'packages', 'planning-assets', 'src/package.ts')).toContain(
+        `{baseUri: "https://flag.example.org/"}`,
+      );
     });
 
     test('without a source there is no baseUri, no warning, and one line says where it mints', async () => {
@@ -411,9 +306,9 @@ describe('createPackage kinds', () => {
         location: 'packages',
         skipInstall: true,
       });
-      expect(
-        read(tmp, 'packages', 'planning-assets', 'src/package.ts'),
-      ).toContain(`linkedPackage('planning-assets')`);
+      expect(read(tmp, 'packages', 'planning-assets', 'src/package.ts')).toContain(
+        `linkedPackage('planning-assets')`,
+      );
       expect(warn).not.toHaveBeenCalled();
       expect(logged()).not.toMatch(/No base URI/);
       expect(logged()).toContain(
@@ -436,21 +331,18 @@ describe('createPackage kinds', () => {
   });
 
   test('without --kind and without a terminal it refuses and names the flag', async () => {
-    await expect(
-      createPackage('planning', undefined, tmp, {skipInstall: true}),
-    ).rejects.toThrow(CreatePackageError);
-    await expect(
-      createPackage('planning', undefined, tmp, {skipInstall: true}),
-    ).rejects.toThrow(/--kind ontology/);
+    await expect(createPackage('planning', undefined, tmp, {skipInstall: true})).rejects.toThrow(
+      CreatePackageError,
+    );
+    await expect(createPackage('planning', undefined, tmp, {skipInstall: true})).rejects.toThrow(
+      /--kind ontology/,
+    );
     expect(fs.readdirSync(tmp)).toEqual([]);
   });
 
   test('an unknown --kind is refused before anything is written', async () => {
     await expect(
-      createPackage('planning', undefined, tmp, {
-        kind: 'shapes' as any,
-        skipInstall: true,
-      }),
+      createPackage('planning', undefined, tmp, {kind: 'shapes' as any, skipInstall: true}),
     ).rejects.toThrow(/--kind must be one of/);
     expect(fs.readdirSync(tmp)).toEqual([]);
   });

@@ -88,18 +88,9 @@ program
     '<name>',
     'the name of your Linked app. To use spaces, wrap the name in double quotes.',
   )
-  .option(
-    '--app-name <name>',
-    'Display name for the app (skip interactive prompt)',
-  )
-  .option(
-    '--app-prefix <prefix>',
-    'Short code prefix for data files (skip interactive prompt)',
-  )
-  .option(
-    '--app-domain <domain>',
-    'Domain for the app (skip interactive prompt)',
-  )
+  .option('--app-name <name>', 'Display name for the app (skip interactive prompt)')
+  .option('--app-prefix <prefix>', 'Short code prefix for data files (skip interactive prompt)')
+  .option('--app-domain <domain>', 'Domain for the app (skip interactive prompt)')
   .option('--skip-install', 'Skip running npm install after scaffolding')
   .option(
     '--template <template>',
@@ -112,15 +103,14 @@ program
     const {startWithVite} = await import('./commands/start.js');
     return startWithVite({env: options?.env, apiOnly: options?.apiOnly});
   })
-  .option(
-    '--env <env>',
-    'The node environment to use. Default is "development"',
-  )
+  .option('--env <env>', 'The node environment to use. Default is "development"')
   .option(
     '--api-only',
     'Serve only the backend API: no vite.config, src/App.tsx or src/routes.tsx needed; page requests get a 404',
   )
-  .description('Start the Linked dev server. Vite-backed by default.');
+  .description(
+    'Start the Linked dev server. Vite-backed by default.',
+  );
 
 program
   .command('call')
@@ -219,10 +209,7 @@ withPackageOptions(
     .command('create-ont-package')
     .action(async (name, uriBase, options) => {
       try {
-        await createPackage(name, uriBase, process.cwd(), {
-          ...options,
-          kind: 'ontology',
-        });
+        await createPackage(name, uriBase, process.cwd(), {...options, kind: 'ontology'});
       } catch (e) {
         reportRefusal(e);
       }
@@ -231,10 +218,7 @@ withPackageOptions(
       'Create an ontology package <name>-ont: exactly one ontology (src/ontologies/<name>.ts), no shapes, components or backend. Its ontology slug is <name>, so its terms mint {root}ont/<name>/{Term}. A name that already ends in -ont keeps it. ' +
         WHERE_HELP,
     )
-    .argument(
-      '<name>',
-      'The ontology slug; the package is named <name>-ont (foo-ont stays foo-ont).',
-    )
+    .argument('<name>', 'The ontology slug; the package is named <name>-ont (foo-ont stays foo-ont).')
     .argument(
       '[uri_base]',
       'The namespace of the ontology. Leave blank for https://linked.cm/ont/<name>/.',
@@ -246,10 +230,7 @@ withPackageOptions(
     .command('create-asset-package')
     .action(async (name, options) => {
       try {
-        await createPackage(name, undefined, process.cwd(), {
-          ...options,
-          kind: 'assets',
-        });
+        await createPackage(name, undefined, process.cwd(), {...options, kind: 'assets'});
       } catch (e) {
         reportRefusal(e);
       }
@@ -258,10 +239,7 @@ withPackageOptions(
       'Create an asset package <name>-assets: shapes, components and a backend (src/shapes, src/components, src/backend.ts), and no ontology. A name that already ends in -assets keeps it. ' +
         WHERE_HELP,
     )
-    .argument(
-      '<name>',
-      'The package is named <name>-assets (foo-assets stays foo-assets).',
-    ),
+    .argument('<name>', 'The package is named <name>-assets (foo-assets stays foo-assets).'),
 );
 
 program
@@ -370,12 +348,7 @@ program
 program
   .command('build [target] [target2]', {isDefault: true})
   .action(async (target, target2, options) => {
-    const result = await buildPackage(
-      target,
-      target2,
-      process.cwd(),
-      !options?.silent,
-    );
+    const result = await buildPackage(target, target2, process.cwd(), !options?.silent);
     if (result !== true) {
       process.exitCode = 1;
     }
@@ -403,8 +376,9 @@ program
     // Vite is the only app build. An app without a `vite.config.{ts,js,mjs}`
     // is rejected by name rather than falling back to anything.
     await runAppCommand(async () => {
-      const {assertViteApp, buildViteApp} =
-        await import('./commands/build-app.js');
+      const {assertViteApp, buildViteApp} = await import(
+        './commands/build-app.js'
+      );
       assertViteApp();
       await buildViteApp({
         environmentNames: splitEnvOption(options?.env),
@@ -415,10 +389,7 @@ program
       });
     });
   })
-  .option(
-    '--env <env>',
-    'The node environment to use. Default is "development"',
-  )
+  .option('--env <env>', 'The node environment to use. Default is "development"')
   .option('--target <target>', 'Build target: web or capacitor')
   .option(
     '--publish',
@@ -448,8 +419,9 @@ program
     // Retry or inspect an existing release without rebuilding the app.
     await runAppCommand(async () => {
       const {ensureEnvironmentLoaded} = await import('./lifecycle.js');
-      const {resolveAppAssetsStore} =
-        await import('./app-release/app-assets-store.js');
+      const {resolveAppAssetsStore} = await import(
+        './app-release/app-assets-store.js'
+      );
       const {publishApp} = await import('./commands/publish-app.js');
       await ensureEnvironmentLoaded(splitEnvOption(options?.env));
       // The store is resolved by publishApp, after the manifest is read.
@@ -539,7 +511,9 @@ program
     'Given a file path, find its package.json and rebuild that package. Use for editor save hooks.',
   )
   .action(async (filepath) => {
-    const {buildPackageByPath} = await import('./commands/build-package.js');
+    const {buildPackageByPath} = await import(
+      './commands/build-package.js'
+    );
     return buildPackageByPath(filepath);
   });
 
@@ -564,7 +538,10 @@ program
     '--parked',
     'Take back every checkout `linked delocalize` parked, then npm install once.',
   )
-  .option('--repo <git-url>', 'Clone this instead of the published repository.')
+  .option(
+    '--repo <git-url>',
+    'Clone this instead of the published repository.',
+  )
   .option(
     '--subdir <path>',
     "The package's directory inside the repository (monorepos). The repository is cloned into packages-local/.repos/ and packages-local/<name> links to the package.",
@@ -633,7 +610,7 @@ program
   )
   .option(
     '--scope <scope>',
-    "Deprecated and ignored: the npm secret is NPM_AUTH_TOKEN in every org, holding that org's own token. Accepted only so stale scripts still set the repo up.",
+    'Deprecated and ignored: the npm secret is NPM_AUTH_TOKEN in every org, holding that org\'s own token. Accepted only so stale scripts still set the repo up.',
   )
   .option(
     '--grant-team <slug>',

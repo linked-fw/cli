@@ -49,12 +49,7 @@ export interface CreatePackageOptions {
  */
 export type TargetDecision =
   | {kind: 'outside'}
-  | {
-      kind: 'resolved';
-      location: PackageLocation;
-      remote?: string;
-      push: boolean;
-    }
+  | {kind: 'resolved'; location: PackageLocation; remote?: string; push: boolean}
   | {kind: 'ask'}
   | {kind: 'refuse'; message: string};
 

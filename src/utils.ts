@@ -391,15 +391,10 @@ export const getLastCommitTime = (
 /** git's trimmed stdout; rejects like `execPromise`, with `{error, stdout, stderr}`. */
 function gitOutput(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
-      'git',
-      args,
-      {cwd, maxBuffer: 64 * 1024 * 1024},
-      (error, stdout, stderr) => {
-        if (error) reject({error, stdout, stderr});
-        else resolve(String(stdout).trim());
-      },
-    );
+    execFile('git', args, {cwd, maxBuffer: 64 * 1024 * 1024}, (error, stdout, stderr) => {
+      if (error) reject({error, stdout, stderr});
+      else resolve(String(stdout).trim());
+    });
   });
 }
 

@@ -180,18 +180,13 @@ describe('the app root', () => {
   let cwd: string;
   beforeEach(() => {
     cwd = process.cwd();
-    app = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'localize-app-root-')),
-    );
+    app = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'localize-app-root-')));
     fs.writeFileSync(
       path.join(app, 'package.json'),
       JSON.stringify({name: 'app', workspaces: ['packages/*']}),
     );
     fs.mkdirSync(path.join(app, 'packages', 'foo'), {recursive: true});
-    fs.writeFileSync(
-      path.join(app, 'packages', 'foo', 'package.json'),
-      '{"name": "foo"}',
-    );
+    fs.writeFileSync(path.join(app, 'packages', 'foo', 'package.json'), '{"name": "foo"}');
     process.chdir(path.join(app, 'packages', 'foo'));
   });
   afterEach(() => {

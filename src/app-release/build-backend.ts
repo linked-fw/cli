@@ -32,12 +32,12 @@ const NODE_BUILTINS = [
 
 export const resolveBackendEntries = (
   appRoot: string,
-  exists: (p: string) => boolean = fs.existsSync,
+  exists: (p: string) => boolean = fs.existsSync
 ): Record<string, string> => {
   const entries: Record<string, string> = {};
   for (const [name, candidates] of Object.entries(BACKEND_ENTRIES)) {
     const found = candidates.find((candidate) =>
-      exists(path.join(appRoot, candidate)),
+      exists(path.join(appRoot, candidate))
     );
     if (found) {
       entries[name] = path.join(appRoot, found);
@@ -74,11 +74,11 @@ export const workspacePackagesToExternalize = async (
   appRoot: string,
   discover: (
     globs: string[],
-    cwd: string,
+    cwd: string
   ) => Promise<{name: string}[]> = async (globs, cwd) => {
     const {discoverWorkspaces} = await import('../vite-config.js');
     return discoverWorkspaces(globs, cwd);
-  },
+  }
 ): Promise<string[]> => {
   const workspaces = await discover([], appRoot);
   return [...new Set(workspaces.map((w) => w.name))].sort();
@@ -94,7 +94,7 @@ export const workspacePackagesToExternalize = async (
  */
 export const findImportSpecifiers = (source: string): string[] => {
   const matches = source.matchAll(
-    /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g,
+    /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g
   );
   return [...new Set([...matches].map((m) => m[1]))].sort();
 };
@@ -156,7 +156,7 @@ const listJsFiles = async (dir: string): Promise<string[]> => {
         const full = path.join(current, entry.name);
         if (entry.isDirectory()) await walk(full);
         else if (/\.(?:m|c)?js$/.test(entry.name)) out.push(full);
-      }),
+      })
     );
   };
   await walk(dir);
@@ -173,11 +173,11 @@ export const packageRootsForApp = async (
   appRoot: string,
   discover: (
     globs: string[],
-    cwd: string,
+    cwd: string
   ) => Promise<{name: string; srcDir: string}[]> = async (globs, cwd) => {
     const {discoverWorkspaces} = await import('../vite-config.js');
     return discoverWorkspaces(globs, cwd);
-  },
+  }
 ): Promise<PackageRoot[]> => {
   const roots: PackageRoot[] = [];
   for (const ws of await discover([], appRoot)) {
@@ -222,13 +222,13 @@ export const packageRootsForApp = async (
  */
 export const findInlinedPackageImports = async (
   appRoot: string,
-  packageRoots: PackageRoot[],
+  packageRoots: PackageRoot[]
 ): Promise<{imports: InlinedPackageImport[]; strayDirs: string[]}> => {
   const libDir = path.join(appRoot, 'lib');
   const strayDirs = STRAY_OUTPUT_DIRS.filter(
     (name) =>
       fs.existsSync(path.join(libDir, name)) &&
-      !fs.existsSync(path.join(appRoot, 'src', name)),
+      !fs.existsSync(path.join(appRoot, 'src', name))
   ).map((name) => `lib/${name}/`);
   if (!fs.existsSync(libDir)) return {imports: [], strayDirs};
 
@@ -238,7 +238,7 @@ export const findInlinedPackageImports = async (
       // The most specific root names the package; a named one wins a tie.
       .sort(
         (a, b) =>
-          b.root.length - a.root.length || Number(!!b.name) - Number(!!a.name),
+          b.root.length - a.root.length || Number(!!b.name) - Number(!!a.name)
       )[0];
 
   // Where a module in lib/ was compiled from, via its sourcemap.
@@ -252,9 +252,7 @@ export const findInlinedPackageImports = async (
       const base = path.resolve(path.dirname(moduleFile), map.sourceRoot || '');
       origins = (map.sources || [])
         .filter((s: unknown) => typeof s === 'string' && !s.startsWith('\0'))
-        .map((s: string) =>
-          realpathOr(path.resolve(base, s.replace(/^file:\/\//, ''))),
-        );
+        .map((s: string) => realpathOr(path.resolve(base, s.replace(/^file:\/\//, ''))));
     } catch {
       // No sourcemap: nothing to trace. The stray-directory check still
       // catches the usual layout of a compiled-in package.
@@ -321,20 +319,18 @@ export const findInlinedPackageImports = async (
  */
 export const assertNoInlinedWorkspaces = async (
   appRoot: string,
-  packageRoots?: PackageRoot[],
+  packageRoots?: PackageRoot[]
 ): Promise<void> => {
   const roots = packageRoots || (await packageRootsForApp(appRoot));
   const {imports, strayDirs} = await findInlinedPackageImports(appRoot, roots);
   if (imports.length === 0 && strayDirs.length === 0) return;
 
-  const lines = imports
-    .slice(0, 8)
-    .map(
-      (found) =>
-        `  ${found.file} imports "${found.specifier}"\n` +
-        `    — a compiled-in copy of ${found.origin}` +
-        (found.packageName ? ` (${found.packageName})` : ''),
-    );
+  const lines = imports.slice(0, 8).map(
+    (found) =>
+      `  ${found.file} imports "${found.specifier}"\n` +
+      `    — a compiled-in copy of ${found.origin}` +
+      (found.packageName ? ` (${found.packageName})` : '')
+  );
   if (imports.length > 8) lines.push(`  …and ${imports.length - 8} more`);
   const names = [
     ...new Set(imports.map((i) => i.packageName).filter(Boolean)),
@@ -347,12 +343,10 @@ export const assertNoInlinedWorkspaces = async (
         : '') +
       'Each copy is a second instance of that package: its classes fail `instanceof` ' +
       'and its registries are empty. Import the package through its public export ' +
-      (names.length
-        ? `(${names.map((n) => `"${n}" or "${n}/…"`).join(', ')}) `
-        : '') +
+      (names.length ? `(${names.map((n) => `"${n}" or "${n}/…"`).join(', ')}) ` : '') +
       'rather than a path into its files, and check that nothing — a resolve.alias, ' +
       'a `development` export condition — maps that import to its source. A ' +
-      'workspace package must also be discoverable, so it can be named in ssr.external.',
+      'workspace package must also be discoverable, so it can be named in ssr.external.'
   );
 };
 
@@ -367,13 +361,13 @@ export const assertNoInlinedWorkspaces = async (
  */
 export const explainUnresolvedWorkspaceImport = (
   message: string,
-  externalWorkspaces: string[],
+  externalWorkspaces: string[]
 ): string | null => {
   const match = message.match(/failed to resolve import "([^"]+)"/i);
   if (!match) return null;
   const specifier = match[1];
   const pkg = externalWorkspaces.find(
-    (name) => specifier === name || specifier.startsWith(`${name}/`),
+    (name) => specifier === name || specifier.startsWith(`${name}/`)
   );
   if (!pkg) return null;
   return (
@@ -434,14 +428,14 @@ const dropManualChunks = () => ({
  */
 export const buildBackendWithVite = async (
   options: {appRoot?: string} = {},
-  dependencies: {viteBuild?: (config: any) => Promise<unknown>} = {},
+  dependencies: {viteBuild?: (config: any) => Promise<unknown>} = {}
 ): Promise<void> => {
   const appRoot = options.appRoot || process.cwd();
   const entries = resolveBackendEntries(appRoot);
 
   if (!entries.backend) {
     throw new Error(
-      'No backend entry found: expected src/backend.ts in ' + appRoot,
+      'No backend entry found: expected src/backend.ts in ' + appRoot
     );
   }
 
@@ -513,7 +507,7 @@ export const buildBackendWithVite = async (
   } catch (err) {
     const explained = explainUnresolvedWorkspaceImport(
       err instanceof Error ? err.message : String(err),
-      externalWorkspaces,
+      externalWorkspaces
     );
     if (!explained) throw err;
     throw new Error(explained);
@@ -530,7 +524,7 @@ export const buildBackendWithVite = async (
  */
 export const copyBackendStylesheets = async (
   appRoot: string,
-  listCssFiles: (dir: string) => Promise<string[]>,
+  listCssFiles: (dir: string) => Promise<string[]>
 ): Promise<number> => {
   const sourceFolder = path.join(appRoot, 'src');
   const targetFolder = path.join(appRoot, 'lib');
@@ -540,7 +534,7 @@ export const copyBackendStylesheets = async (
       const targetFile = file.replace(sourceFolder, targetFolder);
       fs.mkdirpSync(path.dirname(targetFile));
       return fs.copyFile(file, targetFile);
-    }),
+    })
   );
   return cssFiles.length;
 };

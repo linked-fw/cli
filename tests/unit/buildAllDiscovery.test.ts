@@ -176,10 +176,7 @@ describe('build-all package discovery', () => {
     expect(reasons['@w/unrelated']).toMatch(/dependency tree/);
 
     // Nothing is discovered silently: found == built + skipped, exactly.
-    const accounted = [
-      ...plan.build.keys(),
-      ...plan.skipped.map((s) => s.packageName),
-    ];
+    const accounted = [...plan.build.keys(), ...plan.skipped.map((s) => s.packageName)];
     expect(accounted.sort()).toEqual(
       discoverLocalPackages(tmp)
         .map((p) => p.packageName)

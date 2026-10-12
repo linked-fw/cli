@@ -412,8 +412,7 @@ export const checkShapeReferences = async (
   options?: Parameters<typeof inspectShapeReferences>[1],
   inspection?: Promise<ShapeReferenceReport>,
 ): Promise<true | string | {error: string}> => {
-  const report = await (inspection ??
-    inspectShapeReferences(packagePath, options));
+  const report = await (inspection ?? inspectShapeReferences(packagePath, options));
   if (report.skipped) return `skipped: ${report.skipped}`;
   const problems: string[] = [];
   if (report.loadErrors.length > 0) {

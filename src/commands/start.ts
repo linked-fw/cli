@@ -17,10 +17,7 @@ import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {importFile, isPathInside} from '../utils/platform.js';
 import fsExtra from 'fs-extra';
-import {
-  parseWorkspacePatterns,
-  isWorkspacePathNegated,
-} from '../workspace-globs.js';
+import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
 
@@ -35,11 +32,7 @@ export interface StartOptions {
   apiOnly?: boolean;
 }
 
-export const VITE_CONFIG_FILES = [
-  'vite.config.ts',
-  'vite.config.js',
-  'vite.config.mjs',
-];
+export const VITE_CONFIG_FILES = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs'];
 
 /**
  * Names for the app's linked config, in priority order. `lincd.config.js` is
@@ -195,15 +188,11 @@ interface WorkspacePackage {
  * absolute root, and its `src/` directory for fast prefix matching. Dependency
  * roots are realpathed by the shared discovery, matching the ids Vite reports.
  */
-export async function discoverWorkspacePackages(
-  cwd: string,
-): Promise<WorkspacePackage[]> {
+export async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[]> {
   const pkgJsonPath = path.join(cwd, 'package.json');
   if (!(await fsExtra.pathExists(pkgJsonPath))) return [];
   const pkgJson = await fsExtra.readJson(pkgJsonPath);
-  const {patterns, negatedPatterns} = parseWorkspacePatterns(
-    pkgJson.workspaces,
-  );
+  const {patterns, negatedPatterns} = parseWorkspacePatterns(pkgJson.workspaces);
   const out: WorkspacePackage[] = [];
 
   // Include the root app itself so edits to <cwd>/src/* trigger HMR for
@@ -262,11 +251,7 @@ export async function discoverWorkspacePackages(
     // an `npm link` all realpath to a directory outside `node_modules`.
     if (isInsideNodeModules(entry.srcDir)) continue;
     names.add(entry.name);
-    out.push({
-      name: entry.name,
-      root: path.dirname(entry.srcDir),
-      srcDir: entry.srcDir,
-    });
+    out.push({name: entry.name, root: path.dirname(entry.srcDir), srcDir: entry.srcDir});
   }
   return out;
 }
@@ -305,9 +290,7 @@ function openBrowser(url: string): void {
   const {command, args} = browserCommand(url);
   const child = spawn(command, args, {detached: true, stdio: 'ignore'});
   // A missing opener must not take the dev server down.
-  child.on('error', (e) =>
-    console.warn(`[linked] could not open ${url}: ${e.message}`),
-  );
+  child.on('error', (e) => console.warn(`[linked] could not open ${url}: ${e.message}`));
   child.unref();
 }
 
@@ -379,8 +362,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
     const envPath = path.join(cwd, '.env');
     if (
       (await fsExtra.pathExists(envPath)) &&
-      typeof (process as {loadEnvFile?: (p: string) => void}).loadEnvFile ===
-        'function'
+      typeof (process as {loadEnvFile?: (p: string) => void}).loadEnvFile === 'function'
     ) {
       (process as {loadEnvFile: (p: string) => void}).loadEnvFile(envPath);
     }
@@ -403,9 +385,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   const apiOnly = isApiOnly(opts, linkedConfig);
 
   const {createServer: createViteServer} = await import('vite');
-  const vite = await createViteServer(
-    await resolveViteServerConfig(cwd, apiOnly),
-  );
+  const vite = await createViteServer(await resolveViteServerConfig(cwd, apiOnly));
   configureLinkedServer(linkedConfig.server, vite, cwd, apiOnly);
 
   // Load the storage config through Vite SSR so it

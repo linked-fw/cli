@@ -12,10 +12,7 @@ import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
 import {isLinkedPackageJson} from './installed-packages.js';
 import {LOCAL_DIR, localMembers} from './localize/members.js';
-import {
-  parseWorkspacePatterns,
-  isWorkspacePathNegated,
-} from './workspace-globs.js';
+import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 // Shared with the CSS loader's mode resolution, which must pick the same profiles.
 import {readEnvNamesFromArgv} from './loader-mode.js';
 import type {PackageDetails} from './interfaces.js';
@@ -224,13 +221,12 @@ export const LOCAL_PACKAGES_DIR = LOCAL_DIR;
  * package — flag or no flag, workspace or localized checkout — want
  * {@link discoverLocalPackages} instead.
  */
-export function getLincdPackages(rootPath = process.cwd()): PackageDetails[] {
+export function getLincdPackages(
+  rootPath = process.cwd(),
+): PackageDetails[] {
   return discoverLocalPackages(rootPath, {includeLocalPackagesDir: false})
     .filter((pkg) => pkg.isLinkedPackage)
-    .map(({path: packagePath, packageName}) => ({
-      path: packagePath,
-      packageName,
-    }));
+    .map(({path: packagePath, packageName}) => ({path: packagePath, packageName}));
 }
 
 /**
@@ -251,10 +247,8 @@ export function discoverLocalPackages(
   rootPath = process.cwd(),
   options: {includeLocalPackagesDir?: boolean; localPackagesDir?: string} = {},
 ): LocalPackage[] {
-  const {
-    includeLocalPackagesDir = true,
-    localPackagesDir = LOCAL_PACKAGES_DIR,
-  } = options;
+  const {includeLocalPackagesDir = true, localPackagesDir = LOCAL_PACKAGES_DIR} =
+    options;
 
   let pack = getPackageJSON(rootPath);
   if (!pack || !pack.workspaces) {
@@ -307,11 +301,7 @@ function checkLocalPackagesDir(
   }
 }
 
-function checkWorkspaces(
-  rootPath: string,
-  workspaces: any,
-  res: LocalPackage[],
-) {
+function checkWorkspaces(rootPath: string, workspaces: any, res: LocalPackage[]) {
   // Negated entries ("!packages/core") are excluded the way npm excludes them
   // — including from the exact-path branch below, which npm also subjects to
   // them. See ./workspace-globs.js.
@@ -338,11 +328,7 @@ function checkWorkspaces(
   });
 }
 
-function checkPackagePath(
-  rootPath: string,
-  packagePath: string,
-  res: LocalPackage[],
-) {
+function checkPackagePath(rootPath: string, packagePath: string, res: LocalPackage[]) {
   const packageJsonPath = path.join(packagePath, 'package.json');
   if (!fs.existsSync(packageJsonPath)) return;
   const pack = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
@@ -603,3 +589,4 @@ export function planBuildAll(rootPath = './', appRoot?: string): BuildAllPlan {
 
   return {build, skipped};
 }
+
