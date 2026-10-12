@@ -6,7 +6,7 @@
 // dependency on any parent monorepo. Companion `@_linked/*` packages
 // must be published to npm at compatible versions; if they aren't yet,
 // set SKIP_E2E=1 to skip this test.
-import {test, expect} from '@playwright/test';
+import {test, expect, type Locator} from '@playwright/test';
 import {GenericContainer, Wait, StartedTestContainer} from 'testcontainers';
 import {spawn, ChildProcess, execSync} from 'node:child_process';
 import {rmSync, existsSync, mkdtempSync} from 'node:fs';
@@ -70,6 +70,12 @@ test.beforeAll(async () => {
   execSync('npm install', {cwd: APP_DIR, stdio: 'inherit'});
 
   // 5. Boot the app with env overrides pointing at the testcontainer Fuseki.
+  // The scaffolded `.env` pins PORT=4000 together with SITE_ROOT/DATA_ROOT on
+  // :4000. SITE_ROOT is inlined into the browser bundle as the backend every
+  // `Server.call` targets, so moving PORT alone leaves the page posting its
+  // queries to :4000 — nothing answers, and the Add form fails silently. The
+  // three move together, as they must for any host that injects PORT.
+  const appOrigin = `http://localhost:${APP_PORT}`;
   appProc = spawn('npm', ['start'], {
     cwd: APP_DIR,
     env: {
@@ -77,12 +83,14 @@ test.beforeAll(async () => {
       FUSEKI_BASE_URL: fusekiUrl,
       FUSEKI_DATASET: DATASET,
       PORT: String(APP_PORT),
+      SITE_ROOT: appOrigin,
+      DATA_ROOT: `${appOrigin}/data`,
     },
     stdio: 'inherit',
   });
 
   // 6. Wait for HTTP 200 on /.
-  await waitForServer(`http://localhost:${APP_PORT}/`, 90_000);
+  await waitForServer(`${appOrigin}/`, 90_000);
 }, /* timeout */ 4 * 60 * 1000);
 
 test.afterAll(async () => {
@@ -117,7 +125,10 @@ test('Person fixture: add → edit → delete round-trip', async ({page}) => {
   await page.goto(`http://localhost:${APP_PORT}/`);
   await expect(page.getByTestId('person-overview')).toBeVisible();
 
-  // Add Alice
+  // Add Alice. The page is server-rendered, so the form is visible before React
+  // has hydrated it; clicking Add then is a native GET submit that reloads the page
+  // and drops the input. Wait for React to own the button first.
+  await waitForHydration(page.getByRole('button', {name: 'Add'}));
   await page.getByPlaceholder('First name').fill('Alice');
   await page.getByPlaceholder('Last name').fill('Anderson');
   await page.getByRole('button', {name: 'Add'}).click();
@@ -138,12 +149,31 @@ test('Person fixture: add → edit → delete round-trip', async ({page}) => {
     page.getByTestId('person-name').filter({hasText: 'Alicia Anderson'}),
   ).toBeVisible();
 
-  // Delete — row disappears
-  await page.getByRole('button', {name: 'Delete'}).first().click();
+  // Delete — row disappears. Same as Add: the reloaded row is server-rendered, and
+  // a click before hydration reaches no handler.
+  const deleteButton = page.getByRole('button', {name: 'Delete'}).first();
+  await waitForHydration(deleteButton);
+  await deleteButton.click();
   await expect(
     page.getByTestId('person-name').filter({hasText: 'Alicia Anderson'}),
   ).toBeHidden();
 });
+
+/**
+ * Wait until React has hydrated the element: React attaches its props, event
+ * handlers included, to a hydrated DOM node under a `__reactProps$<id>` key.
+ * Visibility is no signal — server-rendered markup is visible before any of it
+ * is interactive.
+ */
+async function waitForHydration(locator: Locator): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        locator.evaluate((el) => Object.keys(el).some((k) => k.startsWith('__reactProps$'))),
+      {message: 'element was never hydrated by React', timeout: 30_000},
+    )
+    .toBe(true);
+}
 
 async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
