@@ -635,6 +635,57 @@ Scenarios (quote output):
 **Validation:** every scenario passes as stated, or the failure is recorded here with its output
 and fixed in this phase. Commit the CN worktree's phase result separately from the CLI plan update.
 
+**Result:** Run in a standalone clone `scratchpad/p6-cn` of the CN branch (not the `wt-cn`
+worktree: in a worktree `git rev-parse --git-path hooks` is the main repository's
+`.git/hooks` — measured `/Users/rene/web/create_now/.git/hooks` — so localizing there would have
+written hooks into the developer's live checkout; documented, not changed). `packages-local/` =
+clones of the developer's core (`main` 08bf1df, 2.28.4; the live checkout was on a feature branch),
+auth (`main` 1aaa261, 3.4.0), shape-ui (`main` c53b297, 2.7.0) and this branch (1.46.2). `.env` from
+`.env.example` with `PORT=4343`, Fuseki on the dead port 3997. Node 22.23.3, npm 12.2.0.
+
+Bootstrap: the real flow, `node wt-cli/lib/esm/launch.js localize <4 names> --adopt` (PATH with the
+app's `.bin`, as npx gives) in a clone with no `node_modules`: install fine (37 s, lockfile restored),
+then every build failed — `/bin/sh: linked: command not found` for core/auth/shape-ui and the cli's
+`tsc` without core's `lib/`. The recipe in `docs/localize.md` (`npm run compile` in core, 2 s;
+`npm run build` in the cli, 3 s) worked, but **`node_modules/.bin/linked` did not exist**: npm skips a
+bin whose file is missing at install time, and `npx --no-install linked` then fails ("could not
+determine executable") while plain `npx linked` resolves to the unrelated registry package `linked`
+("tiny middleware framework"). `npm rebuild @_linked/cli --ignore-scripts` (1.1 s) links it. Fixed
+(below); after the fix, re-adopting cli + shape-ui with the cli's `lib/` removed: exit 0 in 21 s, the
+cli built first, its bin linked, shape-ui built with it.
+
+| # | scenario | result |
+|---|---|---|
+| 1 | install | PASS. All four `node_modules/@_linked/{core,auth,shape-ui,cli} -> ../../packages-local/…`; `npm install` 9–13 s; `git status --porcelain` empty; with `--foreground-scripts`: `[lock-at-rest] restored the committed package-lock.json (packages-local/{_linked-auth,_linked-cli,_linked-core,_linked-shape-ui} stay linked in node_modules)` (npm 12 hides it otherwise, and there was no tty); hooks written to `p6-cn/.git/hooks` with the marker |
+| 2 | `--list`, `--list --check` | PASS. `4 localized · no drift`, exit 0; `--check` exit 0 with no output |
+| 3 | build-all, typecheck, vitest, build-app, backend | PASS. build-all 24 s: `Building @_linked/core first: @_linked/cli depends on it.` → `Building @_linked/cli alone` → the other 6. `typecheck:gate` 20 s: `No new type errors`. vitest 1873 passed / 5 skipped (40 s) — with the `.env` copied from `.env.example` 2 fail (`DOCUMENT_EXTRACTION_PROVIDER=openai` there; unrelated). `NODE_ENV=production … build-app --allow-dirty` 23 s, exit 0; 66 core sources in the sourcemaps, all `packages-local/_linked-core`, none from `node_modules`. Backend (PID-scoped, port 4343): `Up and running`, `GET /` 200, no `getLincdPackages` error. Its `@_linked/auth SESSION_COOKIE_NAME constructor failed: providerClass is not a constructor` and `Could not sort lincd packages, circular dependencies?` appear identically in a registry-only baseline clone (port 4344): pre-existing |
+| 4 | git hooks | PASS after a fix. Fast-forward pull of a side-branch `npm update @_linked/server` (2.24.8 → 2.24.9, made in a clone without checkouts): `[git hook] dependency manifests changed (1c8c7cccc..e29daed0e): npm install` … `done in 20s`, links intact, server 2.24.9, status clean. Switch to a branch with the old lockfile and back: 13 s / 11 s, both clean, server version followed. **pre-commit let a leaked lockfile through** (committed); fixed, then: `pre-commit: refusing package-lock.json: it references packages-local/ …`, exit 1 |
+| 5 | delocalize / `--parked` | PASS. `delocalize @_linked/shape-ui` 21 s: parked to `.packages-local.parked/`, registry 2.7.0 installed, `.bin/linked` executable and runs, `3 localized · 1 parked · no drift`. `localize --parked` 13 s: link back, `--check` 0, clean |
+| 6 | drift | PASS. shape-ui's core range `^2.29.0`: `--check` exit 1, `drift: @_linked/core@2.28.4 (packages-local/_linked-core) does not satisfy dependencies "^2.29.0" of packages-local/_linked-shape-ui`; `npm install` then fails `ETARGET`. Range `2.28.3`: install nests a registry copy, `second copy of localized @_linked/core@2.28.3 at packages-local/_linked-shape-ui/node_modules/@_linked/core` + the range miss, exit 1. Recovery: revert the range, `npm install` — it removes the nested copy itself (no `rm -rf` needed), `--check` 0. A root range missing the checkout (`2.28.3`, `^2.29.0`) keeps the link, as documented |
+| 7 | conflicting override | PASS after a fix. Before: `localize @_linked/dcmi` with `"@_linked/core": "$@_linked/core"` cloned dcmi, then `EOVERRIDE`, exit 7. After: `package.json "overrides" names a localized package: "@_linked/core".`, exit 6, nothing cloned |
+| 8 | `npm ci` with checkouts | PASS. 2 s, `EUSAGE` `npm ci can only install packages when your package.json and package-lock.json are in sync`, then `Missing: @_linked/auth@3.4.0 from lock file` etc.; never names `packages-local`; `node_modules` untouched |
+| 9 | how-to migration | PASS with an added step. Old setup made with registry cli 1.46.1 on `main` (`localize --repo` of shape-ui and the cli: per-checkout `node_modules`, `local-packages.json`, hand links), then the branch merged. As written, step 5 would run the old cli's `--adopt` (nothing reinstalled since the pull). With `npm install` first (9 s, lock-at-rest restored, clean) and, for the localized cli, build + `npm rebuild @_linked/cli --ignore-scripts`, adopt exit 0 in 20 s, hooks written, `2 localized · no drift`, clean. Building the cli checkout *before* deleting its pruned `node_modules` fails (`minimatch` has no export `minimatch`) and leaves it without `lib/` |
+
+Fixes — cli: `1022584` fix(localize): build the cli first and link its bin after the build (+2 tests,
+`docs/localize.md` recipe gains the rebuild line); `26b4baf` fix(localize): pre-commit reads lockfiles
+over a megabyte (`execFileSync`'s 1 MB default threw ENOBUFS on CN's 1.05 MB lockfile, which the hook
+took for a staged deletion; +1 test, fails before the fix); `d319375` fix(localize): refuse an override
+on a checkout already localized (+1 test); `ee15e29` docs(localize): how npm treats a missed range
+(the drift table said npm links whatever the range — true only for the app's own ranges; the nested
+copy goes away on the next install) and hooks in a worktree. CN: `a1c5dac3` docs: the how-to's
+migration gains "npm install first" and the localized-cli steps, the drift intro and the worktree
+note are corrected. `npm run test:unit` 62 suites / 693 tests, `npm run build` exit 0.
+
+Open findings: (a) git hooks in a `git worktree` land in the common hooks directory, shared by every
+worktree (documented only; a per-worktree `core.hooksPath` needs `extensions.worktreeConfig`).
+(b) The drift lines print twice per install that changes dependencies: lock-at-rest runs from both
+`postinstall` and `dependencies`. (c) A localize run started as `node …/launch.js` without the app's
+`.bin` on PATH cannot find `linked` for the builds; `npx linked` is fine. (d) `delocalize` does not
+log its `npm rebuild` (only a failure). (e) CN's `.env.example` sets
+`DOCUMENT_EXTRACTION_PROVIDER=openai`, which fails two vitest cases when copied as `.env`. (f) Two
+fresh unbuilt checkouts of cli and core still need the manual recipe; the one in `docs/localize.md`
+now includes the bin rebuild and was run as written.
+
 ### Deferred to review
 
 cli `npm run test:unit` (full, including `real-localize`) and `npm run build`; CN Playwright
