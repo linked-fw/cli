@@ -123,6 +123,7 @@ import {
   getLincdPackages,
   discoverLocalPackages,
   planBuildAll,
+  orderBuildToolFirst,
 } from './lifecycle.js';
 import type {BuildAllPlan} from './lifecycle.js';
 export {
@@ -1023,6 +1024,41 @@ function printBuildAllPlan(plan: BuildAllPlan) {
   }
 }
 
+/**
+ * Run one package's own `build` script. Resolves to true when it built, false
+ * when it built with warnings, and undefined when it failed (the failure has
+ * been printed).
+ */
+function runBuildScript(pkg: PackageDetails): Promise<boolean | undefined> {
+  // Invoke the package's own `build` script. This lets each package
+  // own its build pipeline — e.g. @_linked/core uses direct tsc, pure-CSS
+  // packages may have no-op builds, and linkedPackage: true packages
+  // typically call `linked build` internally.
+  //
+  // npm is the default; the package manager is detected per package so
+  // packages inside an existing yarn workspace still build with yarn.
+  const pkgDir = path.join(process.cwd(), pkg.path);
+  const pkgJson = getPackageJSON(pkgDir);
+  if (!pkgJson?.scripts?.build) {
+    // No build script — skip gracefully (e.g. a pure-assets package).
+    return Promise.resolve(true);
+  }
+  const buildCmd = runScriptCommand(detectPackageManager(pkgDir), 'build');
+  return execPromise(buildCmd, false, false, {cwd: pkgDir})
+    .then((res) => res === '' || typeof res === 'string')
+    .catch((err) => {
+      // A non-zero exit is a failed build. Report it and resolve to
+      // undefined, which is what the callers read as failure. Resolving to an
+      // error object would count as built.
+      const output = [err?.stdout, err?.stderr].filter(Boolean).join('\n');
+      console.error(
+        chalk.red(pkg.packageName + ' build failed') +
+          (output ? '\n' + output : ''),
+      );
+      return undefined;
+    });
+}
+
 export function buildAll(options) {
   console.log(
     'Building all linked packages of this repository in order of dependencies',
@@ -1030,52 +1066,81 @@ export function buildAll(options) {
 
   const plan = planBuildAll('./', findAppRoot() || undefined);
   printBuildAllPlan(plan);
-  let lincdPackages = plan.build;
 
-  if (lincdPackages.size === 0) {
+  if (plan.build.size === 0) {
     console.log(chalk.yellow('Nothing to build.'));
     return;
   }
 
+  // The build tool goes first and alone: every other build runs it.
+  const order = orderBuildToolFirst(plan.build, options?.from);
+  const sync = options?.sync || false;
+
+  // Successfully built (or deliberately passed over by --from).
+  const done: Set<PackageDetails> = new Set();
+
+  if (!order.tool) {
+    return buildInDependencyOrder(order.rest, order.from, sync, done);
+  }
+  const tool = order.tool;
+  if (!order.buildToolFirst) {
+    log(chalk.blue('skipping ' + tool.packageName));
+    done.add(tool);
+    return buildInDependencyOrder(order.rest, order.from, sync, done);
+  }
+
+  // This process has already loaded every module `build-all` uses (the
+  // command's code is imported statically), so the tool's `rimraf ./lib`
+  // cannot pull anything out from under it.
+  console.log(
+    chalk.blue(
+      `Building ${tool.packageName} first: the other packages build with it.`,
+    ),
+  );
+  return runBuildScript(tool).then((res) => {
+    if (typeof res === 'undefined') {
+      const others = order.rest.size;
+      console.error(
+        chalk.red(
+          `${tool.packageName} failed to build, so build-all stopped before ` +
+            `the other ${others} package${others === 1 ? '' : 's'}: they build with it. ` +
+            `Fix ${tool.packageName} and run build-all again.`,
+        ),
+      );
+      process.exit(1);
+      return;
+    }
+    log(
+      chalk.green('Built ' + tool.packageName) +
+        (res === false ? chalk.redBright(' (with warnings)') : ''),
+    );
+    done.add(tool);
+    if (order.rest.size === 0) {
+      printBuildAllSummary(done, new Set(), new Map(), []);
+      return;
+    }
+    return buildInDependencyOrder(order.rest, order.from, sync, done);
+  });
+}
+
+function buildInDependencyOrder(
+  lincdPackages: Map<string, PackageDetails>,
+  from: string | undefined,
+  sync: boolean,
+  done: Set<PackageDetails>,
+) {
   let startFrom: string;
   //by default start building
   let building: boolean = true;
-
-  let from = options?.from;
-  let sync = options?.sync || false;
-
-  // console.log('from', from);
-  // console.log('sync', sync);
-  // process.exit();
 
   //option to start from a specific package in the stack
   if (from) {
     startFrom = from;
     //if we have a startFrom, then we havnt started the build process yet
-    building = startFrom ? false : true;
-
-    //clear targets
-    // target = '';
-    // target2 = '';
+    building = false;
     console.log(chalk.blue('Will skip builds until ' + startFrom));
-
-    // return async (pkg) => {};
   }
-  // if (target2 == 'from') {
-  //   startFrom = target3;
-  //   //if we have a startFrom, then we havnt started the build process yet
-  //   building = startFrom ? false : true;
-  //
-  //   //clear targets
-  //   target2 = '';
-  //   target3 = '';
-  //   console.log(chalk.blue('Will skip builds until ' + startFrom));
-  //
-  //   // return async (pkg) => {};
-  // }
 
-  // Successfully built (or deliberately passed over by --from).
-  let done: Set<PackageDetails> = new Set();
   // Packages whose own build script failed.
   let failed: Set<PackageDetails> = new Set();
   // Packages not built because a dependency failed or was itself not built,
@@ -1085,10 +1150,12 @@ export function buildAll(options) {
   progressUpdate(lincdPackages.size + ' packages left');
 
   let packagesLeft = lincdPackages.size;
+  // `done` may already hold the build tool, built before this ran.
+  const doneBefore = done.size;
   const finished = runOnPackagesGroupedByDependencies(
     lincdPackages,
     (packageGroup, dependencies) => {
-      if (done.size > 0) {
+      if (done.size > doneBefore) {
         debugInfo(
           chalk.magenta(
             '\n-------\nThese packages are next, since all their dependencies have now been build:',
@@ -1137,43 +1204,7 @@ export function buildAll(options) {
         }
         //unless told otherwise, build the package
         if (!command) {
-          // Invoke the package's own `build` script. This lets each package
-          // own its build pipeline — e.g. @_linked/core uses direct tsc, pure-CSS
-          // packages may have no-op builds, and linkedPackage: true packages
-          // typically call `linked build` internally.
-          //
-          // npm is the default; the package manager is detected per package so
-          // packages inside an existing yarn workspace still build with yarn.
-          const pkgDir = path.join(process.cwd(), pkg.path);
-          const pkgJson = getPackageJSON(pkgDir);
-          const hasBuildScript = !!pkgJson?.scripts?.build;
-
-          if (!hasBuildScript) {
-            // No build script — skip gracefully (e.g. a pure-assets package).
-            command = Promise.resolve(true);
-          } else {
-            const buildCmd = runScriptCommand(
-              detectPackageManager(pkgDir),
-              'build',
-            );
-            command = execPromise(buildCmd, false, false, {
-              cwd: pkgDir,
-            })
-              .then((res) => res === '' || typeof res === 'string')
-              .catch((err) => {
-                // A non-zero exit is a failed build. Report it and resolve to
-                // undefined, which is what the result handler below reads as
-                // failure. Resolving to an error object would count as built.
-                const output = [err?.stdout, err?.stderr]
-                  .filter(Boolean)
-                  .join('\n');
-                console.error(
-                  chalk.red(pkg.packageName + ' build failed') +
-                    (output ? '\n' + output : ''),
-                );
-                return undefined;
-              });
-          }
+          command = runBuildScript(pkg);
           log(chalk.cyan('Building ' + pkg.packageName));
           process.stdout.write(packagesLeft + ' packages left\r');
         }
