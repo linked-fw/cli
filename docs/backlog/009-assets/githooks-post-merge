@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$(git rev-parse --show-toplevel)/.githooks/deps-changed.sh" "$(git rev-parse ORIG_HEAD)" "$(git rev-parse HEAD)"
