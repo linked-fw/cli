@@ -15,8 +15,15 @@ const DEPENDENCY_FILES = ['package.json', 'package-lock.json', 'packages/*/packa
 const LEAK = /"packages-local\/(?!\*")/;
 const NO_COMMIT = /^0+$/;
 
+// An app's lockfile is often over a megabyte, execFileSync's default buffer.
+const MAX_BUFFER = 256 * 1024 * 1024;
+
 function git(...args) {
-  return execFileSync('git', args, {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']});
+  return execFileSync('git', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: MAX_BUFFER,
+  });
 }
 
 function preCommit() {

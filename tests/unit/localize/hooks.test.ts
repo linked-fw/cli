@@ -169,6 +169,20 @@ test('pre-commit refuses a staged lockfile that lists a checkout', (t) => {
   assert.match(r.stderr, /refusing package-lock\.json/);
 });
 
+test('pre-commit refuses a leaked lockfile over a megabyte', (t) => {
+  const root = app(t);
+  const filler = Object.fromEntries(
+    Array.from({length: 20000}, (_, i) => [`node_modules/pad-${i}`, {version: '1.0.0', resolved: 'x'.repeat(40)}]),
+  );
+  const big = {...LEAKED, packages: {...LEAKED.packages, ...filler}};
+  fs.writeFileSync(path.join(root, 'package-lock.json'), json(big));
+  assert.ok(fs.statSync(path.join(root, 'package-lock.json')).size > 1024 * 1024);
+  git(root, 'add', 'package-lock.json');
+  const r = node(GIT_HOOK, ['pre-commit'], root);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /refusing package-lock\.json/);
+});
+
 test('pre-commit refuses a staged package.json that lists a checkout', (t) => {
   const root = app(t);
   fs.writeFileSync(
