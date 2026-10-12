@@ -592,6 +592,26 @@ checkout with no `packages-local/` and must be exactly the root `workspaces` hun
   finds only historical notes explicitly marked as such.
 - `npx vitest run` passes (after P6's install; recorded there if not runnable before).
 
+**Result:** One CN commit (`1c8c7ccc`, after rebasing onto origin/main `45fa522f` — the worktree
+was one merge behind, #84). `package.json`: `workspaces` += `"packages-local/*"`;
+`postinstall`/`dependencies` run the lock-at-rest hook; `pretest:unit`, `pretypecheck`,
+`pretypecheck:gate` and the three `$@_linked/*` overrides deleted; `@_linked/cli` stays `^1.46.1`
+(bumped at wrapup). The lockfile was produced with `npm install --ignore-scripts` and no
+`packages-local/` (the registry cli 1.46.1 has no `hooks/`, so the new postinstall cannot run yet);
+its diff against origin/main is exactly the root `workspaces` hunk (+2/−1) — removing the overrides
+changed nothing. `.gitignore` += `.packages-local.parked/`; `docker-compose.yml` mounts an
+anonymous `/workspace/packages-local` in `setup`, `dev`, `deps`, `backend`; `pr-checks.yml` gains a
+`manifests` job (grep `'"packages-local/([^*]|\*[^"])'`, the same rule as `git-hook.cjs`);
+`localize-lockfile-untouched.spec.ts` deleted. Docs: `agents.md` (CLAUDE.md is a symlink to it),
+`readme.md`, the how-to rewritten (680 → ~230 lines), arch-03's two sections rewritten as the
+approved change plus an overrides note, `docs/ARCHITECTURE.md`, arch-01, `ci-local.sh`,
+`vite.config.ts`, the runbook, `create-now.code-workspace`. Validation: package.json parses; the
+leak grep is empty on the repo and matches a leak sample but not the glob; `docker compose
+--profile setup config -q` exits 0 with four volume targets; `pr-checks.yml` parses; the stale
+reference grep finds only migration/history notes. **Until the cli release ships `hooks/`, CN's CI
+install fails** — the wrapup bump is a hard dependency. Deferred to P6: vitest, the how-to's
+migration steps, and the quoted `npm ci` / lock-at-rest output.
+
 ### P6 — Integration (CN + cli checkout)
 
 Setup: `CN/packages-local/` = clones of core, auth, shape-ui (from the developer's checkouts,
