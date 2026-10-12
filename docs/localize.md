@@ -61,9 +61,11 @@ app/.packages-local.parked/        parked checkouts (delocalize)        gitignor
   clone's own hooks directory. `pre-commit` refuses a staged `package.json` or
   `package-lock.json` that names a checkout (`"packages-local/<dir>"`); the other two run
   `npm install` when the dependency manifests changed. Nothing is committed for this, and only
-  clones that localize get them.
-- **The drift check.** npm links a checkout by name whatever its version, and is silent about the
-  copies that result. `linked localize --list` reports them (see [drift](#drift)); the lock-at-rest
+  clones that localize get them. A `git worktree` has no hooks directory of its own: localizing in
+  one writes the hooks into the main repository's, where every worktree of it runs them (each
+  against its own `node_modules`; one without the cli installed skips them).
+- **The drift check.** npm links a checkout for the app's own ranges whatever its version, and for
+  another member's range that misses it installs a registry copy below that member, silently. `linked localize --list` reports them (see [drift](#drift)); the lock-at-rest
   hook prints them after every install, and `linked start`, `script`, `call` and `build-all` print
   them on stderr before they run. Drift is reported, never acted on, and never fails a command.
 
@@ -242,8 +244,8 @@ drift: @_linked/core@2.28.3 (packages-local/_linked-core) does not satisfy depen
 
 | line | meaning | fix |
 |---|---|---|
-| `… does not satisfy <field> "<range>" of <importer>` | a range declared by the app, a `packages/*` member or another checkout misses the checkout's version. npm links the checkout anyway; the code that declared the range runs against a version it did not ask for | pull or bump the checkout, or the declaring package's range. Usual after a pull that bumped the app's range past your checkout |
-| `second copy of localized <name>@<v> at <path>` | a registry copy of a localized package besides the checkout, usually nested because some range missed the checkout's version. It stays after the range is fixed | fix the range miss, then `rm -rf <path>` and `npm install` |
+| `… does not satisfy <field> "<range>" of <importer>` | a range declared by the app, a `packages/*` member or another checkout misses the checkout's version. For the app's own range npm links the checkout anyway, and the app runs against a version it did not ask for; for a member's range npm installs a matching registry copy below that member (also reported as a second copy), or fails with `ETARGET` when no published version matches | pull or bump the checkout, or the declaring package's range. Usual after a pull that bumped the app's range past your checkout |
+| `second copy of localized <name>@<v> at <path>` | a registry copy of a localized package besides the checkout, usually nested because some range missed the checkout's version | fix the range miss and `npm install`, which removes it; if `--list` still shows it, `rm -rf <path>` and `npm install` again |
 | `nested copy of <name>@<v> at <path> — the app should load one` | a nested copy of `@_linked/core`, `@_linked/react` or `@_linked/server-utils`, which must load once app-wide, localized or not | bring the nesting package's range in line with the app's, then `npm install` |
 | `<dir> is installed but its checkout is gone — run npm install` | npm installed a checkout whose directory no longer exists (`npm ci` exits 0 with a dangling link) | `npm install` |
 
