@@ -126,6 +126,7 @@ import {
   orderBuildToolFirst,
 } from './lifecycle.js';
 import type {BuildAllPlan} from './lifecycle.js';
+import {excerptBuildError} from './build-error-excerpt.js';
 export {
   ensureEnvironmentLoaded,
   loadBackendStorageConfig,
@@ -1027,9 +1028,13 @@ function printBuildAllPlan(plan: BuildAllPlan) {
 /**
  * Run one package's own `build` script. Resolves to true when it built, false
  * when it built with warnings, and undefined when it failed (the failure has
- * been printed).
+ * been printed, and its output is kept in `failureOutput` when given, for the
+ * summary).
  */
-function runBuildScript(pkg: PackageDetails): Promise<boolean | undefined> {
+function runBuildScript(
+  pkg: PackageDetails,
+  failureOutput?: Map<string, string>,
+): Promise<boolean | undefined> {
   // Invoke the package's own `build` script. This lets each package
   // own its build pipeline — e.g. @_linked/core uses direct tsc, pure-CSS
   // packages may have no-op builds, and linkedPackage: true packages
@@ -1051,6 +1056,7 @@ function runBuildScript(pkg: PackageDetails): Promise<boolean | undefined> {
       // undefined, which is what the callers read as failure. Resolving to an
       // error object would count as built.
       const output = [err?.stdout, err?.stderr].filter(Boolean).join('\n');
+      failureOutput?.set(pkg.packageName, output);
       console.error(
         chalk.red(pkg.packageName + ' build failed') +
           (output ? '\n' + output : ''),
@@ -1116,7 +1122,7 @@ export function buildAll(options) {
     );
     done.add(tool);
     if (order.rest.size === 0) {
-      printBuildAllSummary(done, new Set(), new Map(), []);
+      printBuildAllSummary(done, new Set(), new Map(), [], new Map());
       return;
     }
     return buildInDependencyOrder(order.rest, order.from, sync, done);
@@ -1146,6 +1152,8 @@ function buildInDependencyOrder(
   // Packages not built because a dependency failed or was itself not built,
   // mapped to the failed package(s) at the root of that chain.
   let notBuilt: Map<PackageDetails, string[]> = new Map();
+  // The output of each failed build, by package name, for the summary.
+  const failureOutput: Map<string, string> = new Map();
 
   progressUpdate(lincdPackages.size + ' packages left');
 
@@ -1204,7 +1212,7 @@ function buildInDependencyOrder(
         }
         //unless told otherwise, build the package
         if (!command) {
-          command = runBuildScript(pkg);
+          command = runBuildScript(pkg, failureOutput);
           log(chalk.cyan('Building ' + pkg.packageName));
           process.stdout.write(packagesLeft + ' packages left\r');
         }
@@ -1281,7 +1289,7 @@ function buildInDependencyOrder(
         }
       }
 
-      printBuildAllSummary(done, failed, notBuilt, unscheduled);
+      printBuildAllSummary(done, failed, notBuilt, unscheduled, failureOutput);
       if (failed.size > 0 || notBuilt.size > 0 || unscheduled.length > 0) {
         process.exit(1);
       }
@@ -1293,18 +1301,31 @@ function buildInDependencyOrder(
 
 /**
  * The end-of-run report of `build-all`: what was built, every package whose
- * build failed, and every package that was not built because of one.
+ * build failed with a few lines of why, and every package that was not built
+ * because of one.
  */
 function printBuildAllSummary(
   done: Set<PackageDetails>,
   failed: Set<PackageDetails>,
   notBuilt: Map<PackageDetails, string[]>,
   unscheduled: PackageDetails[],
+  failureOutput: Map<string, string>,
 ) {
   printBuildResults(
     [...failed].map((p) => p.packageName),
     done,
   );
+  for (const pkg of failed) {
+    const excerpt = excerptBuildError(failureOutput.get(pkg.packageName) || '');
+    console.warn(
+      chalk.red(`  ${pkg.packageName}:`) +
+        '\n' +
+        (excerpt.length > 0 ? excerpt : ['(no output)'])
+          .map((line) => chalk.gray('    | ') + line)
+          .join('\n'),
+    );
+  }
+  if (failed.size > 0) console.warn('');
   if (notBuilt.size > 0) {
     warn(
       `Not built (${notBuilt.size}) because a dependency failed:\n` +
