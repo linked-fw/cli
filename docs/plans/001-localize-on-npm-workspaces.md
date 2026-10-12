@@ -1099,3 +1099,10 @@ tests/unit/localizeCommand.test.ts tests/unit/buildAll` → `Test Suites: 19 pas
 `docs/how-to/develop-a-linked-package-locally.md`: the bootstrap/migration steps end with
 `npx linked localize <name> --adopt --build ''` to install hooks; mention the lock-at-rest notice.
 **Quick gate:** grep shows the line; no other change.
+
+**Result:** CN commit `e0a1bbef` (`docs/how-to/develop-a-linked-package-locally.md` only, +15/−1).
+Migration step 7 now says that when the adopt-all run is skipped (cli and core built by hand, or
+checkouts put in another way) the steps end with `npx linked localize <name> --adopt --build ''`
+for any one checkout, to install the git hooks; "Pulling and switching branches" quotes the
+lock-at-rest notice and the same command. Gate: `grep -n "adopt --build ''"` → lines 110 and 258;
+`git diff --stat` → that one file.
