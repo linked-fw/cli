@@ -293,7 +293,7 @@ function prepareClone(
   }
   fs.mkdirSync(path.dirname(clone), {recursive: true});
   deps.log(`[localize] cloning ${resolved.repo} -> ${relClone}`);
-  const r = deps.run('git', ['clone', resolved.repo, clone]);
+  const r = deps.run('git', ['clone', '--', resolved.repo, clone]);
   if (r.status !== 0) {
     throw new LocalizeError(
       `git clone ${resolved.repo} failed:\n${(r.stderr || r.stdout).trim()}`,
@@ -337,6 +337,15 @@ export function unpark(member: Member, deps: Deps): Prepared {
     throw new LocalizeError(
       `${member.name} is parked in ${member.dir}, but ${relDir} already exists. Move one of ` +
         `them out of the way and run this again.`,
+      EXIT_REFUSED,
+    );
+  }
+  // npm refuses two workspace members of one name, so the install would fail.
+  const same = localMembers(deps.appRoot).find((m) => m.name === member.name);
+  if (same) {
+    throw new LocalizeError(
+      `${member.name} is parked in ${member.dir}, but ${same.dir} is ${member.name} already. ` +
+        `Keep one: delete or move the other out of the way, and run this again.`,
       EXIT_REFUSED,
     );
   }

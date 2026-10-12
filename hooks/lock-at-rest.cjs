@@ -15,14 +15,15 @@ const {createHash} = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const {LEAK, localMembers, manifestPathspecs} = require('./manifests.cjs');
+const {LEAK, LOCAL_DIR, localMembers, manifestPathspecs} = require('./manifests.cjs');
+const {hookLine, runsOurHook} = require('./hook-shim.cjs');
 
 // An app's lockfile is often over a megabyte, execFileSync's default buffer.
 const MAX_BUFFER = 256 * 1024 * 1024;
 const LOCKFILE = 'package-lock.json';
 const ADVICE = 'To change dependencies: npx linked delocalize, npm install <dep>, commit, then npx linked localize --parked.';
-// What marks a git hook `linked localize` wrote: the same text as HOOK_MARKER in src/localize/git-hooks.ts.
-const HOOK_MARKER = '# managed by linked localize';
+// Where an interrupted first set-up leaves the checkouts: SETUP_ASIDE_DIR in src/localize/localize.ts.
+const SETUP_ASIDE = `${LOCAL_DIR}/.setup-aside`;
 
 function run() {
   // npm runs lifecycle scripts from the package root: the app, which may sit below the git top
@@ -114,30 +115,46 @@ function run() {
 
   // A clone set up by hand (a bootstrap that copied packages-local/ in, or ran `npm install` only)
   // never got the git hooks: no pre-commit refuses a leaked lockfile, and no npm install follows a
-  // pull. True when this is a work tree, `core.hooksPath` is unset (then the hooks are added by
-  // hand, see git-hooks.ts) and the hooks directory has no pre-commit of ours.
-  function hooksMissing() {
+  // pull. The lines to print when this is a work tree, `core.hooksPath` is unset (then the hooks
+  // are added by hand, see git-hooks.ts) and the hooks directory has no pre-commit that runs ours;
+  // none otherwise.
+  function hooksNotice(members) {
     try {
-      if (git('rev-parse', '--is-inside-work-tree').trim() !== 'true') return false;
+      if (git('rev-parse', '--is-inside-work-tree').trim() !== 'true') return [];
     } catch {
-      return false;
+      return [];
     }
     try {
-      if (git('config', 'core.hooksPath').trim()) return false;
+      if (git('config', 'core.hooksPath').trim()) return [];
     } catch {
       /* unset */
     }
-    let dir;
+    let file, prefix;
     try {
-      dir = git('rev-parse', '--git-path', 'hooks').trim();
+      file = path.resolve(root, git('rev-parse', '--git-path', 'hooks').trim(), 'pre-commit');
+      prefix = git('rev-parse', '--show-prefix').trim();
     } catch {
-      return false;
+      return [];
     }
+    let text = null;
     try {
-      return !fs.readFileSync(path.resolve(root, dir, 'pre-commit'), 'utf8').includes(HOOK_MARKER);
+      text = fs.readFileSync(file, 'utf8');
     } catch {
-      return true;
+      /* no pre-commit */
     }
+    if (text === null) {
+      // --adopt needs a git checkout: name one that is.
+      const checkout = members.find((m) => fs.existsSync(path.join(root, m.dir, '.git')));
+      const name = checkout ? checkout.name : "<any checkout's name>";
+      return [`git hooks are not installed in this clone: run \`npx linked localize ${name} --adopt --build ''\` once`];
+    }
+    if (runsOurHook(text)) return [];
+    // localize leaves a hook it did not write alone, so --adopt would not help: add ours by hand.
+    return [
+      `${path.relative(root, file)} is not ours, so nothing refuses a commit of a lockfile that ` +
+        'lists a checkout. Add this line to it (it does nothing where the cli is not installed):',
+      `  ${hookLine('pre-commit', prefix)}`,
+    ];
   }
 
   // The drift report and the missing-hooks notice, after the hidden lockfile npm just wrote; only
@@ -161,11 +178,7 @@ function run() {
     }
     const {driftProblems, describeDrift} = require('./drift.cjs');
     for (const d of driftProblems(root)) write(`[localize] drift: ${describeDrift(d)}\n`);
-    if (hooksMissing())
-      say(
-        `git hooks are not installed in this clone: run \`npx linked localize ${members[0].name} ` +
-          `--adopt --build ''\` once`,
-      );
+    for (const line of hooksNotice(members)) say(line);
     try {
       fs.mkdirSync(path.dirname(stampFile), {recursive: true});
       fs.writeFileSync(stampFile, stamp);
@@ -175,6 +188,9 @@ function run() {
   }
 
   try {
+    // Rare, and the checkouts there are invisible to npm until moved back: said on every install.
+    if (fs.existsSync(path.join(root, SETUP_ASIDE)))
+      say(`checkouts are set aside in ${SETUP_ASIDE}/ (an interrupted set-up): \`npx linked localize --list\` moves them back`);
     const members = localMembers(root);
     if (!members.length) return; // nothing localized: npm owns the lockfile as usual
     restore(members);

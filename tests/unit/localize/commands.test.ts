@@ -32,12 +32,12 @@ function seedCheckout(appRoot, rel, pkg) {
   return dir;
 }
 
-/** A runner whose `git clone <url> <dir>` leaves a checkout of `pkg` at `<dir>`. */
+/** A runner whose `git clone -- <url> <dir>` leaves a checkout of `pkg` at `<dir>`. */
 function cloning(appRoot, pkgFor, handler?) {
   return stubbed(appRoot, (inv) => {
     if (inv.cmd === 'git' && inv.args[0] === 'clone') {
       const name = pkgFor.name;
-      seedCheckout(appRoot, path.relative(appRoot, inv.args[2]), {
+      seedCheckout(appRoot, path.relative(appRoot, inv.args[inv.args.length - 1]), {
         version: '1.0.0',
         ...pkgFor,
         name,
@@ -71,7 +71,7 @@ test('localize clones, sets up, installs once at the root, then builds', (t) => 
   assert.equal(code, 0, deps.output());
   assert.deepEqual(trace(deps, appRoot), [
     'npm install --package-lock-only --ignore-scripts --no-audit --no-fund @ .',
-    'git clone https://example.invalid/a.git packages-local/x-a @ -',
+    'git clone -- https://example.invalid/a.git packages-local/x-a @ -',
     'npm install --no-audit --no-fund @ .',
     'linked build @ packages-local/x-a',
   ]);
@@ -117,7 +117,7 @@ test('first set-up: the lockfile npm makes before the clone is written back afte
 
   assert.deepEqual(trace(deps, appRoot).slice(0, 3), [
     'npm install --package-lock-only --ignore-scripts --no-audit --no-fund @ .',
-    'git clone https://example.invalid/a.git packages-local/x-a @ -',
+    'git clone -- https://example.invalid/a.git packages-local/x-a @ -',
     'npm install --no-audit --no-fund @ .',
   ]);
   assert.equal(fs.readFileSync(lockfile, 'utf8'), setupLock, 'the set-up lockfile, not the install\'s');
@@ -188,7 +188,7 @@ test('one install for several names, and a failing build only warns (exit 5)', (
   let n = 0;
   const deps = stubbed(appRoot, (inv) => {
     if (inv.cmd === 'git' && inv.args[0] === 'clone') {
-      seedCheckout(appRoot, path.relative(appRoot, inv.args[2]), {
+      seedCheckout(appRoot, path.relative(appRoot, inv.args[inv.args.length - 1]), {
         name: ['@x/a', '@x/b'][n++],
         version: '1.0.0',
       });
@@ -229,7 +229,7 @@ test('the cli builds before the others and then gets its bin linked', (t) => {
   let n = 0;
   const deps = stubbed(appRoot, (inv) => {
     if (inv.cmd === 'git' && inv.args[0] === 'clone') {
-      seedCheckout(appRoot, path.relative(appRoot, inv.args[2]), {
+      seedCheckout(appRoot, path.relative(appRoot, inv.args[inv.args.length - 1]), {
         name: ['@x/a', '@_linked/cli'][n++],
         version: '1.0.0',
       });
@@ -303,6 +303,21 @@ test('localize takes a parked checkout back: no clone, no build, one install', (
   assert.deepEqual(trace(deps, appRoot), ['npm install --no-audit --no-fund @ .']);
 });
 
+test('localize refuses (exit 6) to take back a parked name that is a member under another directory', (t) => {
+  const appRoot = consumer(t);
+  seedCheckout(appRoot, '.packages-local.parked/x-a', {name: '@x/a', version: '1.0.0'});
+  seedCheckout(appRoot, 'packages-local/a-by-hand', {name: '@x/a', version: '1.0.0'});
+  const deps = stubbed(appRoot);
+
+  assert.equal(localize(['@x/a'], {}, deps), 6);
+
+  assert.match(deps.output(), /packages-local\/a-by-hand is @x\/a already/);
+  assert.doesNotMatch(deps.output(), /\[localize\] \[localize\]/);
+  assert.ok(fs.existsSync(path.join(appRoot, '.packages-local.parked/x-a/package.json')));
+  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
+  assert.equal(deps.npmCalls().length, 0);
+});
+
 test('an existing directory is refused with an --adopt hint, and nothing is installed', (t) => {
   const appRoot = consumer(t);
   seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
@@ -341,6 +356,19 @@ test('a failed root install exits 7 and builds nothing', (t) => {
   assert.equal(deps.calls.some((c) => c.cmd === 'linked build'), false);
 });
 
+test('a set-up refusal is printed with one [localize] prefix, like every other refusal', (t) => {
+  const appRoot = consumer(t, {workspaces: 'packages/*'}, {setUp: false});
+  const deps = stubbed(appRoot);
+
+  assert.equal(localize(['@x/a'], {}, deps), 6);
+
+  assert.deepEqual(deps.errors, [
+    `[localize] package.json "workspaces" is neither a list nor {"packages": [...]}; ` +
+      `add "packages-local/*" to it by hand.`,
+  ]);
+  assert.equal(deps.calls.length, 0);
+});
+
 test('--dir other than packages-local is a usage error (exit 2)', (t) => {
   const appRoot = consumer(t);
   const deps = stubbed(appRoot);
@@ -360,7 +388,32 @@ test('delocalize the last checkout parks it and runs npm ci', (t) => {
   assert.ok(fs.existsSync(path.join(appRoot, '.packages-local.parked/x-a/package.json')));
   assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
   assert.deepEqual(trace(deps, appRoot), ['npm ci --no-audit --no-fund @ .']);
+  assert.match(deps.output(), /npm ci --no-audit --no-fund \(app root; the committed package-lock\.json, unchanged\)/);
+  const git = deps.calls.filter((c) => c.cmd === 'git').map((c) => c.args.join(' '));
+  assert.ok(git.includes('ls-files --error-unmatch -- package-lock.json'), git.join('\n'));
+  assert.ok(git.includes('diff --quiet HEAD -- package.json package-lock.json'), git.join('\n'));
   assert.match(deps.output(), /linked localize @x\/a` takes it back/);
+});
+
+test('delocalize the last checkout runs npm install, not npm ci, without a clean tracked lockfile', (t) => {
+  for (const [why, failing, said] of [
+    ['untracked', 'ls-files', /package-lock\.json is not tracked by git/],
+    ['changed', 'diff', /package\.json or package-lock\.json differs from HEAD/],
+  ] as const) {
+    const appRoot = consumer(t);
+    seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
+    const deps = stubbed(appRoot, (inv) =>
+      inv.cmd === 'git' && inv.args[0] === failing ? fail('', 1) : undefined,
+    );
+
+    assert.equal(delocalize(['@x/a'], {}, deps), 0, `${why}: ${deps.output()}`);
+
+    assert.deepEqual(trace(deps, appRoot), [
+      'npm install --no-audit --no-fund @ .',
+      'npm rebuild @x/a @ .',
+    ], why);
+    assert.match(deps.output(), said, why);
+  }
 });
 
 test('delocalize one of two runs npm install then npm rebuild <name>', (t) => {
@@ -411,7 +464,7 @@ test('a monorepo package is a link into packages-local/.repos, and parks and com
   const appRoot = consumer(t);
   const deps = stubbed(appRoot, (inv) => {
     if (inv.cmd === 'git' && inv.args[0] === 'clone') {
-      const clone = inv.args[2];
+      const clone = inv.args[inv.args.length - 1];
       seedCheckout(appRoot, path.relative(appRoot, clone), {name: 'root'});
       fs.mkdirSync(path.join(clone, 'packages/a'), {recursive: true});
       fs.writeFileSync(

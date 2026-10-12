@@ -97,8 +97,9 @@ exactly as npm names them (`@_linked/rdfs`, `lodash`); there are no short names.
 **The app root.** `localize`, `delocalize`, `--list` and the drift report before `linked start`
 act on the app root, the same one `build-all` uses: the nearest directory above (or at) the
 current one whose `package.json` has `workspaces`, then each higher one with `workspaces` whose
-globs match it (as npm would find it: `*` within a segment, `**` across depth, no dot directories,
-negations honoured). The first ancestor whose globs do not match ends the climb. Of that chain the
+globs match it (close to how npm finds it: `*` and `?` within a segment, `**` across depth, no dot
+directories, and a `!` negation excludes wherever it stands -- npm's re-inclusion by a later glob and
+`{a,b}` braces are not supported). The first ancestor whose globs do not match ends the climb. Of that chain the
 topmost one that is not itself a linked package wins. So running them inside `packages/foo` sets up
 and installs the app, not the member, while a git worktree nested in the app
 (`<app>/.claude/worktrees/<wt>`, which no app glob matches) is its own app: a command run there
@@ -171,7 +172,8 @@ replaces.
 `delocalize` or `--list` moves them back first and says so in one line
 (`moved 1 checkout back from packages-local/.setup-aside/ into packages-local/ …`). If a checkout of
 the same directory name has appeared in `packages-local/` since, it refuses with exit 6, names it
-and moves nothing: keep one of the two and run it again.
+and moves nothing: keep one of the two and run it again. Until then every install prints
+`[lock-at-rest] checkouts are set aside in packages-local/.setup-aside/ (an interrupted set-up): …`.
 
 **When npm's step fails** (it cannot reach the registry, say), localize says so and prints the
 manual way instead, which still works:
@@ -214,16 +216,20 @@ npx linked localize --parked        # take the checkouts back
 **Taking a checkout back.** `linked localize <name>` moves a parked checkout back instead of
 cloning, with its branch and uncommitted work as they were. A checkout that is already in
 `packages-local/` is refused with exit 6 and a hint to use `--adopt`; localize never clones over a
-directory.
+directory. Taking back (by name or with `--parked`) also refuses with exit 6, moving nothing, when a
+checkout of the same package name is already in `packages-local/` under another directory: npm
+refuses two workspace members of one name.
 
 **`--adopt`** is for a checkout that cannot come from the registry: a package you created and
 have not published (`linked create-package --location packages-local` hands it to `--adopt`), or a
 clone you put in `packages-local/` by hand. It expects a git checkout at the directory localize
 would clone to, whose `package.json` has that name, and it never clones, pulls or fetches.
 
-**Delocalize** parks, then reinstalls: `npm ci` when no checkout remains, otherwise `npm install`
+**Delocalize** parks, then reinstalls: `npm ci` when no checkout remains, git tracks
+`package-lock.json`, and neither it nor `package.json` differs from HEAD; otherwise `npm install`
 followed by `npm rebuild <names>` (an install that replaces a link with the registry copy leaves
-that package's bin without its execute bit; the rebuild restores it).
+that package's bin without its execute bit; the rebuild restores it). The log line says which ran,
+and why.
 
 ### Purge
 
@@ -395,8 +401,11 @@ ours, lock-at-rest prints, once per install that changed the tree (with the drif
 [lock-at-rest] git hooks are not installed in this clone: run `npx linked localize @_linked/core --adopt --build ''` once
 ```
 
-That run (any checkout's name; `--build ''` builds nothing) writes the hooks and runs one
-`npm install`. Under `core.hooksPath` the notice stays quiet: add the lines localize prints there.
+That run (it names a checkout that has a `.git`, or says `<any checkout's name>` when none has;
+`--build ''` builds nothing) writes the hooks and runs one `npm install`. When the hooks directory
+has a `pre-commit` that is not ours, `--adopt` would leave it alone, so the notice names that file
+and prints the one line to add to it instead; once the file runs `hooks/git-hook.cjs`, the notice
+stops. Under `core.hooksPath` the notice stays quiet: add the lines localize prints there.
 
 ## `npm ci` with checkouts present fails
 
@@ -495,7 +504,7 @@ holding its own pruned `node_modules` must not sit next to members.
 | 2 | bad command line (`--dir` other than `packages-local`, `--adopt` with `--repo`/`--subdir`, `--parked` with names) |
 | 4 | no repository could be resolved. Pass `--repo` |
 | 5 | something was warned about and skipped; the rest worked (a failed build, a name that is not localized, a park blocked by an existing directory, a failed `npm rebuild`) |
-| 6 | a guard refused: an existing directory, a conflicting override, a clone that is not the package, a failed `git clone`, an unusable `package.json`, a refused `--purge` (it was 5 before this version) |
+| 6 | a guard refused: an existing directory, a parked checkout whose name is already a member, a conflicting override, a clone that is not the package, a failed `git clone`, an unusable `package.json`, a refused `--purge` (it was 5 before this version) |
 | 7 | `npm install` (or `npm ci`) at the app root failed |
 
 Each package is processed independently, and the exit code is the highest of the per-package codes

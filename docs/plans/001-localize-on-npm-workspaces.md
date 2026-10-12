@@ -1168,6 +1168,33 @@ now, untested on real Windows (no one on the team uses it), covering every comma
 **Quick gate:** tsc; `tests/unit/localize tests/unit/localizeCommand.test.ts tests/unit/buildAll`;
 `npm run test:unit`; `npm run build`.
 
+**Result:** (1) The `sh` hand-over moved to `hooks/hook-shim.cjs` (marker, `hookCommands`,
+`hookLine`, `runsOurHook`), which `git-hooks.ts` loads through `requireHook` and lock-at-rest
+requires, so there is one copy. lock-at-rest's `hooksNotice`: no `pre-commit` → the `--adopt`
+line; a `pre-commit` that is not ours → `<path> is not ours, …` plus the exact `hookLine` (with the
+app's `--show-prefix`), no `--adopt`; a file that has the marker or runs `hooks/git-hook.cjs` (the
+line added by hand) → quiet, which closes L1. Still stamp-gated. (2) The `--adopt` line names the
+first checkout with a `.git` (directory or file), else `<any checkout's name>`. (3) When
+`packages-local/.setup-aside/` exists, lock-at-rest says so on every install, before the
+nothing-localized return, pointing at `npx linked localize --list`. (4) `unpark` refuses with exit 6
+when a member of the same name is in another directory (both `localize <name>` and `--parked`).
+(5) `delocalize` with no checkout left runs `npm ci` only when `git ls-files --error-unmatch --
+package-lock.json` and `git diff --quiet HEAD -- package.json package-lock.json` succeed; otherwise
+`npm install` + `npm rebuild <names>`; the log line gives the reason. (6) `git clone -- <url>
+<dir>`; `return buildAll(options)` for `build-all` (`build-workspace` already returned); the
+`[localize]` prefix dropped from the five `app-setup.ts` messages, since `reportError` adds it to
+every LocalizeError. (7) `docs/localize.md`: the matcher's `*`/`?`/`**`/`!` vs npm re-inclusion and
+braces; also the delocalize rule, the unpark refusal (+ exit-code table), the foreign-`pre-commit`
+notice and the set-aside line; the `delocalize` help in `cli.ts`. Tests: hooks (checkout named by
+`.git`, `<any checkout's name>`, foreign pre-commit below the git top level → path + line, quiet once
+added; set-aside line twice), commands (unpark clash; ci's two git checks; untracked and changed →
+install + rebuild; one `[localize]` prefix), adopt (`--parked` clash), `buildAllCliReturn` (every
+`buildAll(` call in `cli.ts` is returned). Gate: `npx tsc -p tsconfig-esm.json --noEmit` exit 0;
+`npx jest --config jest.config.cjs tests/unit/localize tests/unit/localizeCommand.test.ts
+tests/unit/buildAll` → `Test Suites: 20 passed, 20 total`, `Tests: 226 passed, 226 total`; `npm run
+test:unit` → `Test Suites: 67 passed, 67 total`, `Tests: 753 passed, 753 total`; `npm run build`
+exit 0.
+
 ### P15 — Windows-proof CLI (every command)
 Audit every command in `src/cli.ts` and every hook in `hooks/` for: spawning `npm`/`npx`/bins
 without a shell (Windows needs `npm.cmd` with `shell: true` since Node 18.20/20.12), POSIX-only

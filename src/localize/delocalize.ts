@@ -8,11 +8,14 @@
  *
  * Then the install that swaps the links for registry copies:
  *
- * - no checkout left: `npm ci`, which installs exactly the committed lockfile;
- * - some left: `npm install` (`npm ci` refuses a lockfile that lists members
- *   it does not), then `npm rebuild <names>` -- an install that replaces a
- *   link with the registry copy leaves that package's bin without its execute
- *   bit (measured), and a rebuild relinks it.
+ * - no checkout left, `package-lock.json` tracked by git, and it and
+ *   `package.json` unchanged from HEAD: `npm ci`, which installs exactly the
+ *   committed lockfile;
+ * - otherwise (some checkouts left -- `npm ci` refuses a lockfile that lists
+ *   members it does not -- an untracked lockfile, or a manifest being
+ *   changed): `npm install`, then `npm rebuild <names>` -- an install that
+ *   replaces a link with the registry copy leaves that package's bin without
+ *   its execute bit (measured), and a rebuild relinks it.
  *
  * `--purge` deletes the checkout instead of parking it. It fails closed:
  * unless `--force`, it refuses (exit 6) when the checkout is not a git
@@ -26,6 +29,7 @@ import {EXIT_INSTALL_FAILED, EXIT_REFUSED, EXIT_WARNED} from './errors.js';
 import {checkoutRepoRoot, existsOrLink, isInside, isSymlink, moveEntry} from './fsops.js';
 import {
   INSTALL_ARGS,
+  LOCKFILE,
   legacyManifestHint,
   reportError,
   restoreSetAside,
@@ -150,9 +154,11 @@ function linkedFromElsewhere(repo: string, deps: Deps): boolean {
 
 /** The install after parking or purging: see the module header. */
 function reinstall(names: string[], deps: Deps): number {
-  const remaining = localMembers(deps.appRoot).length;
-  const args = remaining ? INSTALL_ARGS : ['ci', '--no-audit', '--no-fund'];
-  deps.log(`[localize] npm ${args.join(' ')} (app root)`);
+  const why = ciRefusal(deps);
+  const ci = why === null;
+  const args = ci ? ['ci', '--no-audit', '--no-fund'] : INSTALL_ARGS;
+  const reason = ci ? `the committed ${LOCKFILE}, unchanged` : why;
+  deps.log(`[localize] npm ${args.join(' ')} (app root; ${reason})`);
   const r = deps.run('npm', args, {cwd: deps.appRoot});
   if (r.status !== 0) {
     deps.error(
@@ -162,7 +168,7 @@ function reinstall(names: string[], deps: Deps): number {
     );
     return EXIT_INSTALL_FAILED;
   }
-  if (!remaining) return 0;
+  if (ci) return 0;
   const rebuild = deps.run('npm', ['rebuild', ...names], {cwd: deps.appRoot});
   if (rebuild.status !== 0) {
     deps.warn(
@@ -172,6 +178,24 @@ function reinstall(names: string[], deps: Deps): number {
     return EXIT_WARNED;
   }
   return 0;
+}
+
+/**
+ * Why the reinstall cannot be `npm ci`, or null when it can: no checkout is
+ * left, git tracks the lockfile, and neither it nor `package.json` differs
+ * from HEAD. A git call that fails counts as a reason: `npm install` is the
+ * safe choice.
+ */
+function ciRefusal(deps: Deps): string | null {
+  if (localMembers(deps.appRoot).length)
+    return `checkouts remain in ${LOCAL_DIR}/`;
+  const git = (args: string[]) =>
+    deps.run('git', args, {cwd: deps.appRoot}).status === 0;
+  if (!git(['ls-files', '--error-unmatch', '--', LOCKFILE]))
+    return `${LOCKFILE} is not tracked by git`;
+  if (!git(['diff', '--quiet', 'HEAD', '--', 'package.json', LOCKFILE]))
+    return `package.json or ${LOCKFILE} differs from HEAD`;
+  return null;
 }
 
 /**

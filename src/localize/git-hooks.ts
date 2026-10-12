@@ -9,8 +9,8 @@
  * - `pre-commit`: refuse a `package.json` or `package-lock.json` that lists a
  *   checkout.
  *
- * Each is a few lines of `sh` that hand over to `hooks/git-hook.cjs` in the
- * installed cli. The app may sit below the git top level, so the hook records
+ * Each is a few lines of `sh` (from `hooks/hook-shim.cjs`) that hand over to
+ * `hooks/git-hook.cjs` in the installed cli. The app may sit below the git top level, so the hook records
  * the app's path inside the repository (`git rev-parse --show-prefix`) and
  * `cd`s there from the top level when it runs: moving the clone or
  * reinstalling the cli needs no rewrite, and a work tree without the cli (not
@@ -37,6 +37,9 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {requireHook} from './hook-module.js';
+
+// The same text as in hooks/hook-shim.cjs; loading that module checks it.
 export const HOOK_MARKER = '# managed by linked localize';
 export const GIT_HOOKS = ['post-merge', 'post-checkout', 'pre-commit'] as const;
 export type GitHook = (typeof GIT_HOOKS)[number];
@@ -61,32 +64,27 @@ export interface HookInstall {
   sharedWithWorktrees: boolean;
 }
 
-/** `s` as one single-quoted `sh` word: survives spaces, `$`, quotes and backticks. */
-function shQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
+interface HookShimModule {
+  HOOK_MARKER: string;
+  hookCommands: (hook: GitHook, prefix: string) => string[];
+  hookLine: (hook: GitHook, prefix: string) => string;
 }
 
+let shim: HookShimModule | undefined;
+
 /**
- * The commands that run `git-hook.cjs` for `hook` from the app at `prefix`
- * (relative to the git top level, `/`-terminated or empty). Each is one `sh`
- * command, so they can be lines of a file or `; `-joined in a subshell.
+ * `hooks/hook-shim.cjs`: the hand-over the hook files run, shared with
+ * lock-at-rest, which prints it for a hook file that is not ours.
  */
-function hookCommands(hook: GitHook, prefix: string): string[] {
-  const dir = prefix
-    ? `dir="$(git rev-parse --show-toplevel)"/${shQuote(prefix.replace(/\/$/, ''))}`
-    : 'dir="$(git rev-parse --show-toplevel)"';
-  return [
-    dir,
-    'script="$dir/node_modules/@_linked/cli/hooks/git-hook.cjs"',
-    '{ [ -f "$script" ] && command -v node >/dev/null 2>&1; } || exit 0',
-    // git starts a hook at the top level. With GIT_DIR set, git takes the
-    // current directory for the top level unless GIT_WORK_TREE says otherwise,
-    // and a relative path is relative to here: both stop holding after the cd.
-    '[ -z "${GIT_DIR-}" ] || [ -n "${GIT_WORK_TREE-}" ] || export GIT_WORK_TREE="$PWD"',
-    'for v in GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE; do eval "p=\\${$v-}"; case "$p" in ""|/*) ;; *) export "$v=$PWD/$p" ;; esac; done',
-    'cd "$dir" || exit 0',
-    `exec node "$script" ${hook} "$@"`,
-  ];
+function shimModule(): HookShimModule {
+  shim ??= requireHook<HookShimModule>(
+    'hook-shim.cjs',
+    (mod) =>
+      mod.HOOK_MARKER === HOOK_MARKER &&
+      typeof mod.hookCommands === 'function' &&
+      typeof mod.hookLine === 'function',
+  );
+  return shim;
 }
 
 /** The hook file for `hook`: marker, then a hand-over that resolves the cli at run time. */
@@ -95,14 +93,14 @@ export function hookScript(hook: GitHook, prefix = ''): string {
     '#!/bin/sh',
     HOOK_MARKER,
     '# Runs @_linked/cli/hooks/git-hook.cjs from the app directory; does nothing without it.',
-    ...hookCommands(hook, prefix),
+    ...shimModule().hookCommands(hook, prefix),
     '',
   ].join('\n');
 }
 
 /** The same hand-over as one line, in a subshell, for a hook file another tool owns. */
 export function hookLine(hook: GitHook, prefix = ''): string {
-  return `(${hookCommands(hook, prefix).join('; ')})`;
+  return shimModule().hookLine(hook, prefix);
 }
 
 /** husky (v9) points `core.hooksPath` at `.husky/_` and runs the scripts in `.husky/`. */

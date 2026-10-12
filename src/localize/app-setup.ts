@@ -67,7 +67,7 @@ function setupPackageJson(appRoot: string): SetupChange[] {
   if (!globs) {
     if (ws !== undefined)
       throw new LocalizeError(
-        `[localize] package.json "workspaces" is neither a list nor {"packages": [...]}; ` +
+        `package.json "workspaces" is neither a list nor {"packages": [...]}; ` +
           `add "${WORKSPACE_GLOB}" to it by hand.`,
         EXIT_REFUSED,
       );
@@ -82,7 +82,7 @@ function setupPackageJson(appRoot: string): SetupChange[] {
   const scripts = pkg.scripts;
   if (!scripts || typeof scripts !== 'object' || Array.isArray(scripts))
     throw new LocalizeError(
-      '[localize] package.json "scripts" is not an object.',
+      'package.json "scripts" is not an object.',
       EXIT_REFUSED,
     );
   for (const name of HOOK_SCRIPTS) {
@@ -189,7 +189,7 @@ function readPackageJson(file: string): {
     text = fs.readFileSync(file, 'utf8');
   } catch {
     throw new LocalizeError(
-      `[localize] no package.json at ${path.dirname(file)}.`,
+      `no package.json at ${path.dirname(file)}.`,
       EXIT_REFUSED,
     );
   }
@@ -198,13 +198,13 @@ function readPackageJson(file: string): {
     pkg = JSON.parse(text);
   } catch (e) {
     throw new LocalizeError(
-      `[localize] ${file} is not valid JSON: ${(e as Error).message}`,
+      `${file} is not valid JSON: ${(e as Error).message}`,
       EXIT_REFUSED,
     );
   }
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg))
     throw new LocalizeError(
-      `[localize] ${file} is not a JSON object.`,
+      `${file} is not a JSON object.`,
       EXIT_REFUSED,
     );
   return {text, pkg: pkg as Record<string, any>};

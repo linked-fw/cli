@@ -175,3 +175,20 @@ test('--parked takes every parked checkout back with one install and no builds',
   assert.match(none.output(), /nothing is parked/);
   assert.equal(none.calls.length, 0);
 });
+
+test('--parked refuses (exit 6) a parked name that is already a member under another directory', (t) => {
+  const appRoot = consumer(t);
+  seed(appRoot, 'a', {name: 'a', version: '1.0.0'}, {dir: '.packages-local.parked'});
+  seed(appRoot, 'a-copy', {name: 'a', version: '1.0.0'});
+  const deps = stubbed(appRoot, branchMain);
+
+  assert.equal(localizeParked({}, deps), 6, deps.output());
+
+  assert.match(
+    deps.output(),
+    /a is parked in \.packages-local\.parked\/a, but packages-local\/a-copy is a already/,
+  );
+  assert.ok(fs.existsSync(path.join(appRoot, '.packages-local.parked/a/package.json')));
+  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/a')), false);
+  assert.equal(deps.calls.some((c) => c.cmd === 'npm'), false);
+});

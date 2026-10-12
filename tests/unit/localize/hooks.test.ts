@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {ensureAppSetup} from '../../../src/localize/app-setup.js';
-import {installGitHooks} from '../../../src/localize/git-hooks.js';
+import {hookLine, installGitHooks} from '../../../src/localize/git-hooks.js';
 import {rm, test, tmpdir} from './helpers.js';
 
 const HOOKS = path.resolve(__dirname, '../../../hooks');
@@ -83,10 +83,13 @@ function app(t, {workspaces = ['packages-local/*'], sub = '', files = {}} = {}) 
   return root;
 }
 
-function member(root, dir = 'a', name = '@x/a') {
+/** A checkout in packages-local/<dir>; `git` gives it a `.git` (a directory, `'file'` or none). */
+function member(root, dir = 'a', name = '@x/a', {git: dotGit = 'dir'} = {}) {
   const d = path.join(root, 'packages-local', dir);
   fs.mkdirSync(d, {recursive: true});
   fs.writeFileSync(path.join(d, 'package.json'), json({name, version: '1.0.0'}));
+  if (dotGit === 'dir') fs.mkdirSync(path.join(d, '.git'));
+  else if (dotGit === 'file') fs.writeFileSync(path.join(d, '.git'), 'gitdir: ../../.git/worktrees/x\n');
 }
 
 /** A `npm` on the PATH that records its arguments in `<root>/npm-calls` and exits `status`. */
@@ -286,11 +289,54 @@ test('lock-at-rest: a clone with checkouts but no git hooks is told how to insta
   r = node(LOCK_AT_REST, [], root); // `dependencies` after `postinstall`
   assert.equal(r.stderr, '', 'not again for the same install');
 
-  // A pre-commit that is not ours does not count.
-  fs.writeFileSync(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+});
+
+test('lock-at-rest: the hooks notice names a checkout that is a git checkout, else any', (t) => {
+  const root = app(t);
+  member(root, 'a', '@x/a', {git: 'none'});
+  member(root, 'b', '@x/b', {git: 'file'});
+  installedTree(root);
+  let r = node(LOCK_AT_REST, [], root);
+  assert.match(r.stderr, /run `npx linked localize @x\/b --adopt --build ''` once/);
+
+  fs.rmSync(path.join(root, 'packages-local', 'b', '.git'));
   installedTree(root, {'node_modules/left': {version: '1.0.0'}});
   r = node(LOCK_AT_REST, [], root);
-  assert.match(r.stderr, HOOKS_NOTICE);
+  assert.match(r.stderr, /run `npx linked localize <any checkout's name> --adopt --build ''` once/);
+});
+
+test('lock-at-rest: a pre-commit that is not ours is named, with the line to add, until it has it', (t) => {
+  const root = app(t, {sub: 'web'});
+  member(root);
+  installedTree(root);
+  const hook = path.join(path.dirname(root), '.git', 'hooks', 'pre-commit');
+  fs.writeFileSync(hook, '#!/bin/sh\nexit 0\n');
+  let r = node(LOCK_AT_REST, [], root);
+  assert.equal(r.status, 0, r.stderr);
+  const line = hookLine('pre-commit', 'web/');
+  assert.match(r.stderr, /\[lock-at-rest\] \.\.\/\.git\/hooks\/pre-commit is not ours/);
+  assert.ok(r.stderr.includes(`\n[lock-at-rest]   ${line}\n`), r.stderr);
+  assert.doesNotMatch(r.stderr, /--adopt|git hooks are not installed/);
+
+  // The developer adds the line: the notice stops.
+  fs.appendFileSync(hook, `${line}\n`);
+  installedTree(root, {'node_modules/left': {version: '1.0.0'}});
+  r = node(LOCK_AT_REST, [], root);
+  assert.equal(r.stderr, '');
+});
+
+test('lock-at-rest: checkouts left in packages-local/.setup-aside are pointed out on every install', (t) => {
+  const root = app(t);
+  fs.mkdirSync(path.join(root, 'packages-local', '.setup-aside', 'a'), {recursive: true});
+  const ASIDE =
+    /checkouts are set aside in packages-local\/\.setup-aside\/ \(an interrupted set-up\): `npx linked localize --list` moves them back/;
+  for (let i = 0; i < 2; i++) {
+    const r = node(LOCK_AT_REST, [], root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, ASIDE);
+  }
+  fs.rmSync(path.join(root, 'packages-local', '.setup-aside'), {recursive: true});
+  assert.equal(node(LOCK_AT_REST, [], root).stderr, '');
 });
 
 test('lock-at-rest: no hooks notice once localize wrote the hooks, or under core.hooksPath, or with nothing localized', (t) => {

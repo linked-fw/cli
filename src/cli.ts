@@ -480,7 +480,7 @@ program
 program
   .command('build-all')
   .action((options) => {
-    buildAll(options);
+    return buildAll(options);
   })
   .option(
     '--sync',
@@ -570,7 +570,7 @@ program
 program
   .command('delocalize [packages...]')
   .description(
-    'Park checkouts: move them from packages-local/ to .packages-local.parked/, then reinstall the registry copies (npm ci when no checkout remains, else npm install and npm rebuild). `linked localize <name>` or `--parked` takes them back. With no names, parks every checkout.',
+    'Park checkouts: move them from packages-local/ to .packages-local.parked/, then reinstall the registry copies (npm ci when no checkout remains and the committed lockfile and package.json are unchanged, else npm install and npm rebuild). `linked localize <name>` or `--parked` takes them back. With no names, parks every checkout.',
   )
   .option(
     '--purge',
