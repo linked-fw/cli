@@ -690,3 +690,165 @@ now includes the bin rebuild and was run as written.
 
 cli `npm run test:unit` (full, including `real-localize`) and `npm run build`; CN Playwright
 suites (need the real ports); the one-week trial with all checkouts and both developers.
+
+## Review
+
+Three parallel reviews (cli code, CN + architecture, suites + coverage). All suites pass: tsc,
+cli unit 62 suites / 693 tests (incl. `real-localize`), `npm run build`, `test:template` 22 tests;
+a mutation pass inverted nine critical behaviours and every one was caught. `test:e2e` skipped as
+irrelevant (create-app unchanged; it runs the registry cli). Architecture: no violations; arch-03
+records the approved change, arch-01/07/10 checked.
+
+Findings (M = medium, selected for iteration 1; stale comments/docs included regardless):
+
+1. M — D4 broken by `core.hooksPath` (husky: hooks skipped; tracked hooks dir: files written into
+   the work tree) and by worktrees (hooks land in the common dir and run in every worktree).
+2. M — the removed `$` overrides also guaranteed single copies outside localize; CI no longer
+   checks it.
+3. M — an app below the git top level gets hooks that silently do nothing.
+4. M — `packages/*` is hard-coded in the hooks and the drift importers; a dependency change in
+   another workspace folder has its lockfile change discarded.
+5. M — `linked localize` run inside a workspace member sets up that member's `package.json`.
+6. M — the postinstall hook hard-fails where `@_linked/cli` is not installed (`--omit=dev`).
+7. M — lock-at-rest always restores from HEAD, discarding a staged lockfile change or an
+   `npm update`/`dedupe` made while localized, silently.
+8. M — the first set-up needs four manual steps.
+9. M — fail-open guards: `delocalize --purge` deletes when git errors; pre-commit treats any
+   `git show` error as a staged deletion.
+10. M — every install spawns the full cli about twice for the drift report (~2 s).
+11. M (stale) — `cli.ts` create-package help, `--purge` exit code vs `errors.ts`, the
+    `git-hooks.ts` comment, the weaker CI grep in `docs/localize.md`.
+12. M (docs) — arch-03 says npm never checks the range (true only for the app's own ranges);
+    `docs/releasing-linked-packages.md` cites `resolutions` as the single-copy guard.
+13. M (docs) — the dev container now sees an empty `packages-local/`; D10's "today's behaviour"
+    is inaccurate (the old postinstall relinked inside the container); Linux creates the
+    mountpoint as root.
+14. M — `ci-local.sh --install` gives a misleading message when checkouts are present.
+15. stale — `agents.md` worktree bullet; backlog 105/097/076 localize mentions; arch-03's Node 20
+    line; `create-now.code-workspace` comment.
+16. M — deep imports removed through the `@_linked/cli/*` wildcard are not listed in the changeset.
+
+Low, left for the pause: Windows (`npm.cmd` spawn, junctions, CRLF), `--subdir` without `--repo`,
+double `[localize]` prefix, `buildAll` without `return`, `git clone --`, `"packages-local/**"` in the
+leak regex, unparking a name that is already a member, `delocalize` running `npm ci` without a
+lockfile, export trimming and renames, comment widths, prettier at wrapup, the leak fixture
+containing the glob, no real-npm test of the cli bin relink.
+
+## Iteration 1 — Ideation
+
+### Finding 1 of 16: hooks with `core.hooksPath` and in worktrees
+Options: (a) write into whatever `--git-path hooks` returns (today); (b) when `core.hooksPath` is
+set, write nothing and print the one-line call for each hook; (c) per-worktree config. **Chosen
+(b)** plus a guard in `git-hook.cjs`: post-merge/post-checkout do nothing unless the current work
+tree has checkouts. That makes the shared worktree hooks harmless without per-worktree config, and
+never writes into a directory another tool manages or git tracks.
+
+### Finding 2 of 16: single copies in CI
+**Chosen:** a CI step after `npm ci` in CN's typecheck job: `npx linked localize --list --check`,
+which reports `singleton-copy` with no checkouts present. Rejected: restoring the overrides (they
+break localizing those packages).
+
+### Finding 3 of 16: app below the git top level
+**Chosen:** the hook shim `cd`s to the app directory recorded at install time
+(`git rev-parse --show-prefix`), and `git-hook.cjs` uses paths relative to it
+(`--relative`, cwd-relative pathspecs).
+
+### Finding 4 of 16: hard-coded `packages/*`
+**Chosen:** derive manifest pathspecs from the app's `workspaces` globs (minus `packages-local/*`),
+in one helper shared by both hooks and drift.
+
+### Finding 5 of 16: the app root
+**Chosen:** resolve the app root as the topmost ancestor whose `package.json` has `workspaces`
+(the rule `build-all` already uses), falling back to the current directory for an app that has no
+`workspaces` yet. One exported helper.
+
+### Finding 6 of 16: postinstall without the cli
+**Chosen:** the scripts guard the call:
+`node -e "const p='node_modules/@_linked/cli/hooks/lock-at-rest.cjs';require('fs').existsSync(p)&&require(require('path').resolve(p))"`.
+App set-up recognises and upgrades the earlier unguarded form. Rejected: requiring the cli as a
+production dependency (a rule every app must remember).
+
+### Finding 7 of 16: what lock-at-rest restores
+**Chosen:** restore from the index when the staged lockfile has no checkout entry, else from HEAD;
+when the restored copy differs from what npm wrote beyond checkout entries is undetectable cheaply,
+so the message always says "changes to dependencies need `linked delocalize` first".
+
+### Finding 8 of 16: first set-up in one step
+**Chosen:** when app set-up changes `package.json`, run
+`npm install --package-lock-only --ignore-scripts --no-audit --no-fund` before anything is cloned,
+keep that lockfile, and write it back after the main install. The work tree then shows exactly the
+set-up diff to commit. If that install fails, fall back to today's message with the manual steps.
+
+### Finding 9 of 16: fail closed
+**Chosen:** `--purge` refuses (exit 6) when the checkout is not a git repo or any git call fails,
+and checks uncommitted changes, commits on any branch not on a remote, and stashes. pre-commit lists
+staged files with `--diff-filter=d` and refuses when reading a staged manifest fails.
+
+### Finding 10 of 16: one drift implementation, no cli spawn
+**Chosen:** `hooks/drift.cjs` (Node built-ins, plus `semver` resolved from the app, range checks
+skipped if absent) is the drift implementation; `src/localize/drift.ts` loads it with
+`createRequire` and keeps the types. lock-at-rest requires it directly and prints only when
+`node_modules/.package-lock.json` changed since the last report (a stamp file in
+`node_modules/.cache/`).
+
+### Findings 11–15: stale text and docs
+Fix in place: `--purge` refusal becomes exit 6 (a guard refusal), docs follow; the CI grep in
+`docs/localize.md` matches CN's; arch-03 and the how-to state the range rule precisely; the
+releasing doc points at the drift check; the how-to says localize on the host, never in the dev
+container, and notes the root-owned mountpoint on Linux; D10's rationale is corrected;
+`ci-local.sh --install` refuses with a "park first" message when checkouts exist.
+
+### Finding 16 of 16: semver
+**Chosen:** stay a minor (no consumer found), and list the removed deep imports in the changeset.
+
+## Iteration 1 — Plan
+
+- **cli hooks** (`hooks/`): `drift.cjs` (new, shared), `manifests.cjs` (new: workspace manifest
+  pathspecs from `package.json`), `lock-at-rest.cjs` (index-first restore, drift via `drift.cjs`
+  with a stamp, cwd-relative paths), `git-hook.cjs` (cwd = app dir, members guard, workspace
+  pathspecs, `--diff-filter=d`, fail closed).
+- **cli TS**: `src/localize/drift.ts` → thin typed wrapper over `drift.cjs`;
+  `git-hooks.ts` (skip + print when `core.hooksPath` is set; shim `cd`s to the recorded prefix;
+  warn in a linked worktree); `app-setup.ts` (guarded command; upgrade the old one);
+  `members.ts` or a new `app-root.ts` (`findAppRoot`, shared with `cli-methods.ts`);
+  `localize.ts` (app root; set-up lockfile capture); `delocalize.ts` (fail-closed purge, exit 6);
+  `cli.ts` help text; `errors.ts` comment; changeset; `docs/localize.md`.
+- **CN**: `package.json` scripts → the guarded command; `pr-checks.yml` drift step; how-to,
+  arch-03, `docs/releasing-linked-packages.md`, `agents.md`, `ci-local.sh`, backlog 105/097/076,
+  `create-now.code-workspace`.
+- **Contracts**: `hooks/drift.cjs` exports `driftProblems(appRoot)` returning the existing `Drift`
+  shape and `describeDrift(d)`; `hooks/manifests.cjs` exports `manifestPathspecs(appRoot): string[]`
+  (`package.json` plus `<glob>/package.json` for each non-`packages-local` workspace glob);
+  `findAppRoot(start): string`; `LOCK_AT_REST_COMMAND` is the guarded string.
+
+## Iteration 1 — Phases
+
+### P7 — Hooks: shared drift, manifests, restore, fail closed (CLI)
+Findings 1 (members guard), 3, 4, 6 (command constant + set-up upgrade), 7, 9 (pre-commit), 10.
+Tests: drift parity through the wrapper (existing `drift.test.ts` passes unchanged); manifests for
+`["packages/*","apps/*","packages-local/*"]`; lock-at-rest restores from the index when the staged
+lockfile is clean and from HEAD when it leaks; a dependency change under `apps/x/package.json`
+leaves the lockfile alone; app in a repo subdirectory; drift printed once for two runs with an
+unchanged hidden lockfile; post-merge with no checkouts does not run npm; pre-commit refuses when a
+staged manifest cannot be read; a staged deletion passes; the old unguarded script is upgraded.
+**Quick gate:** tsc; `tests/unit/localize`.
+
+### P8 — Commands: app root, set-up capture, purge, hooksPath, stale text (CLI)
+Findings 1 (`core.hooksPath` skip + print, worktree warning), 5, 8, 9 (purge), 11, 16, and
+`docs/localize.md` for all of iteration 1.
+Tests: localize from `packages/foo` sets up the app root; set-up capture leaves exactly the set-up
+diff (fake run + a real-npm case in `real-localize`); `core.hooksPath` set → nothing written, three
+lines printed; purge refuses on git failure / no `.git` / stash / unpushed branch (exit 6).
+**Quick gate:** tsc; `tests/unit/localize tests/unit/localizeCommand.test.ts tests/unit/createPackage`;
+`npm run build`.
+
+### P9 — CN follow-ups
+Findings 2, 6 (scripts), 12, 13, 14, 15. **Quick gate:** package.json parses; manifests grep; YAML
+parses; stale-reference grep; `bash -n scripts/ci-local.sh`.
+
+### P10 — Integration re-run
+In a fresh standalone clone of the CN branch with the four checkouts: one-step set-up from an
+un-set-up app (capture), install, drift printed once, husky-style `core.hooksPath` (nothing
+written, lines printed), a dependency change in a second workspace folder survives, purge refusal,
+`npm ci` with no checkouts and no cli hooks file (guarded command is a silent no-op), backend +
+vitest smoke. **Then review again.**
