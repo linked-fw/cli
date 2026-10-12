@@ -98,7 +98,8 @@ fresh, unbuilt checkouts" keeps the documented manual recipe.
 
 **D10 — Docker keeps registry copies.** CN's compose services mount an anonymous volume over
 `/workspace/packages-local`, so the glob matches nothing in the container and `npm ci` works. This
-is today's behaviour: host links never reached the container's `node_modules` volume.
+is a change: the old postinstall `--relink` ran inside the container and re-created links into the
+bind-mounted checkouts. Localizing and editing happen on the host only.
 
 **D11 — The live migration and the trial are manual.** Nothing here touches a developer's current
 setup. Moving existing checkouts and the one-week trial (backlog 009, Plan step 1) happen after
@@ -994,3 +995,71 @@ committed lockfile, the next install reports `changed ~352 packages` (~11 s) bef
 reason. (f) The un-set-up run in A used a cli newer than the app's (registry 1.46.1 has no
 `hooks/`), so the hooks it wrote are inert there until the cli release is installed — as intended.
 (g) The `p10-wt` worktree stays registered in `p10-cn2` (scratch only).
+
+## Review 2
+
+All suites pass (tsc; cli unit 66 suites / 735 tests). Review 1's findings: 14 resolved; 2 partial
+(CN's drift CI step is inert until CN installs the cli release — a wrapup dependency, together with
+the `hooks/` bump; D10's rationale — fixed above). New, selected for iteration 2:
+
+1. High — `findAppRoot` climbs past a nested git worktree (`create_now/.claude/worktrees/<x>`) to
+   the main checkout, so `localize`/`delocalize`/`--purge` there would act on the main clone.
+2. M — moving checkouts aside to `.packages-local.setup` during set-up is not crash-safe (Ctrl-C
+   strands them; not gitignored; the next run clones fresh).
+3. M — `--purge` misses commits on a detached HEAD.
+4. M — the set-up lockfile edit does not check that the lockfile's `workspaces` already match
+   `package.json` (minus the new glob), so it can write a lockfile `npm ci` rejects.
+5. M — a clone that never ran `linked localize` has no hooks (the cli/core bootstrap recipe ends
+   that way); CN's CI checks are not enforced, so the CI grep is not a backstop.
+
+Low, left for the pause: drift module loaded eagerly by every command; drift printed twice during
+a localize run; `semver.ts` duplicates `drift.cjs`; an untracked new member manifest gets no
+warning; misleading message on a conflicted lockfile; the set-up lockfile is lost by an install
+before it is committed (docs); negation/brace globs; pre-commit skipped when `node` is missing
+(docs); two doc wording items; overrides refusal could name the drift check; the extra install
+round after a restore; purge names only the first reason; test gaps for the lows.
+
+## Iteration 2 — Ideation
+
+### Finding 1 of 5: app root in nested worktrees
+**Chosen:** take the nearest ancestor with `workspaces` (R); climb to a higher ancestor only while
+its `workspaces` globs match R's relative path. A worktree under `.claude/worktrees/` is not
+matched by CN's globs, so it stays its own root. `build-all` gets the same rule.
+
+### Finding 2 of 5: crash-safe move-aside
+**Chosen:** move checkouts into `packages-local/.setup-aside/` (inside the gitignored directory,
+skipped by the `*` glob like `.repos/`); at the start of `localize`, `delocalize` and `--list`, a
+leftover `.setup-aside/` is moved back with one line saying so.
+
+### Finding 3 of 5: purge and detached HEAD
+**Chosen:** `git log --oneline HEAD --branches --not --remotes`.
+
+### Finding 4 of 5: set-up lockfile edit
+**Chosen:** edit only when the lockfile root's `workspaces` deep-equal `package.json`'s pre-set-up
+globs; otherwise fall back to npm, then to the manual steps.
+
+### Finding 5 of 5: clones without hooks
+**Chosen:** lock-at-rest prints one line when checkouts exist, `core.hooksPath` is unset and the
+hooks directory has no marked `pre-commit`: "run `npx linked localize <name> --adopt --build ''`
+once to install the git hooks"; the bootstrap recipe in `docs/localize.md` and CN's how-to end with
+that command.
+
+## Iteration 2 — Plan and phases
+
+### P11 — Iteration 2 fixes (CLI)
+Files: `src/localize/app-root.ts` (+ `build-all`'s caller), `src/localize/localize.ts`
+(`.setup-aside`, leftover recovery in localize/delocalize/list), `src/localize/delocalize.ts`
+(HEAD in the purge log), `src/localize/setup-lockfile.ts` (workspaces equality),
+`hooks/lock-at-rest.cjs` (missing-hooks notice), `docs/localize.md`, changeset if wording changes.
+Tests: `findAppRoot` for a worktree nested under the app (not matched by its globs) and for a
+member under `packages/` (matched); leftover `.setup-aside/` restored; purge refuses a commit on a
+detached HEAD; set-up edit returns null when lockfile `workspaces` differ; lock-at-rest prints the
+hooks notice once when members exist and no marked pre-commit, nothing when the hook exists or
+`core.hooksPath` is set.
+**Quick gate:** tsc; `tests/unit/localize tests/unit/localizeCommand.test.ts tests/unit/buildAll`;
+`npm run test:unit`; `npm run build`.
+
+### P12 — CN how-to line
+`docs/how-to/develop-a-linked-package-locally.md`: the bootstrap/migration steps end with
+`npx linked localize <name> --adopt --build ''` to install hooks; mention the lock-at-rest notice.
+**Quick gate:** grep shows the line; no other change.
