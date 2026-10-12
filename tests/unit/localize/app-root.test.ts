@@ -79,3 +79,22 @@ test('the climb stops at the first ancestor whose globs do not match, and honour
   write(top, {name: 'top', workspaces: ['deep/**']});
   assert.equal(findAppRoot(path.join(top, 'deep', 'a', 'b')), top, '** across depth');
 });
+
+test('from inside a --subdir checkout (its real path under packages-local/.repos), the app', (t) => {
+  const app = tmpdir('localize-app-root-');
+  t.after(() => rm(app));
+  write(app, {name: 'app', workspaces: ['packages/*', 'packages-local/*']});
+  const mono = path.join(app, 'packages-local', '.repos', 'mono');
+  write(mono, {name: 'mono', private: true, workspaces: ['packages/*']});
+  write(path.join(mono, 'packages', 'foo'), {name: '@x/foo'});
+  const link = path.join(app, 'packages-local', 'x-foo');
+  fs.symlinkSync(path.join('.repos', 'mono', 'packages', 'foo'), link);
+  assert.equal(findAppRoot(fs.realpathSync(link)), app);
+  assert.equal(findAppRoot(mono), app, 'from the monorepo root');
+  const aside = path.join(app, 'packages-local', '.setup-aside', 'bar');
+  write(aside, {name: 'bar', workspaces: ['packages/*']});
+  assert.equal(findAppRoot(aside), app, 'from a checkout set aside');
+
+  write(app, {name: 'app', workspaces: ['packages/*']});
+  assert.equal(findAppRoot(mono), mono, 'not when the app does not list packages-local/*');
+});

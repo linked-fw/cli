@@ -302,7 +302,7 @@ Check `ls -l node_modules/.bin/linked` before `build-all`: without the link, `np
 offers to install the npm package `linked`, which is something else. Only a localize run writes
 the git hooks, so any clone whose checkouts arrived some other way (by hand, a copy, a plain
 `npm install`) ends with that last line, for any one checkout's name; until then lock-at-rest says
-so after each install (see [Git hooks](#git-hooks)).
+so after an install that changed node_modules (see [Git hooks](#git-hooks)).
 
 ## Drift
 

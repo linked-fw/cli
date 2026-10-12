@@ -1134,3 +1134,16 @@ returns the app.
 
 Fix in `src/localize/app-root.ts`, fixture test, L4 wording in `docs/localize.md` and the CN how-to.
 **Quick gate:** tsc; `tests/unit/localize`; `npm run test:unit`; `npm run build`.
+
+**Result:** `findWorkspaceRoot` also climbs past an ancestor when the path is under its
+`packages-local/` and its globs list `packages-local/*` (`underPackagesLocal`, one literal check
+beside the one glob matcher), so the real path of a `--subdir` checkout
+(`packages-local/.repos/<mono>/…`) and `.setup-aside/…` resolve to the app. Test: app with
+`packages-local/x-foo -> .repos/mono/packages/foo`, mono with its own `workspaces`; `findAppRoot`
+from the link's real path, from `.repos/mono` and from `.setup-aside/bar` → the app; without
+`packages-local/*` in the app's globs → mono. The test fails without the fix (`1 failed, 5
+passed`). L4: `docs/localize.md` and the CN how-to step 7 now say the notice comes "after an
+install that changed node_modules". Gate: `npx tsc -p tsconfig-esm.json --noEmit` exit 0; `npx
+jest --config jest.config.cjs tests/unit/localize` → `Test Suites: 16 passed, 16 total`, `Tests:
+188 passed, 188 total`; `npm run test:unit` → `Test Suites: 66 passed, 66 total`, `Tests: 745
+passed, 745 total`; `npm run build` exit 0.

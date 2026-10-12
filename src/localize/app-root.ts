@@ -66,13 +66,26 @@ export function findWorkspaceRoot(start: string): string | null {
     if (m?.workspaces) {
       const {workspaceGlobs, globsMatch} = manifestsModule();
       const rel = path.relative(above, topmost).split(path.sep).join('/');
-      if (!globsMatch(workspaceGlobs(above) ?? [], rel)) break;
+      const globs = workspaceGlobs(above) ?? [];
+      if (!globsMatch(globs, rel) && !underPackagesLocal(globs, rel)) break;
       topmost = above;
       if (!m.linkedPackage) topmostApp = above;
     }
     if (path.dirname(above) === above) break;
   }
   return topmostApp ?? topmost;
+}
+
+/**
+ * A `--subdir` checkout is a symlink `packages-local/<name>` into
+ * `packages-local/.repos/<mono>/…`, and a command run in it sees the real
+ * path, which `packages-local/*` does not match: the climb would stop at the
+ * framework monorepo and localize would set it up. So anything under
+ * `packages-local/` (`.repos/`, `.setup-aside/` too) belongs to an app whose
+ * globs list `packages-local/*`.
+ */
+function underPackagesLocal(globs: string[], rel: string): boolean {
+  return rel.startsWith('packages-local/') && globs.includes('packages-local/*');
 }
 
 function nearestWithWorkspaces(
