@@ -6,6 +6,8 @@
  * - a copy that is already the app's (a symlink) is no hit;
  * - a copy prune would keep never reaches the prune, and costs no tree walk;
  * - a copy whose own dependencies would resolve differently from the app is kept;
+ * - a copy that ships its own types is kept while the checkout holds an
+ *   `@types/` stub for it;
  * - candidates are per checkout (one checkout's runtime dependency is not
  *   another's devDependency);
  * - one call converges;
@@ -339,6 +341,96 @@ test('the @types package TypeScript would take counts; the same version at anoth
   fs.rmSync(path.join(a, 'node_modules', '@types'), {recursive: true});
   relink(stubbed(appRoot));
   assert.equal(has(a, 'typed'), false);
+});
+
+test('a copy that ships its own types stays while the checkout holds an @types stub for it', (t) => {
+  // The measured case: the app's minimatch moved to a version satisfying the
+  // checkout's range, and the checkout still had @types/minimatch@3 (another
+  // dependency's), so with its own copy gone tsc took the stub.
+  const appRoot = consumer(t);
+  appHas(appRoot, 'minimatch', '9.0.9', {types: './dist/index.d.ts'});
+  const a = checkout(appRoot, '@fw/a', {
+    dependencies: {minimatch: '^9.0.4', multimatch: '^5.0.0'},
+  });
+  nested(a, 'minimatch', '9.0.5', {types: './dist/index.d.ts'});
+  nested(a, '@types/minimatch', '3.0.5');
+  nested(a, 'multimatch', '5.0.0', {
+    dependencies: {'@types/minimatch': '^3.0.3'},
+  });
+  record(appRoot, {'@fw/a': a});
+
+  const plan = prune.planPrune(readManifest(appRoot).entries, {appRoot});
+  const kept = plan.keep.find((k) => k.dep === 'minimatch');
+  assert.equal(kept?.reason, 'types');
+  assert.deepEqual(kept?.types, {name: '@types/minimatch', version: '3.0.5'});
+
+  const deps = stubbed(appRoot);
+  relink(deps);
+  assert.ok(has(a, 'minimatch'));
+  assert.match(
+    deps.warns.join('\n'),
+    /minimatch@9\.0\.5 \(TypeScript would take @types\/minimatch@3\.0\.5\)/,
+  );
+  const listed = stubbed(appRoot);
+  list({}, listed);
+  assert.match(
+    listed.output(),
+    /fw-a\/node_modules\/minimatch@9\.0\.5: it ships its own types and the checkout also has @types\/minimatch@3\.0\.5/,
+  );
+
+  // Without the stub the copy goes as usual.
+  fs.rmSync(path.join(a, 'node_modules', '@types'), {recursive: true});
+  relink(stubbed(appRoot));
+  assert.equal(has(a, 'minimatch'), false);
+});
+
+test('an @types stub keeps only a copy with types of its own (index.d.ts counts)', (t) => {
+  const appRoot = consumer(t);
+  appHas(appRoot, 'untyped', '1.2.0');
+  appHas(appRoot, 'indexed', '1.2.0');
+  const a = checkout(appRoot, '@fw/a', {
+    dependencies: {untyped: '^1.0.0', indexed: '^1.0.0'},
+  });
+  // untyped: tsc took the stub before the removal too, so nothing changes.
+  nested(a, 'untyped', '1.1.0');
+  nested(a, '@types/untyped', '1.0.0');
+  // indexed: types found through index.d.ts, so it counts as shipping them.
+  nested(a, 'indexed', '1.1.0');
+  fs.writeFileSync(path.join(a, 'node_modules', 'indexed', 'index.d.ts'), '');
+  nested(a, '@types/indexed', '1.0.0');
+  record(appRoot, {'@fw/a': a});
+
+  const plan = prune.planPrune(readManifest(appRoot).entries, {appRoot});
+  assert.deepEqual(
+    plan.remove.map((d) => d.dep),
+    ['untyped'],
+  );
+  assert.deepEqual(
+    plan.keep.map((d) => [d.dep, d.reason]),
+    [['indexed', 'types']],
+  );
+});
+
+test('a copy pruned before the stub mattered counts as missing, so relink reinstalls the checkout', (t) => {
+  // The state an older prune left behind: the copy gone, the stub still there.
+  const appRoot = consumer(t);
+  appHas(appRoot, 'minimatch', '9.0.9', {
+    exports: {'.': {import: {types: './dist/index.d.ts'}}},
+  });
+  const a = checkout(appRoot, '@fw/a', {dependencies: {minimatch: '^9.0.4'}});
+  nested(a, '@types/minimatch', '3.0.5');
+  record(appRoot, {'@fw/a': a});
+
+  const deps = stubbed(appRoot);
+  relink(deps);
+  assert.equal(deps.npmCalls().length, 1, deps.output());
+  assert.equal(deps.npmCalls()[0].cwd, a);
+
+  // Without the stub, the absence is the prune's and no reinstall follows.
+  fs.rmSync(path.join(a, 'node_modules', '@types'), {recursive: true});
+  const again = stubbed(appRoot);
+  relink(again);
+  assert.equal(again.npmCalls().length, 0, again.output());
 });
 
 // ---------------------------------------------------------------------------

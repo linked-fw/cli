@@ -131,7 +131,9 @@ function reinstallIfPruned(name, entry, entries, opts, deps) {
       : null;
   const provided = candidates
     ? (dep, range, pkg) =>
-        isProvidedByApp(dep, range, entries, candidates, deps, pkg)
+        isProvidedByApp(dep, range, entries, candidates, deps, pkg, {
+          dir: checkout,
+        })
     : () => false;
   const missing = missingDependencies(
     checkout,
