@@ -95,8 +95,8 @@ makes these changes and prints them under `set up this app for checkouts (commit
 - `.gitignore`: `packages-local/` and `.packages-local.parked/`.
 
 A second run changes nothing. It never edits `overrides`: an override key naming a package you
-localize makes npm fail with `EOVERRIDE`, so localize refuses with exit 6, names the key, and
-changes nothing. Remove the key and run it again.
+localize, or one already in `packages-local/`, makes npm fail with `EOVERRIDE`, so localize refuses
+with exit 6, names the key, and changes nothing. Remove the key and run it again.
 
 ```json
 {

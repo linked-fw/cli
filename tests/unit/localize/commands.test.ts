@@ -158,6 +158,19 @@ test('a failed cli build links no bin', (t) => {
   );
 });
 
+test('an override on a checkout already localized refuses localizing another', (t) => {
+  const appRoot = consumer(t, {overrides: {'@_linked/core': '$@_linked/core'}});
+  seedCheckout(appRoot, 'packages-local/_linked-core', {name: '@_linked/core', version: '1.0.0'});
+  const deps = cloning(appRoot, {name: '@x/a'});
+
+  const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
+
+  assert.equal(code, 6, deps.output());
+  assert.match(deps.output(), /"@_linked\/core"/);
+  assert.equal(deps.calls.length, 0, 'nothing cloned or installed');
+  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
+});
+
 test('localize refuses a conflicting override: exit 6, the key named, nothing cloned or changed', (t) => {
   const appRoot = consumer(t, {overrides: {'@_linked/core': '$@_linked/core'}});
   const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');

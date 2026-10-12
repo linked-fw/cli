@@ -10,8 +10,9 @@
  *
  * One run, for every name at once:
  *
- *   1. refuse an `overrides` key naming a package being localized (npm fails
- *      with `EOVERRIDE` on a member's name); nothing is changed then;
+ *   1. refuse an `overrides` key naming a package being localized or already
+ *      in `packages-local/` (npm fails with `EOVERRIDE` on a member's name);
+ *      nothing is changed then;
  *   2. the one-time app setup (app-setup.ts), reported line by line so the
  *      developer commits it;
  *   3. per name: a parked checkout (`linked delocalize`) moves back; an
@@ -118,10 +119,15 @@ export function runLocalize(
   legacyManifestHint(deps);
   try {
     checkDir(opts.dir);
-    const conflicts = conflictingOverrides(deps.appRoot, names);
+    // The checkouts already there count too: the one install below covers them all.
+    const localized = new Set([
+      ...names,
+      ...localMembers(deps.appRoot).map((m) => m.name),
+    ]);
+    const conflicts = conflictingOverrides(deps.appRoot, [...localized]);
     if (conflicts.length) {
       throw new LocalizeError(
-        `package.json "overrides" names a package being localized: ${conflicts
+        `package.json "overrides" names a localized package: ${conflicts
           .map((k) => `"${k}"`)
           .join(', ')}.\n` +
           `npm refuses an override on a workspace member's name (EOVERRIDE), and a nested one ` +
