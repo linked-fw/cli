@@ -79,12 +79,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {isInside, isSymlink, readJson} from './fsops.js';
-import semver from 'semver';
+import {satisfies} from './semver.js';
 import {providedPackages} from './provided.js';
 import type {ProvidedSkip} from './provided.js';
 
 import type {ManifestEntry} from './manifest.js';
 import type {Deps} from './run.js';
+
+export {satisfies};
 
 /** What pruning reads from a command's options. */
 export interface PruneOptions {
@@ -116,24 +118,6 @@ export function candidatesFor(
     names: new Set([...rule.names, ...Object.keys(entries)]),
     skipped: new Map(rule.skipped.map((s) => [s.name, s])),
   };
-}
-
-/**
- * Does the app's installed `version` satisfy `range`? `null` means "cannot
- * tell" -- a dist-tag, `file:`, `npm:`, `workspace:`, a git URL, or a version
- * that is not one -- and every caller then keeps the copy. The failure mode is
- * therefore always the safe one: a copy kept that could have gone, never a
- * copy removed that was needed.
- *
- * npm's own `semver` decides, so prereleases follow npm's rule: `1.3.0-beta.1`
- * satisfies a range only when one of its comparators names a prerelease on
- * the same `major.minor.patch`.
- */
-export function satisfies(version: string, range: string): boolean | null {
-  if (typeof version !== 'string' || typeof range !== 'string') return null;
-  if (semver.valid(version) === null) return null;
-  if (semver.validRange(range) === null) return null;
-  return semver.satisfies(version, range);
 }
 
 /** Pruning is on unless a caller says `{prune: false}`. */

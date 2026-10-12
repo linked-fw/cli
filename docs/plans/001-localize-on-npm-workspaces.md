@@ -5,7 +5,7 @@ summary: >
   the working tree stays clean, and localize shrinks to clone/adopt/park/list plus a drift check.
   Pruning, relink, ensure, the provided rule and the localize Vite dedupe are removed. Spans this
   repo and Create Now.
-status: Tasks
+status: Implementation
 source: docs/backlog/009-localize-on-npm-workspaces.md
 ---
 
@@ -341,6 +341,8 @@ P1's hook path and P3's command surface fixed, not their code. P6 is the integra
   `npx jest --config jest.config.cjs tests/unit/localize/resolve.test.ts` passes on the untouched
   tree (baseline). Record the quick-gate runtime. No commit.
 
+**Result:** npm ci OK; tsc clean (2.5 s); baseline quick-gate set 16 suites / 209 tests passed in ~12 s.
+
 ### P1 — Contracts and the dependency-free hooks (CLI)
 
 Tasks:
@@ -393,6 +395,26 @@ Tests (jest, `tests/unit/localize/`, temp dirs via the existing helpers):
 plus `tests/unit/localize` all pass; `node -e "require('./hooks/lock-at-rest.cjs')"` is not run
 (side effects) — instead `node --check hooks/*.cjs` exits 0. `grep -E "require\\(['\"][^.]" hooks/*.cjs`
 lists only Node built-ins.
+
+**Result:** Done as listed: `semver.ts` (`prune.ts` and `index.ts` re-export from it), `members.ts`,
+`drift.ts`, `app-setup.ts`, `git-hooks.ts`, `hooks/{lock-at-rest,git-hook}.cjs`, `files` += `hooks`,
+exports in `index.ts`; tests `members` (3), `drift` (7), `app-setup` (8), `git-hooks` (5), `hooks`
+(11). Deviations, each smaller than the contract or a safety the contract left open:
+`satisfies` keeps its `boolean | null` (moved unchanged; drift counts only `false` as a miss, so a
+tag or `workspace:` range is never drift). `lock-at-rest` decides on `git diff HEAD` rather than
+`git status` (an untracked lockfile is not restored) and restores with `git checkout HEAD --` (a
+staged leak goes too); the drift check's output is captured and written to stderr and `/dev/tty`
+like the warnings. The installed hook exits 0 when `git-hook.cjs` or `node` is missing, so a clone
+without the cli installed is never blocked. `git-hook.cjs` drops `GIT_DIR`/`GIT_INDEX_FILE`/… from
+the environment of `npm install`, so a checkout's lifecycle scripts never run git against the app's
+repository. `ensureAppSetup` also replaces a `[npx] linked localize --relink` step inside an `&&`
+chain, creates `workspaces` when absent, and refuses (exit 6) a missing or unparsable
+`package.json` or an unknown `workspaces` shape. `second-copy` also covers a top-level registry
+copy of a member. `conflictingOverrides` reports nested keys as `a > b`; `installGitHooks` returns
+absolute paths and does nothing outside a work tree. Validation: `tsc -p tsconfig-esm.json --noEmit`
+exit 0 (2.0 s); `jest tests/unit/localize` 16 suites / 192 tests passed in 5.4 s; the full quick-gate
+set 21 suites / 243 tests in 5.9 s; `node --check` exit 0 for both hooks; the `require` grep lists
+only `child_process`, `fs`, `path`.
 
 ### P2 — Vite dedupe and build-all order (CLI)
 

@@ -65,6 +65,7 @@
   "files": [
     "lib",
     "defaults",
+    "hooks",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

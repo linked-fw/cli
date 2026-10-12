@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 
-import {satisfies} from '../../../src/localize/prune.js';
+import {satisfies} from '../../../src/localize/semver.js';
 
 const rows = [
   // caret
