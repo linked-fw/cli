@@ -952,3 +952,45 @@ un-set-up app (capture), install, drift printed once, husky-style `core.hooksPat
 written, lines printed), a dependency change in a second workspace folder survives, purge refusal,
 `npm ci` with no checkouts and no cli hooks file (guarded command is a silent no-op), backend +
 vitest smoke. **Then review again.**
+
+**Result:** Standalone clones only (`scratchpad/p10-*`); sources = read-only clones of the
+developer's core (`main` 08bf1df, 2.28.4), auth (`main` 1aaa261, 3.4.0), shape-ui (`main` c53b297,
+2.7.0), dcmi (`main` 97b8482, 1.3.4) into `p10-src/`, and this branch as `_linked-cli`. CN at
+`cb7638a2`. `.env` from `.env.example` with `PORT`/`SITE_ROOT` on 4343 and Fuseki on the dead port
+3997. Node 22.23.3, npm 12.2.0.
+
+| | scenario | result |
+|---|---|---|
+| A | one-step set-up from un-set-up `main` (`45fa522f`) | PASS after a fix. `npm install` on `main` (registry cli 1.46.1): its `linked localize --relink` postinstall printed nothing, exit 0, status clean. New cli `localize @_linked/core` → exit 6 `package.json "overrides" names a localized package: "@_linked/core"` … `Nothing was changed.` (main still has the `$` overrides; expected). `localize @_linked/dcmi`: **the capture failed** — `npm install --package-lock-only` → `EALLOWREMOTE … Refusing to fetch "https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.3.tgz"` (CN report 074 §2.1: lockfile-only fetches a `bundleDependencies` tarball and skips npm 12's same-registry exemption); manual steps printed, and the work tree held the install's lockfile (538-line diff incl. `packages-local/_linked-dcmi`). npm 11 and `--allow-remote=all` succeed but add ~60 `inBundle` lines, so lockfile-only is never "just the set-up" on CN. Fixed (below); re-run 12.6 s, exit 0: `package-lock.json: the root entry's "workspaces" now matches package.json (the set-up's lockfile)` … `put back the set-up's lockfile`; `git status`: exactly ` M .gitignore`, ` M package-lock.json`, ` M package.json`; lockfile diff `@@ -13 +13,2 @@ -"packages/*" +"packages/*", +"packages-local/*"`; dcmi linked; three hooks in `.git/hooks`. The edited lockfile: `npm ci` exit 0 (11 s), a following `npm install` leaves it byte-identical |
+| B | fresh clone + 4 checkouts, bootstrap, installs | PASS after a fix. First `npm install` 29 s: `[lock-at-rest] restored the committed package-lock.json (packages-local/_linked-auth, …-cli, …-core, …-shape-ui stay linked …)`, status clean, four links. Recipe from `docs/localize.md` as written: core `npm run compile` 2.7 s, cli `npm run build` 3.5 s, `npm rebuild @_linked/cli --ignore-scripts` 1.2 s → `.bin/linked -> ../@_linked/cli/lib/esm/launch.js`. `--list`: `4 localized · no drift`; `--check` 0. Drift (shape-ui core range `2.28.3`): the two drift lines printed once per install (not twice), **but again on an `up to date` install** — npm rewrites `node_modules/.package-lock.json` every install, so the mtime stamp never matched. Fixed (below); re-run: install 1 prints `second copy of localized @_linked/core@2.28.3 at packages-local/_linked-shape-ui/node_modules/@_linked/core` + the range miss, install 2 (`up to date in 9s`) prints none. Range reverted: nested copy removed, `--check` 0, clean |
+| C | dep change in `packages/access` | PASS. `npm install is-number@7.0.0 -w packages/access`: npm runs no root lifecycle under `-w`, so lock-at-rest did not run at all; lockfile left with checkout entries. Plain `npm install` then: `WARNING: packages/access/package.json differ(s) from HEAD while checkouts are linked …`, `package-lock.json now references packages-local and must NOT be committed.`, lockfile not restored. With hooks installed, committing both: `pre-commit: refusing package-lock.json: it references packages-local/ …`, exit 1. (Before hooks were installed — see finding b — that commit went through; it was undone.) Reverted + install: clean |
+| D | husky `core.hooksPath` | PASS. `hooksPath=.husky/_`, `localize @_linked/shape-ui --adopt --build ""` (re-adopting a linked member works, 16.8 s): `core.hooksPath is set (.husky/_), so no git hooks were written. Add each line below …` with `.husky/post-merge:`/`post-checkout:`/`pre-commit:` lines; `.husky/_` stayed empty. The post-merge line pasted into `.husky/post-merge` (`sh -n` ok), `hooksPath=.husky`; `git pull --ff-only` of a side branch bumping `@_linked/server` 2.24.8 → 2.24.9 (made in the no-checkout clone): `[git hook] dependency manifests changed (cb7638a2d..690b9e6ff): npm install` … `[git hook] npm install done in 9s`; server 2.24.9, core still linked, status clean (`.husky/` untracked). hooksPath unset, `.husky` removed, adopt again wrote the three hooks to `.git/hooks` |
+| E | purge refusal | PASS. Disposable dcmi checkout (clone of `p10-src`), commit on branch `side` + a stash: `delocalize @_linked/dcmi --purge` exit 6 `not deleting -- it has 1 commit on a branch no remote has. Pass --force …` (1.3 s), checkout kept; `--force` exit 0 `although it has 1 commit on a branch no remote has`, removed, registry dcmi reinstalled (18 s). Stash only (fresh checkout): exit 6 `it has 1 stash entry`; `--force` deletes. The refusal names the first reason found only |
+| F | CI path | PASS. Fresh clone, no `packages-local`, registry cli 1.46.1 (no `hooks/`): `npm ci` exit 0, 21 s, the guarded command printed nothing. With this branch's `hooks/` copied into `node_modules/@_linked/cli/hooks`: `npm run postinstall --silent` exit 0, 0.28 s, no output; `node wt-cli/lib/esm/launch.js localize --list --check` exit 0, 1.2 s, no output (no singleton copies) |
+| G | smoke | PASS. `npx linked build-all` 23 s exit 0: `Building @_linked/core first: @_linked/cli depends on it.` → `Building @_linked/cli alone` → 6 more. `npm run typecheck:gate` 16 s: `No new type errors. 0 pre-existing errors still in the baseline.` `npx vitest run` 45 s: 236 files passed, 1873 passed / 5 skipped — with `DOCUMENT_EXTRACTION_PROVIDER=openai` commented out of `.env` for that run (the P6 caveat: with it, two `DocumentExtractionClient` provider-default cases fail), restored after. Backend `linked start --env development`: `Up and running at http://localhost:4343`, `GET /` 200, no `getLincdPackages` error (`Could not sort lincd packages, circular dependencies?` is pre-existing, P6); PIDs 89596/89624/89631/89641 stopped, 4343 free |
+| H | worktree, no checkouts | PASS. `git worktree add --detach ../p10-wt` of `p10-cn2`; checkout `cb7638a2` ↔ `690b9e6f` (lockfile differs): no node_modules → 0.26 s, nothing printed. After `npm ci` + this branch's `hooks/` in the worktree's cli: both switches 0.57 s / 0.11 s, nothing printed, no install, clean. Control: with a probe member in the worktree's `packages-local/` the same switch prints `[git hook] dependency manifests changed (690b9e6ff..cb7638a2d): npm install` — the members guard is what kept it quiet |
+
+Fixes — cli: `207bc31` fix(localize): make the set-up's lockfile by editing the root entry when it
+has workspaces (`src/localize/setup-lockfile.ts`: sets `packages[""].workspaces` to
+`package.json`'s when the root entry already has `workspaces` and `hasInstallScript: true`, the
+dependency fields agree, and the file round-trips through `JSON.stringify` with its indent/EOL;
+else `null` and npm's lockfile-only call as before; tests: `setup-lockfile.test.ts` (4), a stubbed
+case in `commands.test.ts` (no `--package-lock-only` call), a real-npm case in `real-localize`
+(one-hunk diff, then `npm ci` with no checkout exits 0); disabling the edit fails 2; docs +
+changeset). `be7a1ac` fix(localize): stamp the drift report on the hidden lockfile's content (sha1),
+not its mtime (+ a same-content/new-mtime step in `hooks.test.ts`, which fails on the old stamp;
+docs). `npm run test:unit` 66 suites / 735 tests, tsc and `npm run build` exit 0. CN: none.
+
+Open findings: (a) On `main` today, localizing core/react/server-utils is refused until the `$`
+overrides go — expected (the CN branch removes them), but the set-up does not say so for a first
+localize from `main`. (b) Hooks are written only by a localize run: the "both fresh, unbuilt"
+recipe in `docs/localize.md` (and any clone where checkouts are put in by hand and `npm install`
+run) leaves no hooks, so a leaked lockfile could be committed until
+`npx linked localize <name> --adopt` is run once (measured: it writes them). Suggest one more line
+in that recipe. (c) `npm install <dep> -w <member>` runs no root lifecycle, so lock-at-rest neither
+warns nor restores; pre-commit still refuses the result. (d) After lock-at-rest restores the
+committed lockfile, the next install reports `changed ~352 packages` (~11 s) before settling to
+`up to date` (~9 s); harmless, slower. (e) The purge refusal names only the first unsaved-work
+reason. (f) The un-set-up run in A used a cli newer than the app's (registry 1.46.1 has no
+`hooks/`), so the hooks it wrote are inert there until the cli release is installed — as intended.
+(g) The `p10-wt` worktree stays registered in `p10-cn2` (scratch only).
