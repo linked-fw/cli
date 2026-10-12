@@ -1106,3 +1106,31 @@ checkouts put in another way) the steps end with `npx linked localize <name> --a
 for any one checkout, to install the git hooks; "Pulling and switching branches" quotes the
 lock-at-rest notice and the same command. Gate: `grep -n "adopt --build ''"` → lines 110 and 258;
 `git diff --stat` → that one file.
+
+## Review 3
+
+tsc is clean and `npm run test:unit` passes 66 suites / 744 tests; Review 2's five findings are
+resolved. New medium **N1**: running a command from inside a `--subdir` checkout resolves the app
+root to the framework monorepo, because cwd is the real path `<app>/packages-local/.repos/<mono>/…`
+and the app glob `packages-local/*` does not match `packages-local/.repos/<mono>` — localize there
+would run set-up on the monorepo. Stale doc **L4**: `docs/localize.md` (~:305) and CN how-to step 7
+say the hooks notice comes "after each install"; it comes after an install that changed the tree.
+Lows left for the pause: a foreign pre-commit keeps the notice firing (L1); the notice may name a
+checkout without `.git` (L2); `globsMatch` negation order/braces differ from npm (L3); a stranded
+`.setup-aside` is not hinted by lock-at-rest (L5); overlapping localize runs (L6).
+
+## Iteration 3
+
+### Finding 1 of 1: app root from inside a `--subdir` checkout
+
+Chosen: while climbing in `findWorkspaceRoot`, a path under `<ancestor>/packages-local/`
+(including `.repos/…` and `.setup-aside/…`) counts as matched when the ancestor's workspace globs
+include `packages-local/*`. Test with a fixture: app with
+`packages-local/x-foo -> .repos/mono/packages/foo`, mono has its own `package.json` with
+`workspaces`; `findAppRoot` from the real path of `packages-local/x-foo` (and from `.repos/mono`)
+returns the app.
+
+### P13 — fix and doc line
+
+Fix in `src/localize/app-root.ts`, fixture test, L4 wording in `docs/localize.md` and the CN how-to.
+**Quick gate:** tsc; `tests/unit/localize`; `npm run test:unit`; `npm run build`.
