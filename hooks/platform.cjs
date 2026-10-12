@@ -8,8 +8,12 @@
  * arguments are fixed flags, with nothing cmd.exe would read specially.
  */
 function npmCommand(args, platform = process.platform) {
-  if (platform !== 'win32') return {command: 'npm', args: [...args], shell: false};
-  if (args.some((a) => !/^[\w@./=:-]+$/.test(a))) throw new Error(`npmCommand: unsafe argument for cmd.exe: ${args.join(' ')}`);
+  if (platform !== 'win32')
+    return {command: 'npm', args: [...args], shell: false};
+  if (args.some((a) => !/^[\w@./=:-]+$/.test(a)))
+    throw new Error(
+      `npmCommand: unsafe argument for cmd.exe: ${args.join(' ')}`,
+    );
   return {command: ['npm.cmd', ...args].join(' '), args: [], shell: true};
 }
 

@@ -58,7 +58,10 @@ test('parked checkouts are their own list, not members', (t) => {
   dir(appRoot, `${LOCAL_DIR}/a`, {name: 'a', version: '1.0.0'});
   dir(appRoot, `${PARKED_DIR}/b`, {name: 'b', version: '2.0.0'});
 
-  assert.deepEqual(localMembers(appRoot).map((m) => m.name), ['a']);
+  assert.deepEqual(
+    localMembers(appRoot).map((m) => m.name),
+    ['a'],
+  );
   assert.deepEqual(parkedMembers(appRoot), [
     {name: 'b', version: '2.0.0', dir: '.packages-local.parked/b'},
   ]);

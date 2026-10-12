@@ -13,7 +13,7 @@ npm install --save-dev @_linked/cli
 One executable ships in this package: `linked`. (`lnk`, `lincd` and `lincd-cli` were dropped in
 [#40](https://github.com/linked-fw/cli/pull/40).)
 
-In a project that has `@_linked/cli` installed — any linked app, including Create Now — run it as
+In a project that has `@_linked/cli` installed — any linked app — run it as
 `npx linked <command>`. Everywhere else, name the package: `npx @_linked/cli <command>`.
 A bare `npx linked` outside such a project does **not** reach this CLI: npm resolves it to the
 unrelated `linked` package on the registry, which has no binary, and fails with

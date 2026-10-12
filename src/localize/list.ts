@@ -79,7 +79,8 @@ export function list(opts: {check?: boolean}, deps: Deps): number {
   }
   for (const d of drift) deps.log(`drift: ${describeDrift(d)}`);
 
-  const count = (s: ListRow['state']) => rows.filter((r) => r.state === s).length;
+  const count = (s: ListRow['state']) =>
+    rows.filter((r) => r.state === s).length;
   const parts = [`${count('localized')} localized`];
   if (count('parked')) parts.push(`${count('parked')} parked`);
   parts.push(drift.length ? `${drift.length} drift` : 'no drift');

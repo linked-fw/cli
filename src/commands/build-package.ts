@@ -53,7 +53,8 @@ export async function buildPackageByPath(filePath: string): Promise<void> {
           if (releases.length > 0) {
             yarnBin = path.join(yarnReleasesDir, releases[0]);
             // Windows runs no `.cjs` by its shebang: node runs it there.
-            if (process.platform === 'win32') yarnBin = `"${process.execPath}" "${yarnBin}"`;
+            if (process.platform === 'win32')
+              yarnBin = `"${process.execPath}" "${yarnBin}"`;
           }
         }
         runner = `${yarnBin} exec`;

@@ -86,7 +86,9 @@ export async function runLocalize(
       '--adopt takes no --repo or --subdir: an adopted checkout is used as it is.',
     );
   if (options.parked && (packages.length || options.adopt))
-    return usage('--parked takes back every parked checkout; it takes no package names.');
+    return usage(
+      '--parked takes back every parked checkout; it takes no package names.',
+    );
   if (options.parked) {
     process.exitCode = localizeParked({dir: options.dir}, deps);
     return;

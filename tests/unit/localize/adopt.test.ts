@@ -54,9 +54,14 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
   let asideDuringLockOnly: boolean | null = null;
   const deps = stubbed(appRoot, (inv) => {
     if (inv.args.includes('--package-lock-only')) {
-      seenByLockOnly = fs.existsSync(path.join(appRoot, 'packages-local/scope-thing'));
+      seenByLockOnly = fs.existsSync(
+        path.join(appRoot, 'packages-local/scope-thing'),
+      );
       asideDuringLockOnly = fs.existsSync(
-        path.join(appRoot, 'packages-local/.setup-aside/scope-thing/package.json'),
+        path.join(
+          appRoot,
+          'packages-local/.setup-aside/scope-thing/package.json',
+        ),
       );
     }
     return branchMain(inv);
@@ -64,13 +69,17 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
 
   assert.equal(adopt(['@scope/thing'], {}, deps), 0, deps.output());
 
-  const gitVerbs = deps.calls.filter((c) => c.cmd === 'git').map((c) => c.args[0]);
+  const gitVerbs = deps.calls
+    .filter((c) => c.cmd === 'git')
+    .map((c) => c.args[0]);
   for (const verb of ['clone', 'pull', 'fetch'])
     assert.equal(gitVerbs.includes(verb), false, `adopt ran git ${verb}`);
   assert.deepEqual(
     deps.calls
       .filter((c) => c.cmd !== 'git')
-      .map((c) => `${c.cmd} ${c.args.join(' ')}@${path.relative(appRoot, c.cwd)}`),
+      .map(
+        (c) => `${c.cmd} ${c.args.join(' ')}@${path.relative(appRoot, c.cwd)}`,
+      ),
     [
       // The set-up's lockfile, made with the checkout moved aside.
       'npm install --package-lock-only --ignore-scripts --no-audit --no-fund@',
@@ -78,13 +87,34 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
       'linked build @packages-local/scope-thing',
     ],
   );
-  assert.equal(seenByLockOnly, false, 'npm made the set-up lockfile without the checkout');
-  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/scope-thing/package.json')), 'moved back');
-  assert.equal(asideDuringLockOnly, true, 'set aside inside packages-local/, outside its glob');
-  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside')), false);
-  const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
+  assert.equal(
+    seenByLockOnly,
+    false,
+    'npm made the set-up lockfile without the checkout',
+  );
+  assert.ok(
+    fs.existsSync(
+      path.join(appRoot, 'packages-local/scope-thing/package.json'),
+    ),
+    'moved back',
+  );
+  assert.equal(
+    asideDuringLockOnly,
+    true,
+    'set aside inside packages-local/, outside its glob',
+  );
+  assert.equal(
+    fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside')),
+    false,
+  );
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
+  );
   assert.deepEqual(pkg.workspaces, ['packages-local/*']);
-  assert.match(deps.output(), /@scope\/thing -> packages-local\/scope-thing \(branch main\)/);
+  assert.match(
+    deps.output(),
+    /@scope\/thing -> packages-local\/scope-thing \(branch main\)/,
+  );
 });
 
 test('adopt finds a member by name even under another directory name', (t) => {
@@ -115,7 +145,10 @@ test('adopt of a parked package points at localize, which takes it back', (t) =>
   seed(appRoot, 'thing', {name: 'thing'}, {dir: '.packages-local.parked'});
   const deps = stubbed(appRoot);
   assert.equal(adopt(['thing'], {}, deps), 6);
-  assert.match(deps.output(), /thing is parked\. To take it back:\n {2}linked localize thing/);
+  assert.match(
+    deps.output(),
+    /thing is parked\. To take it back:\n {2}linked localize thing/,
+  );
 });
 
 test('a fresh `git init` with no commit yet is reported on its branch, not as HEAD', (t) => {
@@ -139,7 +172,10 @@ test('a fresh `git init` with no commit yet is reported on its branch, not as HE
   );
 
   assert.equal(adopt(['unborn'], {}, deps), 0, deps.output());
-  assert.match(deps.output(), /unborn -> packages-local\/unborn \(branch trunk\)/);
+  assert.match(
+    deps.output(),
+    /unborn -> packages-local\/unborn \(branch trunk\)/,
+  );
 });
 
 test('localize on an unpublished package whose checkout is already there points at adopt', (t) => {
@@ -157,8 +193,18 @@ test('localize on an unpublished package whose checkout is already there points 
 
 test('--parked takes every parked checkout back with one install and no builds', (t) => {
   const appRoot = consumer(t);
-  seed(appRoot, 'a', {name: 'a', version: '1.0.0'}, {dir: '.packages-local.parked'});
-  seed(appRoot, 'b', {name: 'b', version: '1.0.0'}, {dir: '.packages-local.parked'});
+  seed(
+    appRoot,
+    'a',
+    {name: 'a', version: '1.0.0'},
+    {dir: '.packages-local.parked'},
+  );
+  seed(
+    appRoot,
+    'b',
+    {name: 'b', version: '1.0.0'},
+    {dir: '.packages-local.parked'},
+  );
   const deps = stubbed(appRoot, branchMain);
 
   assert.equal(localizeParked({}, deps), 0, deps.output());
@@ -166,7 +212,9 @@ test('--parked takes every parked checkout back with one install and no builds',
   assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/a/package.json')));
   assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/b/package.json')));
   assert.deepEqual(
-    deps.calls.filter((c) => c.cmd !== 'git').map((c) => `${c.cmd} ${c.args[0]}`),
+    deps.calls
+      .filter((c) => c.cmd !== 'git')
+      .map((c) => `${c.cmd} ${c.args[0]}`),
     ['npm install'],
   );
 
@@ -178,7 +226,12 @@ test('--parked takes every parked checkout back with one install and no builds',
 
 test('--parked refuses (exit 6) a parked name that is already a member under another directory', (t) => {
   const appRoot = consumer(t);
-  seed(appRoot, 'a', {name: 'a', version: '1.0.0'}, {dir: '.packages-local.parked'});
+  seed(
+    appRoot,
+    'a',
+    {name: 'a', version: '1.0.0'},
+    {dir: '.packages-local.parked'},
+  );
   seed(appRoot, 'a-copy', {name: 'a', version: '1.0.0'});
   const deps = stubbed(appRoot, branchMain);
 
@@ -188,7 +241,12 @@ test('--parked refuses (exit 6) a parked name that is already a member under ano
     deps.output(),
     /a is parked in \.packages-local\.parked\/a, but packages-local\/a-copy is a already/,
   );
-  assert.ok(fs.existsSync(path.join(appRoot, '.packages-local.parked/a/package.json')));
+  assert.ok(
+    fs.existsSync(path.join(appRoot, '.packages-local.parked/a/package.json')),
+  );
   assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/a')), false);
-  assert.equal(deps.calls.some((c) => c.cmd === 'npm'), false);
+  assert.equal(
+    deps.calls.some((c) => c.cmd === 'npm'),
+    false,
+  );
 });

@@ -9,7 +9,7 @@
  * `packages-local/` empty, nothing else in the tree changes.
  *
  * `npm install --package-lock-only` is not a substitute. It resolves afresh,
- * and on a real app it does more than that one hunk: on create-now (npm 11
+ * and on a real app it does more than that one hunk: on a large app (npm 11
  * and 12) it adds the bundled dependencies of an optional package for another
  * platform, which a full install never records, and npm 12 refuses it outright
  * (`EALLOWREMOTE`, fetching that package's tarball to read them). So when the
@@ -20,7 +20,6 @@
  * set-up; a lockfile already behind `package.json` there goes to npm too.
  */
 import {isDeepStrictEqual} from 'node:util';
-
 
 /** The dependency fields npm copies into the root entry; they must already agree. */
 const DEP_FIELDS = [
@@ -53,7 +52,8 @@ export function setupLockfileByEdit(
     return null;
   }
   const root = lock?.packages?.[''];
-  if (!root || typeof root !== 'object' || !(lock.lockfileVersion >= 2)) return null;
+  if (!root || typeof root !== 'object' || !(lock.lockfileVersion >= 2))
+    return null;
   if (!('workspaces' in root) || root.hasInstallScript !== true) return null;
   if (!pkg || pkg.workspaces === undefined) return null;
   if (!isDeepStrictEqual(root.workspaces, workspacesBefore)) return null;
@@ -76,6 +76,8 @@ export function setupLockfileByEdit(
 /** npm leaves an empty dependency object out of the root entry. */
 function sameDeps(a: unknown, b: unknown): boolean {
   const norm = (v: unknown) =>
-    v && typeof v === 'object' && Object.keys(v).length ? JSON.stringify(v) : '';
+    v && typeof v === 'object' && Object.keys(v).length
+      ? JSON.stringify(v)
+      : '';
   return norm(a) === norm(b);
 }

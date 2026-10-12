@@ -26,7 +26,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {EXIT_INSTALL_FAILED, EXIT_REFUSED, EXIT_WARNED} from './errors.js';
-import {checkoutRepoRoot, existsOrLink, isInside, isSymlink, moveEntry} from './fsops.js';
+import {
+  checkoutRepoRoot,
+  existsOrLink,
+  isInside,
+  isSymlink,
+  moveEntry,
+} from './fsops.js';
 import {
   INSTALL_ARGS,
   LOCKFILE,
@@ -35,12 +41,7 @@ import {
   restoreSetAside,
   tail,
 } from './localize.js';
-import {
-  LOCAL_DIR,
-  PARKED_DIR,
-  localMembers,
-  parkedMembers,
-} from './members.js';
+import {LOCAL_DIR, PARKED_DIR, localMembers, parkedMembers} from './members.js';
 import type {Member} from './members.js';
 import type {Deps} from './run.js';
 
@@ -222,7 +223,8 @@ function purgeRefusal(repo: string, deps: Deps): string | null {
   for (const {args, what} of checks) {
     const r = deps.run('git', args, {cwd: repo});
     if (r.status !== 0) {
-      const why = (r.stderr || r.stdout).trim().split('\n')[0] || `exit ${r.status}`;
+      const why =
+        (r.stderr || r.stdout).trim().split('\n')[0] || `exit ${r.status}`;
       return `\`git ${args.join(' ')}\` failed (${why}), so its work cannot be checked`;
     }
     const n = r.stdout.split('\n').filter((l) => l.trim()).length;

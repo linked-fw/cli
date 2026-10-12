@@ -31,7 +31,14 @@ import path from 'node:path';
 import {localize} from '../../../src/localize/localize.js';
 import {delocalize} from '../../../src/localize/delocalize.js';
 import {buildFixtureRepo} from './fixtures/build-fixture-repo.js';
-import {makeConsumer, realDeps, rm, scrubbedNpmEnv, test, tmpdir} from './helpers.js';
+import {
+  makeConsumer,
+  realDeps,
+  rm,
+  scrubbedNpmEnv,
+  test,
+  tmpdir,
+} from './helpers.js';
 
 /** A real clone and a real install; generous for a cold npm cache on CI. */
 const SLOW = 120_000;
@@ -101,12 +108,17 @@ test(
 
     // 1. npm linked the member, and installed its dependency for it.
     const link = path.join(appRoot, 'node_modules', name);
-    assert.ok(fs.lstatSync(link).isSymbolicLink(), 'node_modules/<name> is a symlink');
+    assert.ok(
+      fs.lstatSync(link).isSymbolicLink(),
+      'node_modules/<name> is a symlink',
+    );
     assert.equal(fs.realpathSync(link), fs.realpathSync(checkout));
     const mod = await import(path.join(link, 'src', 'index.js'));
     assert.equal(mod.widget, 'from source');
     assert.ok(
-      fs.existsSync(path.join(appRoot, 'node_modules', depName, 'package.json')),
+      fs.existsSync(
+        path.join(appRoot, 'node_modules', depName, 'package.json'),
+      ),
       `${depName} was installed with the root install`,
     );
 
@@ -118,15 +130,23 @@ test(
     );
     // ...while npm's own record of the tree has the member.
     const hidden = JSON.parse(
-      fs.readFileSync(path.join(appRoot, 'node_modules/.package-lock.json'), 'utf8'),
+      fs.readFileSync(
+        path.join(appRoot, 'node_modules/.package-lock.json'),
+        'utf8',
+      ),
     );
-    assert.ok(hidden.packages[`packages-local/${name}`], 'the hidden lockfile lists it');
+    assert.ok(
+      hidden.packages[`packages-local/${name}`],
+      'the hidden lockfile lists it',
+    );
 
     // --- delocalize parks it, npm ci restores the registry tree -------------
     assert.equal(delocalize([name], {}, deps), 0, deps.output());
     assert.equal(fs.existsSync(link), false, 'no member, no link');
     assert.ok(
-      fs.existsSync(path.join(appRoot, '.packages-local.parked', name, 'src', 'index.js')),
+      fs.existsSync(
+        path.join(appRoot, '.packages-local.parked', name, 'src', 'index.js'),
+      ),
       'the work is parked, not deleted',
     );
     assert.equal(status(appRoot), '');
@@ -162,14 +182,19 @@ test(
 
     const clone = path.join(appRoot, 'packages-local', '.repos', name);
     const pkgDir = path.join(clone, 'packages', 'widget');
-    assert.ok(fs.existsSync(path.join(clone, '.git')), 'the clone is the whole repository');
+    assert.ok(
+      fs.existsSync(path.join(clone, '.git')),
+      'the clone is the whole repository',
+    );
     assert.equal(
       fs.realpathSync(path.join(appRoot, 'node_modules', name)),
       fs.realpathSync(pkgDir),
     );
     assert.ok(fs.existsSync(path.join(appRoot, 'node_modules', depName)));
     assert.equal(
-      fs.existsSync(path.join(appRoot, 'node_modules', 'fixture-monorepo-root')),
+      fs.existsSync(
+        path.join(appRoot, 'node_modules', 'fixture-monorepo-root'),
+      ),
       false,
       'the repository root is not a member',
     );
@@ -203,7 +228,10 @@ test(
       '',
       'no clone left in packages-local/',
     );
-    assert.equal(fs.existsSync(path.join(appRoot, 'node_modules', name)), false);
+    assert.equal(
+      fs.existsSync(path.join(appRoot, 'node_modules', name)),
+      false,
+    );
   },
   SLOW,
 );
@@ -240,10 +268,11 @@ test(
       'and the checkout is linked',
     );
 
-    assert.deepEqual(
-      status(appRoot).split('\n').filter(Boolean).sort(),
-      [' M .gitignore', ' M package-lock.json', ' M package.json'],
-    );
+    assert.deepEqual(status(appRoot).split('\n').filter(Boolean).sort(), [
+      ' M .gitignore',
+      ' M package-lock.json',
+      ' M package.json',
+    ]);
     const lockDiff = git(appRoot, 'diff', '-U0', '--', 'package-lock.json');
     // Only the root entry's set-up hunk: the glob, and the install script the hook added.
     const changed = lockDiff
@@ -252,7 +281,12 @@ test(
       .map((l) => l.replace(/\s+/g, ''));
     assert.deepEqual(
       changed,
-      ['+"hasInstallScript":true,', '+"workspaces":[', '+"packages-local/*"', '+],'],
+      [
+        '+"hasInstallScript":true,',
+        '+"workspaces":[',
+        '+"packages-local/*"',
+        '+],',
+      ],
       lockDiff,
     );
     assert.equal((lockDiff.match(/^@@/gm) ?? []).length, 1, 'one hunk');
@@ -290,17 +324,27 @@ test(
     const deps = realDeps(appRoot);
     const code = localize([name], {repo: repoUrl, build: ''}, deps);
     assert.equal(code, 0, deps.output());
-    assert.match(deps.output(), /root entry's "workspaces" now matches package\.json/);
+    assert.match(
+      deps.output(),
+      /root entry's "workspaces" now matches package\.json/,
+    );
     assert.doesNotMatch(deps.output(), /package-lock-only/);
 
     const changed = git(appRoot, 'diff', '-U0', '--', 'package-lock.json')
       .split('\n')
       .filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l))
       .map((l) => l.replace(/\s+/g, ''));
-    assert.deepEqual(changed, ['-"packages/*"', '+"packages/*",', '+"packages-local/*"']);
+    assert.deepEqual(changed, [
+      '-"packages/*"',
+      '+"packages/*",',
+      '+"packages-local/*"',
+    ]);
 
     // What CI sees: the committed set-up, no checkout.
-    fs.renameSync(path.join(appRoot, 'packages-local'), path.join(scratch, 'parked'));
+    fs.renameSync(
+      path.join(appRoot, 'packages-local'),
+      path.join(scratch, 'parked'),
+    );
     execFileSync('npm', ['ci', '--no-audit', '--no-fund'], {
       cwd: appRoot,
       env: scrubbedNpmEnv(),

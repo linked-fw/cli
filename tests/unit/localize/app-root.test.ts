@@ -7,7 +7,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {findAppRoot, findWorkspaceRoot} from '../../../src/localize/app-root.js';
+import {
+  findAppRoot,
+  findWorkspaceRoot,
+} from '../../../src/localize/app-root.js';
 import {rm, test, tmpdir} from './helpers.js';
 
 function write(dir: string, pkg: object | string) {
@@ -25,7 +28,11 @@ test('from a workspace member, the app above it', (t) => {
   const member = path.join(app, 'packages', 'foo');
   write(member, {name: 'foo'});
   assert.equal(findAppRoot(member), app);
-  assert.equal(findAppRoot(path.join(member, 'src')), app, 'any directory below it');
+  assert.equal(
+    findAppRoot(path.join(member, 'src')),
+    app,
+    'any directory below it',
+  );
   assert.equal(findAppRoot(app), app);
 });
 
@@ -74,10 +81,17 @@ test('the climb stops at the first ancestor whose globs do not match, and honour
     write(path.join(top, 'apps', name), {name, workspaces: ['packages/*']});
   }
   assert.equal(findAppRoot(path.join(top, 'apps', 'web')), top);
-  assert.equal(findAppRoot(path.join(top, 'apps', 'skip')), path.join(top, 'apps', 'skip'));
+  assert.equal(
+    findAppRoot(path.join(top, 'apps', 'skip')),
+    path.join(top, 'apps', 'skip'),
+  );
   write(path.join(top, 'deep', 'a', 'b'), {name: 'b', workspaces: ['x/*']});
   write(top, {name: 'top', workspaces: ['deep/**']});
-  assert.equal(findAppRoot(path.join(top, 'deep', 'a', 'b')), top, '** across depth');
+  assert.equal(
+    findAppRoot(path.join(top, 'deep', 'a', 'b')),
+    top,
+    '** across depth',
+  );
 });
 
 test('from inside a --subdir checkout (its real path under packages-local/.repos), the app', (t) => {
@@ -96,5 +110,9 @@ test('from inside a --subdir checkout (its real path under packages-local/.repos
   assert.equal(findAppRoot(aside), app, 'from a checkout set aside');
 
   write(app, {name: 'app', workspaces: ['packages/*']});
-  assert.equal(findAppRoot(mono), mono, 'not when the app does not list packages-local/*');
+  assert.equal(
+    findAppRoot(mono),
+    mono,
+    'not when the app does not list packages-local/*',
+  );
 });

@@ -65,7 +65,10 @@ describe('orderBuildToolFirst', () => {
     const order = orderBuildToolFirst(
       packageMap('@probe/a', BUILD_TOOL_PACKAGE, CORE),
       undefined,
-      deps({[BUILD_TOOL_PACKAGE]: [CORE], '@probe/a': [CORE, BUILD_TOOL_PACKAGE]}),
+      deps({
+        [BUILD_TOOL_PACKAGE]: [CORE],
+        '@probe/a': [CORE, BUILD_TOOL_PACKAGE],
+      }),
     );
     expect([...order.pre.keys()]).toEqual([CORE]);
     expect(order.tool?.packageName).toBe(BUILD_TOOL_PACKAGE);
@@ -288,11 +291,15 @@ describe('build-all with the cli in the workspace', () => {
     );
     const at = (re: RegExp) => output.findIndex((line) => re.test(line));
     expect(at(/Built @_linked\/core/)).toBeGreaterThan(-1);
-    expect(at(/Built @_linked\/core/)).toBeLessThan(at(/Building @_linked\/cli alone/));
+    expect(at(/Built @_linked\/core/)).toBeLessThan(
+      at(/Building @_linked\/cli alone/),
+    );
     expect(at(/Built @_linked\/cli/)).toBeLessThan(at(/Built @probe\/a/));
     expect(text()).not.toMatch(/build failed|Failed to build/);
     // The summary is printed once, at the end.
-    expect(output.filter((line) => /Successfully built/.test(line))).toHaveLength(1);
+    expect(
+      output.filter((line) => /Successfully built/.test(line)),
+    ).toHaveLength(1);
     expect(text()).toMatch(/Successfully built: .*@_linked\/core/);
   }, 30000);
 

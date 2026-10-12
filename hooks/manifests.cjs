@@ -27,7 +27,11 @@ function readJson(file) {
 function workspaceGlobs(appRoot) {
   const pkg = readJson(path.join(appRoot, 'package.json'));
   const ws = pkg && pkg.workspaces;
-  const globs = Array.isArray(ws) ? ws : ws && Array.isArray(ws.packages) ? ws.packages : null;
+  const globs = Array.isArray(ws)
+    ? ws
+    : ws && Array.isArray(ws.packages)
+      ? ws.packages
+      : null;
   return globs ? globs.filter((g) => typeof g === 'string' && g !== '') : null;
 }
 
@@ -59,14 +63,23 @@ function trackedGlobs(appRoot, fallback = []) {
  * `packages-local/*` (checkouts are not committed).
  */
 function manifestPathspecs(appRoot) {
-  return ['package.json', ...trackedGlobs(appRoot).map((g) => `${g}/package.json`)];
+  return [
+    'package.json',
+    ...trackedGlobs(appRoot).map((g) => `${g}/package.json`),
+  ];
 }
 
 /** One glob segment (`*`, `?`, literal text) as a regular expression. */
 function segmentRegExp(segment) {
   const body = segment
     .split('')
-    .map((c) => (c === '*' ? '[^/]*' : c === '?' ? '[^/]' : c.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
+    .map((c) =>
+      c === '*'
+        ? '[^/]*'
+        : c === '?'
+          ? '[^/]'
+          : c.replace(/[.+^${}()|[\]\\]/g, '\\$&'),
+    )
     .join('');
   return new RegExp(`^${body}$`);
 }
@@ -80,17 +93,27 @@ function expandGlobs(appRoot, globs) {
   const found = [];
   const walk = (rel, segments) => {
     if (!segments.length) {
-      if (rel && fs.existsSync(path.join(appRoot, rel, 'package.json')) && !found.includes(rel))
+      if (
+        rel &&
+        fs.existsSync(path.join(appRoot, rel, 'package.json')) &&
+        !found.includes(rel)
+      )
         found.push(rel);
       return;
     }
     const [segment, ...rest] = segments;
-    if (!/[*?]/.test(segment)) return walk(rel ? `${rel}/${segment}` : segment, rest);
+    if (!/[*?]/.test(segment))
+      return walk(rel ? `${rel}/${segment}` : segment, rest);
     let entries = [];
     try {
       entries = fs
         .readdirSync(path.join(appRoot, rel), {withFileTypes: true})
-        .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith('.') && e.name !== 'node_modules')
+        .filter(
+          (e) =>
+            (e.isDirectory() || e.isSymbolicLink()) &&
+            !e.name.startsWith('.') &&
+            e.name !== 'node_modules',
+        )
         .map((e) => e.name)
         .sort();
     } catch {
@@ -102,7 +125,8 @@ function expandGlobs(appRoot, globs) {
       return;
     }
     const re = segmentRegExp(segment);
-    for (const name of entries) if (re.test(name)) walk(rel ? `${rel}/${name}` : name, rest);
+    for (const name of entries)
+      if (re.test(name)) walk(rel ? `${rel}/${name}` : name, rest);
   };
   for (const glob of globs) walk('', glob.split('/'));
   return found;
@@ -121,15 +145,25 @@ function globsMatch(globs, rel) {
     const [segment, ...rest] = segments;
     if (segment === '**') {
       if (matches(rest, names)) return true;
-      return names.length > 0 && wildcardName(names[0]) && matches(segments, names.slice(1));
+      return (
+        names.length > 0 &&
+        wildcardName(names[0]) &&
+        matches(segments, names.slice(1))
+      );
     }
     if (!names.length) return false;
     if (/[*?]/.test(segment)) {
-      if (!wildcardName(names[0]) || !segmentRegExp(segment).test(names[0])) return false;
+      if (!wildcardName(names[0]) || !segmentRegExp(segment).test(names[0]))
+        return false;
     } else if (segment !== names[0]) return false;
     return matches(rest, names.slice(1));
   };
-  const split = (g) => g.replace(/^\.\//, '').replace(/\/+$/, '').split('/').filter((s) => s !== '');
+  const split = (g) =>
+    g
+      .replace(/^\.\//, '')
+      .replace(/\/+$/, '')
+      .split('/')
+      .filter((s) => s !== '');
   let included = false;
   for (const glob of globs) {
     if (glob.startsWith('!')) {

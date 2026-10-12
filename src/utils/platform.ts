@@ -9,7 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-const pathFor = (platform: NodeJS.Platform) => (platform === 'win32' ? path.win32 : path.posix);
+const pathFor = (platform: NodeJS.Platform) =>
+  platform === 'win32' ? path.win32 : path.posix;
 
 /** Paths as compared on `platform`: resolved, and lower-cased where the filesystem ignores case. */
 function comparable(p: string, platform: NodeJS.Platform): string {
@@ -18,7 +19,11 @@ function comparable(p: string, platform: NodeJS.Platform): string {
 }
 
 /** Do `a` and `b` name the same path on `platform`? No filesystem access. */
-export function samePath(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
+export function samePath(
+  a: string,
+  b: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
   return comparable(a, platform) === comparable(b, platform);
 }
 
@@ -29,9 +34,15 @@ export function isPathInside(
   platform: NodeJS.Platform = process.platform,
 ): boolean {
   const p = pathFor(platform);
-  const rel = p.relative(comparable(parent, platform), comparable(child, platform));
+  const rel = p.relative(
+    comparable(parent, platform),
+    comparable(child, platform),
+  );
   // `..foo` is a child named `..foo`; only `..` itself or a `../` prefix leaves `parent`.
-  return rel === '' || (rel !== '..' && !rel.startsWith('..' + p.sep) && !p.isAbsolute(rel));
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith('..' + p.sep) && !p.isAbsolute(rel))
+  );
 }
 
 /**
@@ -43,7 +54,11 @@ export function linkDirectory(
   target: string,
   linkPath: string,
   platform: NodeJS.Platform = process.platform,
-  symlink: (target: string, linkPath: string, type: 'dir' | 'junction') => void = fs.symlinkSync,
+  symlink: (
+    target: string,
+    linkPath: string,
+    type: 'dir' | 'junction',
+  ) => void = fs.symlinkSync,
 ): void {
   if (platform === 'win32') {
     symlink(path.win32.resolve(target), linkPath, 'junction');
@@ -57,7 +72,10 @@ export function linkDirectory(
  * `file:` URL (`import('C:\\x.js')` fails: `c:` reads as a URL scheme);
  * elsewhere the path itself, which Node takes as it is.
  */
-export function importSpecifier(file: string, platform: NodeJS.Platform = process.platform): string {
+export function importSpecifier(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
   if (platform !== 'win32') return file;
   return pathToFileURL(path.win32.resolve(file), {windows: true}).href;
 }

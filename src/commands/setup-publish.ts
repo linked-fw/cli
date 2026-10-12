@@ -13,7 +13,14 @@ const dirname__ = path.dirname(fileURLToPath(import.meta.url));
 // defaults/setup-publish/ lives at packages/cli/defaults/setup-publish/
 // This file compiles to lib/{esm,cjs}/commands/setup-publish.js — go up three
 // levels to reach the package root, then into defaults/setup-publish.
-const TEMPLATE_ROOT = path.resolve(dirname__, '..', '..', '..', 'defaults', 'setup-publish');
+const TEMPLATE_ROOT = path.resolve(
+  dirname__,
+  '..',
+  '..',
+  '..',
+  'defaults',
+  'setup-publish',
+);
 
 // Both are callers of the shared reusable workflows. `publish.yml` in particular cannot be
 // renamed: npm's trusted-publisher check validates the calling workflow's filename, and a
@@ -29,7 +36,10 @@ export const WORKFLOW_FILES = ['pr.yml', 'publish.yml'] as const;
  */
 export function buildBranchProtectionPayload() {
   return {
-    required_status_checks: {strict: false, contexts: ['checks / Build & Test']},
+    required_status_checks: {
+      strict: false,
+      contexts: ['checks / Build & Test'],
+    },
     // Admins included: the point of the gate is that no release skips the build, and the people
     // most likely to push straight to main are the admins.
     enforce_admins: true,
@@ -91,7 +101,9 @@ export type SetupPublishOptions = {
  * With --configure-github: if `gh` CLI is available and authenticated, also applies the uniform
  * branch-protection profile on main and enables auto-merge.
  */
-export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void> {
+export async function setupPublish(
+  opts: SetupPublishOptions = {},
+): Promise<void> {
   const cwd = process.cwd();
   // One secret NAME across every org. The orgs are separate, so each holds its own value —
   // a token scoped to that org's npm scope. (There used to be an `NPM_AUTH_TOKEN_CM` for
@@ -120,7 +132,11 @@ export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void
 
   const pkgJsonPath = path.join(cwd, 'package.json');
   if (!fs.existsSync(pkgJsonPath)) {
-    console.error(chalk.red('No package.json found in current directory. Run from the repo root.'));
+    console.error(
+      chalk.red(
+        'No package.json found in current directory. Run from the repo root.',
+      ),
+    );
     process.exit(1);
   }
 
@@ -191,8 +207,16 @@ export async function setupPublish(opts: SetupPublishOptions = {}): Promise<void
 async function resolveRepoSlug(cwd: string, pkgJson: any): Promise<string> {
   // Try git remote first
   try {
-    const remoteUrl = await execPromise('git config --get remote.origin.url', false, false, {cwd});
-    const m = typeof remoteUrl === 'string' ? remoteUrl.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\s*$/) : null;
+    const remoteUrl = await execPromise(
+      'git config --get remote.origin.url',
+      false,
+      false,
+      {cwd},
+    );
+    const m =
+      typeof remoteUrl === 'string'
+        ? remoteUrl.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\s*$/)
+        : null;
     if (m) return m[1];
   } catch {
     // fall through
@@ -206,7 +230,11 @@ async function resolveRepoSlug(cwd: string, pkgJson: any): Promise<string> {
     const m = repoField.url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
     if (m) return m[1];
   }
-  console.warn(chalk.yellow('Could not determine repo slug. Using placeholder "OWNER/REPO" — update .changeset/config.json manually.'));
+  console.warn(
+    chalk.yellow(
+      'Could not determine repo slug. Using placeholder "OWNER/REPO" — update .changeset/config.json manually.',
+    ),
+  );
   return 'OWNER/REPO';
 }
 
@@ -215,7 +243,9 @@ async function resolveRepoSlug(cwd: string, pkgJson: any): Promise<string> {
  * missing script into a failure, so it is only safe to write once one exists — and a fresh
  * `create-package` scaffold has none.
  */
-export function hasTestScript(pkgJson: {scripts?: Record<string, unknown>}): boolean {
+export function hasTestScript(pkgJson: {
+  scripts?: Record<string, unknown>;
+}): boolean {
   const test = pkgJson.scripts?.test;
   return typeof test === 'string' && test.trim() !== '';
 }
@@ -234,7 +264,10 @@ async function copyWorkflows(cwd: string, vars: WorkflowVars): Promise<void> {
   fs.mkdirpSync(dstDir);
 
   for (const file of WORKFLOW_FILES) {
-    const content = renderWorkflow(fs.readFileSync(path.join(srcDir, file), 'utf8'), vars);
+    const content = renderWorkflow(
+      fs.readFileSync(path.join(srcDir, file), 'utf8'),
+      vars,
+    );
     fs.writeFileSync(path.join(dstDir, file), content);
     console.log(chalk.green('  ✓') + ` .github/workflows/${file}`);
   }
@@ -247,12 +280,17 @@ async function copyWorkflows(cwd: string, vars: WorkflowVars): Promise<void> {
     const stalePath = path.join(dstDir, stale);
     if (fs.existsSync(stalePath)) {
       fs.removeSync(stalePath);
-      console.log(chalk.green('  ✓') + ` removed superseded .github/workflows/${stale}`);
+      console.log(
+        chalk.green('  ✓') + ` removed superseded .github/workflows/${stale}`,
+      );
     }
   }
 }
 
-async function copyChangesetConfig(cwd: string, repoSlug: string): Promise<void> {
+async function copyChangesetConfig(
+  cwd: string,
+  repoSlug: string,
+): Promise<void> {
   const srcDir = path.join(TEMPLATE_ROOT, 'changeset');
   const dstDir = path.join(cwd, '.changeset');
   fs.mkdirpSync(dstDir);
@@ -262,14 +300,22 @@ async function copyChangesetConfig(cwd: string, repoSlug: string): Promise<void>
   fs.writeFileSync(path.join(dstDir, 'config.json'), configContent);
   console.log(chalk.green('  ✓') + ' .changeset/config.json');
 
-  fs.copyFileSync(path.join(srcDir, 'README.md'), path.join(dstDir, 'README.md'));
+  fs.copyFileSync(
+    path.join(srcDir, 'README.md'),
+    path.join(dstDir, 'README.md'),
+  );
   console.log(chalk.green('  ✓') + ' .changeset/README.md');
 }
 
-async function writeInitialChangeset(cwd: string, pkgName: string): Promise<void> {
+async function writeInitialChangeset(
+  cwd: string,
+  pkgName: string,
+): Promise<void> {
   const changelogPath = path.join(cwd, 'CHANGELOG.md');
   if (fs.existsSync(changelogPath)) {
-    console.log(chalk.gray('  · CHANGELOG.md exists — skipping initial changeset'));
+    console.log(
+      chalk.gray('  · CHANGELOG.md exists — skipping initial changeset'),
+    );
     return;
   }
   const initial = path.join(cwd, '.changeset', 'initial-release.md');
@@ -292,7 +338,9 @@ async function updateGitignore(cwd: string): Promise<void> {
     '#  are legit src files.)',
     'src/**/*.js.map',
   ];
-  const original = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf8') : '';
+  const original = fs.existsSync(gitignorePath)
+    ? fs.readFileSync(gitignorePath, 'utf8')
+    : '';
   const existing = original ? original.split('\n') : [];
   const existingSet = new Set(existing.map((l) => l.trim()));
   const toAdd = entries.filter((e) => e && !existingSet.has(e.trim()));
@@ -341,13 +389,16 @@ export function mergeNpmrc(existing: string, settings: string[]): string {
   );
   const missing = settings.filter((setting) => !present.has(keyOf(setting)));
   if (missing.length === 0) return existing;
-  const base = existing === '' || existing.endsWith('\n') ? existing : existing + '\n';
+  const base =
+    existing === '' || existing.endsWith('\n') ? existing : existing + '\n';
   return base + missing.join('\n') + '\n';
 }
 
 async function updateNpmrc(cwd: string, workflowOrg: string): Promise<void> {
   const npmrcPath = path.join(cwd, '.npmrc');
-  const existing = fs.existsSync(npmrcPath) ? fs.readFileSync(npmrcPath, 'utf8') : '';
+  const existing = fs.existsSync(npmrcPath)
+    ? fs.readFileSync(npmrcPath, 'utf8')
+    : '';
   const next = mergeNpmrc(existing, npmrcSettings(workflowOrg));
   if (next === existing) {
     console.log(chalk.gray('  · .npmrc already has the required settings'));
@@ -388,18 +439,28 @@ export function renovateStub(workflowOrg: string): string {
   );
 }
 
-async function writeRenovateConfig(cwd: string, workflowOrg: string): Promise<void> {
+async function writeRenovateConfig(
+  cwd: string,
+  workflowOrg: string,
+): Promise<void> {
   if (workflowOrg === 'OWNER') {
-    console.warn(chalk.yellow('  ⚠ Skipped renovate.json: the repo org is unknown.'));
+    console.warn(
+      chalk.yellow('  ⚠ Skipped renovate.json: the repo org is unknown.'),
+    );
     return;
   }
-  const existing = RENOVATE_CONFIG_FILES.find((file) => fs.existsSync(path.join(cwd, file)));
+  const existing = RENOVATE_CONFIG_FILES.find((file) =>
+    fs.existsSync(path.join(cwd, file)),
+  );
   if (existing) {
     console.log(chalk.gray(`  · ${existing} exists — left as is`));
     return;
   }
   fs.writeFileSync(path.join(cwd, 'renovate.json'), renovateStub(workflowOrg));
-  console.log(chalk.green('  ✓') + ` renovate.json (extends ${workflowOrg}/renovate-config)`);
+  console.log(
+    chalk.green('  ✓') +
+      ` renovate.json (extends ${workflowOrg}/renovate-config)`,
+  );
 }
 
 async function patchPackageJson(
@@ -409,15 +470,23 @@ async function patchPackageJson(
 ): Promise<void> {
   if (applyPackageJsonPatches(pkgJson, repoSlug)) {
     const original = fs.readFileSync(pkgJsonPath, 'utf8');
-    fs.writeFileSync(pkgJsonPath, withEolOf(JSON.stringify(pkgJson, null, 2) + '\n', original));
-    console.log(chalk.green('  ✓') + ' package.json (publishConfig + changesets devDeps)');
+    fs.writeFileSync(
+      pkgJsonPath,
+      withEolOf(JSON.stringify(pkgJson, null, 2) + '\n', original),
+    );
+    console.log(
+      chalk.green('  ✓') + ' package.json (publishConfig + changesets devDeps)',
+    );
   } else {
     console.log(chalk.gray('  · package.json already configured'));
   }
 }
 
 /** Mutates `pkgJson` in place; returns whether anything changed. Pure enough to test. */
-export function applyPackageJsonPatches(pkgJson: any, repoSlug: string): boolean {
+export function applyPackageJsonPatches(
+  pkgJson: any,
+  repoSlug: string,
+): boolean {
   let modified = false;
 
   // `repository.url` must be set, and must match the repo the workflow builds in.
@@ -480,7 +549,9 @@ async function ensureLockfile(cwd: string): Promise<void> {
   // the lockfile in isolation, and copying it back.
   const os = await import('os');
   const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-setup-'));
-  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-setup-cache-'));
+  const cacheDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'linked-setup-cache-'),
+  );
   try {
     // The existing lockfile comes along so its resolutions are kept (only what package.json just
     // gained is resolved), and .npmrc so the lock is resolved under the repo's own settings —
@@ -492,21 +563,44 @@ async function ensureLockfile(cwd: string): Promise<void> {
     // An argument list: the temp directory may hold a space (a Windows user name).
     const install = await runCommand(
       'npm',
-      ['install', '--package-lock-only', '--ignore-scripts', '--cache', cacheDir],
+      [
+        'install',
+        '--package-lock-only',
+        '--ignore-scripts',
+        '--cache',
+        cacheDir,
+      ],
       {cwd: tmpBase, echo: true},
     );
-    if (install.status !== 0) throw new Error(`npm install exited with ${install.status}`);
+    if (install.status !== 0)
+      throw new Error(`npm install exited with ${install.status}`);
     const lockPath = path.join(tmpBase, 'package-lock.json');
     if (fs.existsSync(lockPath)) {
       fs.copyFileSync(lockPath, path.join(cwd, 'package-lock.json'));
       console.log(chalk.green('  ✓') + ' package-lock.json');
     } else {
-      console.warn(chalk.yellow('  ⚠ npm install did not produce a package-lock.json — likely because a dependency is not yet published on npm.'));
-      console.warn(chalk.yellow('    Regenerate manually once all deps are published: `npm install --package-lock-only`.'));
+      console.warn(
+        chalk.yellow(
+          '  ⚠ npm install did not produce a package-lock.json — likely because a dependency is not yet published on npm.',
+        ),
+      );
+      console.warn(
+        chalk.yellow(
+          '    Regenerate manually once all deps are published: `npm install --package-lock-only`.',
+        ),
+      );
     }
   } catch (err) {
-    console.warn(chalk.yellow('  ⚠ Failed to generate package-lock.json — likely because a dependency is not yet published on npm.'));
-    console.warn(chalk.yellow('    Regenerate manually once all deps are published: `npm install --package-lock-only`.'));
+    console.warn(
+      chalk.yellow(
+        '  ⚠ Failed to generate package-lock.json — likely because a dependency is not yet published on npm.',
+      ),
+    );
+    console.warn(
+      chalk.yellow(
+        '    Regenerate manually once all deps are published: `npm install --package-lock-only`.',
+      ),
+    );
   } finally {
     fs.removeSync(tmpBase);
     fs.removeSync(cacheDir);
@@ -521,8 +615,18 @@ async function configureGithub(repoSlug: string): Promise<void> {
   try {
     await execPromise('gh --version', false, false);
   } catch {
-    console.warn(chalk.yellow('  ⚠ `gh` CLI not found. Install from https://cli.github.com/ and retry with --configure-github,'));
-    console.warn(chalk.yellow('    or set branch protection manually at https://github.com/' + repoSlug + '/settings/branches'));
+    console.warn(
+      chalk.yellow(
+        '  ⚠ `gh` CLI not found. Install from https://cli.github.com/ and retry with --configure-github,',
+      ),
+    );
+    console.warn(
+      chalk.yellow(
+        '    or set branch protection manually at https://github.com/' +
+          repoSlug +
+          '/settings/branches',
+      ),
+    );
     return;
   }
 
@@ -530,7 +634,11 @@ async function configureGithub(repoSlug: string): Promise<void> {
   try {
     await execPromise('gh auth status', false, false);
   } catch {
-    console.warn(chalk.yellow('  ⚠ `gh` CLI is not authenticated. Run `gh auth login` and retry.'));
+    console.warn(
+      chalk.yellow(
+        '  ⚠ `gh` CLI is not authenticated. Run `gh auth login` and retry.',
+      ),
+    );
     return;
   }
 
@@ -540,20 +648,35 @@ async function configureGithub(repoSlug: string): Promise<void> {
     // The JSON payload on stdin (--input -), with no shell: cmd.exe has no single quotes.
     const put = await runCommand(
       'gh',
-      ['api', '-X', 'PUT', `/repos/${repoSlug}/branches/main/protection`, '--input', '-'],
+      [
+        'api',
+        '-X',
+        'PUT',
+        `/repos/${repoSlug}/branches/main/protection`,
+        '--input',
+        '-',
+      ],
       {input: payload},
     );
     if (put.status !== 0) throw new Error(put.stderr || put.stdout);
-    console.log(chalk.green('  ✓') + ` branch protection enabled on ${repoSlug}/main`);
+    console.log(
+      chalk.green('  ✓') + ` branch protection enabled on ${repoSlug}/main`,
+    );
     // A repo can pin a required check in a *ruleset* as well as in classic branch protection, and
     // the two are stored separately — this call only writes the classic one, so a leftover ruleset
     // keeps blocking merges on a check name that no longer reports.
     console.log(
-      chalk.gray(`  · check for a competing ruleset: gh api /repos/${repoSlug}/rulesets`),
+      chalk.gray(
+        `  · check for a competing ruleset: gh api /repos/${repoSlug}/rulesets`,
+      ),
     );
   } catch (err) {
-    console.warn(chalk.yellow('  ⚠ Failed to set branch protection. Do it manually:'));
-    console.warn(chalk.yellow(`    https://github.com/${repoSlug}/settings/branches`));
+    console.warn(
+      chalk.yellow('  ⚠ Failed to set branch protection. Do it manually:'),
+    );
+    console.warn(
+      chalk.yellow(`    https://github.com/${repoSlug}/settings/branches`),
+    );
   }
 
   // Enable "Allow auto-merge" so a PR can be queued to merge itself once checks pass. The publish
@@ -567,20 +690,39 @@ async function configureGithub(repoSlug: string): Promise<void> {
     );
     console.log(chalk.green('  ✓') + ` auto-merge enabled on ${repoSlug}`);
   } catch (err) {
-    console.warn(chalk.yellow('  ⚠ Failed to enable auto-merge. Enable it manually:'));
-    console.warn(chalk.yellow(`    https://github.com/${repoSlug}/settings (General → Allow auto-merge)`));
+    console.warn(
+      chalk.yellow('  ⚠ Failed to enable auto-merge. Enable it manually:'),
+    );
+    console.warn(
+      chalk.yellow(
+        `    https://github.com/${repoSlug}/settings (General → Allow auto-merge)`,
+      ),
+    );
   }
 }
 
-async function grantTeamAccess(repoSlug: string, teamSlug: string): Promise<void> {
+async function grantTeamAccess(
+  repoSlug: string,
+  teamSlug: string,
+): Promise<void> {
   console.log('');
-  console.log(chalk.magenta(`Granting '${teamSlug}' team push access to ${repoSlug}...`));
+  console.log(
+    chalk.magenta(`Granting '${teamSlug}' team push access to ${repoSlug}...`),
+  );
 
   try {
     await execPromise('gh --version', false, false);
   } catch {
-    console.warn(chalk.yellow("  ⚠ `gh` CLI not found. Install from https://cli.github.com/ and retry with --grant-team,"));
-    console.warn(chalk.yellow(`    or add the team manually at https://github.com/${repoSlug}/settings/access`));
+    console.warn(
+      chalk.yellow(
+        '  ⚠ `gh` CLI not found. Install from https://cli.github.com/ and retry with --grant-team,',
+      ),
+    );
+    console.warn(
+      chalk.yellow(
+        `    or add the team manually at https://github.com/${repoSlug}/settings/access`,
+      ),
+    );
     return;
   }
 
@@ -591,12 +733,25 @@ async function grantTeamAccess(repoSlug: string, teamSlug: string): Promise<void
       false,
       false,
     );
-    console.log(chalk.green('  ✓') + ` team '${teamSlug}' granted push access on ${repoSlug}`);
+    console.log(
+      chalk.green('  ✓') +
+        ` team '${teamSlug}' granted push access on ${repoSlug}`,
+    );
   } catch (err: any) {
     const msg = err?.stderr || err?.stdout || String(err);
-    console.warn(chalk.yellow(`  ⚠ Failed to grant team access: ${msg.slice(0, 200)}`));
-    console.warn(chalk.yellow(`    Team may not exist in org '${owner}', or you may lack admin rights.`));
-    console.warn(chalk.yellow(`    Manual: https://github.com/${repoSlug}/settings/access`));
+    console.warn(
+      chalk.yellow(`  ⚠ Failed to grant team access: ${msg.slice(0, 200)}`),
+    );
+    console.warn(
+      chalk.yellow(
+        `    Team may not exist in org '${owner}', or you may lack admin rights.`,
+      ),
+    );
+    console.warn(
+      chalk.yellow(
+        `    Manual: https://github.com/${repoSlug}/settings/access`,
+      ),
+    );
   }
 }
 
@@ -615,39 +770,85 @@ function printNextSteps(
 
   console.log(`  1. Review the generated files, adjust as needed.`);
   console.log(`  2. Commit:`);
-  console.log(chalk.cyan('       git add . && git commit -m "set up the publish pipeline"'));
+  console.log(
+    chalk.cyan(
+      '       git add . && git commit -m "set up the publish pipeline"',
+    ),
+  );
   console.log(`  3. Push to main — the publish workflow will trigger.`);
   console.log('');
-  console.log(chalk.bold('Register the trusted publisher on npmjs.com (before the first release):'));
+  console.log(
+    chalk.bold(
+      'Register the trusted publisher on npmjs.com (before the first release):',
+    ),
+  );
   console.log('');
-  console.log(`  package → Settings → Trusted Publisher, matching the caller workflow exactly:`);
-  console.log(`    organization: ${chalk.cyan(owner)}   repository: ${chalk.cyan(repo)}`);
-  console.log(`    workflow filename: ${chalk.cyan('publish.yml')}   environment: ${chalk.cyan('(empty)')}`);
+  console.log(
+    `  package → Settings → Trusted Publisher, matching the caller workflow exactly:`,
+  );
+  console.log(
+    `    organization: ${chalk.cyan(owner)}   repository: ${chalk.cyan(repo)}`,
+  );
+  console.log(
+    `    workflow filename: ${chalk.cyan('publish.yml')}   environment: ${chalk.cyan('(empty)')}`,
+  );
   console.log(`    "Allow npm publish": ${chalk.cyan('ticked')}`);
   console.log('');
-  console.log(chalk.gray(`  Without it the release still ships — the workflow falls back to a staged`));
-  console.log(chalk.gray(`  npm release that a maintainer approves with 2FA. A typo in the organization`));
-  console.log(chalk.gray(`  field looks exactly the same, so check that field first if a package that`));
+  console.log(
+    chalk.gray(
+      `  Without it the release still ships — the workflow falls back to a staged`,
+    ),
+  );
+  console.log(
+    chalk.gray(
+      `  npm release that a maintainer approves with 2FA. A typo in the organization`,
+    ),
+  );
+  console.log(
+    chalk.gray(
+      `  field looks exactly the same, so check that field first if a package that`,
+    ),
+  );
   console.log(chalk.gray(`  should publish directly keeps staging instead.`));
   console.log('');
   // No per-repo secret grant step: NPM_AUTH_TOKEN, RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY are
   // "All repositories" org secrets, which is the whole reason first-party and community packages
   // live in separate orgs. Only mention what is genuinely still one-time-per-org.
-  console.log(chalk.bold(`One-time org-level setup (already done on linked-fw and linked-cm):`));
+  console.log(
+    chalk.bold(
+      `One-time org-level setup (already done on linked-fw and linked-cm):`,
+    ),
+  );
   console.log('');
-  console.log(`  a. Org secrets ${chalk.cyan(npmSecretName)}, ${chalk.cyan('RELEASE_APP_ID')} and ${chalk.cyan('RELEASE_APP_PRIVATE_KEY')},`);
-  console.log(`     visible to ${chalk.cyan('All repositories')} — there is no per-repo grant step.`);
-  console.log(`     → https://github.com/organizations/${owner}/settings/secrets/actions`);
+  console.log(
+    `  a. Org secrets ${chalk.cyan(npmSecretName)}, ${chalk.cyan('RELEASE_APP_ID')} and ${chalk.cyan('RELEASE_APP_PRIVATE_KEY')},`,
+  );
+  console.log(
+    `     visible to ${chalk.cyan('All repositories')} — there is no per-repo grant step.`,
+  );
+  console.log(
+    `     → https://github.com/organizations/${owner}/settings/secrets/actions`,
+  );
   console.log('');
-  console.log(`  b. Enable "Allow GitHub Actions to create and approve pull requests":`);
-  console.log(`     → https://github.com/organizations/${owner}/settings/actions`);
+  console.log(
+    `  b. Enable "Allow GitHub Actions to create and approve pull requests":`,
+  );
+  console.log(
+    `     → https://github.com/organizations/${owner}/settings/actions`,
+  );
 
   if (!configuredGithub) {
     console.log('');
     console.log(chalk.bold('Branch protection:'));
-    console.log(`  Rerun with ${chalk.cyan('linked setup-publish --configure-github')} to configure automatically,`);
-    console.log(`  or set manually at https://github.com/${repoSlug}/settings/branches —`);
-    console.log(`  the required check is ${chalk.cyan('checks / Build & Test')}, not ${chalk.cyan('Build & Test')}.`);
+    console.log(
+      `  Rerun with ${chalk.cyan('linked setup-publish --configure-github')} to configure automatically,`,
+    );
+    console.log(
+      `  or set manually at https://github.com/${repoSlug}/settings/branches —`,
+    );
+    console.log(
+      `  the required check is ${chalk.cyan('checks / Build & Test')}, not ${chalk.cyan('Build & Test')}.`,
+    );
   }
   console.log('');
 }

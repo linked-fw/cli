@@ -25,9 +25,9 @@ export type Drift =
   | {kind: 'missing-dir'; dir: string};
 
 interface DriftModule {
-  SINGLETONS: readonly string[];
   driftProblems: (appRoot: string) => Drift[];
   describeDrift: (d: Drift) => string;
+  satisfies: (version: string, range: string) => boolean | null;
 }
 
 const hook = requireHook<DriftModule>(
@@ -35,14 +35,8 @@ const hook = requireHook<DriftModule>(
   (mod) =>
     typeof mod.driftProblems === 'function' &&
     typeof mod.describeDrift === 'function' &&
-    Array.isArray(mod.SINGLETONS),
+    typeof mod.satisfies === 'function',
 );
-
-/**
- * One copy each, app-wide, localized or not: they hold registries of classes
- * (or React's context), so a second copy splits the app in two.
- */
-export const SINGLETONS: readonly string[] = hook.SINGLETONS;
 
 /** Every drift in the installed tree, in a stable order. No install yet means none. */
 export function driftProblems(appRoot: string): Drift[] {
@@ -52,4 +46,16 @@ export function driftProblems(appRoot: string): Drift[] {
 /** One line, for `--list` and the drift check before `start` and friends. */
 export function describeDrift(d: Drift): string {
   return hook.describeDrift(d);
+}
+
+/**
+ * Does `version` satisfy `range`? `null` means "cannot tell" -- a dist-tag,
+ * `file:`, `npm:`, `workspace:`, a git URL, or a version that is not one --
+ * and drift then reports nothing: npm links the checkout for such a range
+ * anyway. npm's own `semver` decides, so prereleases follow npm's rule:
+ * `1.3.0-beta.1` satisfies a range only when one of its comparators names a
+ * prerelease on the same `major.minor.patch`.
+ */
+export function satisfies(version: string, range: string): boolean | null {
+  return hook.satisfies(version, range);
 }

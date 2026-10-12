@@ -34,16 +34,25 @@ function git(...args) {
   });
 }
 
-const errorText = (e) => String((e && e.stderr) || (e && e.message) || e).trim();
+const errorText = (e) =>
+  String((e && e.stderr) || (e && e.message) || e).trim();
 const BYPASS = '  (git commit --no-verify skips this check.)\n';
 
 function preCommit() {
   let staged;
   try {
     // Added, copied, modified, renamed -- not deleted: a staged deletion lists no checkout.
-    staged = git('diff', '--cached', '--name-only', '--diff-filter=d', '--relative').split('\n');
+    staged = git(
+      'diff',
+      '--cached',
+      '--name-only',
+      '--diff-filter=d',
+      '--relative',
+    ).split('\n');
   } catch (e) {
-    process.stderr.write(`pre-commit: refusing: cannot list the staged files: ${errorText(e)}\n${BYPASS}`);
+    process.stderr.write(
+      `pre-commit: refusing: cannot list the staged files: ${errorText(e)}\n${BYPASS}`,
+    );
     return 1;
   }
   let refused = 0;
@@ -53,7 +62,9 @@ function preCommit() {
     try {
       content = git('show', `:./${file}`);
     } catch (e) {
-      process.stderr.write(`pre-commit: refusing ${file}: cannot read the staged copy: ${errorText(e)}\n${BYPASS}`);
+      process.stderr.write(
+        `pre-commit: refusing ${file}: cannot read the staged copy: ${errorText(e)}\n${BYPASS}`,
+      );
       refused = 1;
       continue;
     }
@@ -78,18 +89,31 @@ function installIfChanged(oldRev, newRev) {
   if (!localMembers(root).length) return 0; // no checkouts here: npm ci / npm install as usual
   // `git diff --quiet` exits 1 when there are differences; anything else is "cannot tell".
   const files = [...manifestPathspecs(root), 'package-lock.json'];
-  const diff = spawnSync('git', ['diff', '--quiet', oldRev, newRev, '--', ...files], {cwd: root, stdio: 'ignore'});
+  const diff = spawnSync(
+    'git',
+    ['diff', '--quiet', oldRev, newRev, '--', ...files],
+    {cwd: root, stdio: 'ignore'},
+  );
   if (diff.status !== 1) return 0;
 
-  process.stderr.write(`[git hook] dependency manifests changed (${oldRev.slice(0, 9)}..${newRev.slice(0, 9)}): npm install\n`);
+  process.stderr.write(
+    `[git hook] dependency manifests changed (${oldRev.slice(0, 9)}..${newRev.slice(0, 9)}): npm install\n`,
+  );
   const start = Date.now();
   const npm = npmCommand(['install', '--no-audit', '--no-fund']);
-  const r = spawnSync(npm.command, npm.args, {cwd: root, stdio: 'inherit', env: npmEnv(), shell: npm.shell});
+  const r = spawnSync(npm.command, npm.args, {
+    cwd: root,
+    stdio: 'inherit',
+    env: npmEnv(),
+    shell: npm.shell,
+  });
   if (r.status !== 0) {
     process.stderr.write('[git hook] npm install FAILED - run it by hand\n');
     return 0;
   }
-  process.stderr.write(`[git hook] npm install done in ${Math.round((Date.now() - start) / 1000)}s\n`);
+  process.stderr.write(
+    `[git hook] npm install done in ${Math.round((Date.now() - start) / 1000)}s\n`,
+  );
   return 0;
 }
 
@@ -139,6 +163,8 @@ let code = 0;
 try {
   code = main(process.argv.slice(2));
 } catch (e) {
-  process.stderr.write(`[git hook] skipped: ${e && e.message ? e.message : e}\n`);
+  process.stderr.write(
+    `[git hook] skipped: ${e && e.message ? e.message : e}\n`,
+  );
 }
 process.exit(code);

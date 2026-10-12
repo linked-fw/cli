@@ -87,7 +87,8 @@ export interface InstalledLinkedPackage {
  * installed for itself. A checkout's own `node_modules` can hold a
  * published copy of a sibling it depends on (npm nests one when the sibling's
  * checkout misses its range); keyed on the name and walked depth-first,
- * reaching that copy first hid the app's checkout of it. The same name can therefore appear more than once, once per copy.
+ * reaching that copy first hid the app's checkout of it. The same name can
+ * therefore appear more than once, once per copy.
  */
 export async function discoverInstalledLinkedPackages(
   cwd: string = process.cwd(),

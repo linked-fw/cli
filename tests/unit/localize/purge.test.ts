@@ -24,7 +24,12 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: 'tests@localize.invalid',
 };
 const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', args, {cwd, encoding: 'utf8', env: gitEnv, stdio: 'pipe'});
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: gitEnv,
+    stdio: 'pipe',
+  });
 
 /** Deps with real git (in `env`) and npm stubbed out. */
 function deps(appRoot: string, env: NodeJS.ProcessEnv = gitEnv) {
@@ -69,7 +74,12 @@ function pushedCheckout(t) {
   return {appRoot, checkout, scratch};
 }
 
-function refuses(appRoot: string, checkout: string, reason: RegExp, d = deps(appRoot)) {
+function refuses(
+  appRoot: string,
+  checkout: string,
+  reason: RegExp,
+  d = deps(appRoot),
+) {
   assert.equal(delocalize(['@x/a'], {purge: true}, d), 6, d.output());
   assert.match(d.output(), /not deleting/);
   assert.match(d.output(), reason);
@@ -87,7 +97,10 @@ test('no .git: refused, and --force deletes', (t) => {
   const {appRoot, checkout} = pushedCheckout(t);
   rm(path.join(checkout, '.git'));
   refuses(appRoot, checkout, /not a git checkout/);
-  assert.equal(delocalize(['@x/a'], {purge: true, force: true}, deps(appRoot)), 0);
+  assert.equal(
+    delocalize(['@x/a'], {purge: true, force: true}, deps(appRoot)),
+    0,
+  );
   assert.equal(fs.existsSync(checkout), false);
 });
 
@@ -95,10 +108,21 @@ test('a git that fails: refused, never read as "nothing unsaved"', (t) => {
   const {appRoot, checkout, scratch} = pushedCheckout(t);
   const bin = path.join(scratch, 'bin');
   fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'git'), '#!/bin/sh\necho "fatal: broken" >&2\nexit 128\n');
+  fs.writeFileSync(
+    path.join(bin, 'git'),
+    '#!/bin/sh\necho "fatal: broken" >&2\nexit 128\n',
+  );
   fs.chmodSync(path.join(bin, 'git'), 0o755);
-  const broken = deps(appRoot, {...gitEnv, PATH: `${bin}${path.delimiter}${process.env.PATH}`});
-  refuses(appRoot, checkout, /`git status --porcelain` failed \(fatal: broken\)/, broken);
+  const broken = deps(appRoot, {
+    ...gitEnv,
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+  });
+  refuses(
+    appRoot,
+    checkout,
+    /`git status --porcelain` failed \(fatal: broken\)/,
+    broken,
+  );
 });
 
 test('uncommitted changes: refused', (t) => {
@@ -128,11 +152,21 @@ test('a commit on a detached HEAD that no remote has: refused', (t) => {
 
 test('a stash: refused, and --force deletes', (t) => {
   const {appRoot, checkout} = pushedCheckout(t);
-  fs.writeFileSync(path.join(checkout, 'package.json'), '{"name": "@x/a", "version": "1.0.1"}');
+  fs.writeFileSync(
+    path.join(checkout, 'package.json'),
+    '{"name": "@x/a", "version": "1.0.1"}',
+  );
   git(checkout, 'stash', '-q');
   refuses(appRoot, checkout, /1 stash entry/);
   const d = deps(appRoot);
-  assert.equal(delocalize(['@x/a'], {purge: true, force: true}, d), 0, d.output());
-  assert.match(d.output(), /--force: deleting packages-local\/x-a although it has 1 stash entry/);
+  assert.equal(
+    delocalize(['@x/a'], {purge: true, force: true}, d),
+    0,
+    d.output(),
+  );
+  assert.match(
+    d.output(),
+    /--force: deleting packages-local\/x-a although it has 1 stash entry/,
+  );
   assert.equal(fs.existsSync(checkout), false);
 });

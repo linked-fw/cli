@@ -172,7 +172,9 @@ export const buildViteApp = async (
     ? releaseBaseURL(store.accessURL, identity.releasePrefix)
     : '';
   if (baseURL) {
-    console.log(`✅ Release ${identity.releaseId} will be served from ${baseURL}`);
+    console.log(
+      `✅ Release ${identity.releaseId} will be served from ${baseURL}`,
+    );
   }
 
   // The client and backend must both finish before release files are described

@@ -10,8 +10,8 @@
  *   checkout.
  *
  * Each is a few lines of `sh` (from `hooks/hook-shim.cjs`) that hand over to
- * `hooks/git-hook.cjs` in the installed cli. The app may sit below the git top level, so the hook records
- * the app's path inside the repository (`git rev-parse --show-prefix`) and
+ * `hooks/git-hook.cjs` in the installed cli. The app may sit below the git
+ * top level, so the hook records the app's path inside the repository (`git rev-parse --show-prefix`) and
  * `cd`s there from the top level when it runs: moving the clone or
  * reinstalling the cli needs no rewrite, and a work tree without the cli (not
  * installed yet) skips the hook rather than blocking git. git starts a hook at

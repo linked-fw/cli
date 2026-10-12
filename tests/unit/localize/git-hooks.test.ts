@@ -40,13 +40,19 @@ const hooksDir = (root) => path.join(root, '.git', 'hooks');
 test('writes post-merge, post-checkout and pre-commit, executable and marked', (t) => {
   const root = repo(t);
   const {written, skipped} = installGitHooks(root);
-  assert.deepEqual(written, GIT_HOOKS.map((h) => path.join(hooksDir(root), h)));
+  assert.deepEqual(
+    written,
+    GIT_HOOKS.map((h) => path.join(hooksDir(root), h)),
+  );
   assert.deepEqual(skipped, []);
   for (const file of written) {
     const text = fs.readFileSync(file, 'utf8');
     assert.ok(text.startsWith(`#!/bin/sh\n${HOOK_MARKER}\n`), text);
     assert.match(text, new RegExp(`"\\$script" ${path.basename(file)} "\\$@"`));
-    assert.ok(!text.includes(root), 'the path is resolved when the hook runs, not baked in');
+    assert.ok(
+      !text.includes(root),
+      'the path is resolved when the hook runs, not baked in',
+    );
     assert.equal(fs.statSync(file).mode & 0o111, 0o111);
     assert.equal(spawnSync('sh', ['-n', file]).status, 0);
   }
@@ -62,8 +68,14 @@ test('a hook it did not write is skipped and reported; its own are rewritten', (
 
   const first = installGitHooks(root);
   assert.deepEqual(first.skipped, [foreign]);
-  assert.deepEqual(first.written.map((f) => path.basename(f)), ['post-merge', 'post-checkout']);
-  assert.equal(fs.readFileSync(foreign, 'utf8'), '#!/bin/sh\nnpx lint-staged\n');
+  assert.deepEqual(
+    first.written.map((f) => path.basename(f)),
+    ['post-merge', 'post-checkout'],
+  );
+  assert.equal(
+    fs.readFileSync(foreign, 'utf8'),
+    '#!/bin/sh\nnpx lint-staged\n',
+  );
   assert.ok(!fs.readFileSync(ours, 'utf8').includes('older version'));
 
   const second = installGitHooks(root);
@@ -80,7 +92,14 @@ test('the hook runs git-hook.cjs from the top level, wherever git runs it from',
   let r = spawnSync('sh', [preCommit], {cwd: sub, encoding: 'utf8'});
   assert.equal(r.status, 0, r.stderr);
 
-  const script = path.join(root, 'node_modules', '@_linked', 'cli', 'hooks', 'git-hook.cjs');
+  const script = path.join(
+    root,
+    'node_modules',
+    '@_linked',
+    'cli',
+    'hooks',
+    'git-hook.cjs',
+  );
   fs.mkdirSync(path.dirname(script), {recursive: true});
   fs.writeFileSync(
     script,
@@ -88,23 +107,39 @@ test('the hook runs git-hook.cjs from the top level, wherever git runs it from',
   );
   r = spawnSync('sh', [preCommit, 'x', 'y z'], {cwd: sub, encoding: 'utf8'});
   assert.equal(r.status, 3, 'the hook exits with git-hook.cjs');
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'args.json'), 'utf8')), [
-    'pre-commit',
-    'x',
-    'y z',
-  ]);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(root, 'args.json'), 'utf8')),
+    ['pre-commit', 'x', 'y z'],
+  );
 });
 
 test('a linked work tree gets them where git looks for them', (t) => {
   const root = repo(t);
-  git(root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+  git(
+    root,
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    'commit',
+    '-q',
+    '--allow-empty',
+    '-m',
+    'init',
+  );
   const wt = path.join(tmpdir('localize-git-wt-'), 'wt');
   t.after(() => rm(path.dirname(wt)));
   git(root, 'worktree', 'add', '-q', wt);
 
   const {written} = installGitHooks(wt);
-  const expected = path.resolve(wt, git(wt, 'rev-parse', '--git-path', 'hooks'));
-  assert.deepEqual(written.map((f) => path.dirname(f)), [expected, expected, expected]);
+  const expected = path.resolve(
+    wt,
+    git(wt, 'rev-parse', '--git-path', 'hooks'),
+  );
+  assert.deepEqual(
+    written.map((f) => path.dirname(f)),
+    [expected, expected, expected],
+  );
 });
 
 test('outside a git work tree nothing is written', (t) => {
@@ -134,7 +169,14 @@ const commitEnv = ['-c', 'user.name=t', '-c', 'user.email=t@t'];
  */
 function fakeGitHook(appDir: string): string {
   const record = path.join(appDir, 'hook-ran.json');
-  const script = path.join(appDir, 'node_modules', '@_linked', 'cli', 'hooks', 'git-hook.cjs');
+  const script = path.join(
+    appDir,
+    'node_modules',
+    '@_linked',
+    'cli',
+    'hooks',
+    'git-hook.cjs',
+  );
   fs.mkdirSync(path.dirname(script), {recursive: true});
   fs.writeFileSync(
     script,
@@ -154,7 +196,7 @@ function fakeGitHook(appDir: string): string {
 /** A repository whose app sits two directories down, in a path with spaces and a quote. */
 function repoWithSubdirApp(t) {
   const root = repo(t);
-  const app = path.join(root, "my apps", "it's web");
+  const app = path.join(root, 'my apps', "it's web");
   fs.mkdirSync(app, {recursive: true});
   fs.writeFileSync(path.join(app, 'package.json'), '{"name": "web"}\n');
   git(root, 'add', '-A');
@@ -162,7 +204,7 @@ function repoWithSubdirApp(t) {
   return {root, app};
 }
 
-test('an app below the top level: the hook cds there, with git\'s relative GIT_DIR made absolute', (t) => {
+test("an app below the top level: the hook cds there, with git's relative GIT_DIR made absolute", (t) => {
   const {root, app} = repoWithSubdirApp(t);
   const {written} = installGitHooks(app);
   assert.equal(written.length, 3);
@@ -182,7 +224,11 @@ test('an app below the top level: the hook cds there, with git\'s relative GIT_D
   assert.deepEqual(ran.args, ['post-checkout', 'a', 'b c']);
   assert.equal(ran.GIT_DIR, path.join(root, '.git'));
   assert.equal(ran.GIT_INDEX_FILE, path.join(root, '.git/index'));
-  assert.equal(fs.realpathSync(ran.top), root, 'git works from the app directory');
+  assert.equal(
+    fs.realpathSync(ran.top),
+    root,
+    'git works from the app directory',
+  );
 
   // And as git really runs it, on a branch switch.
   fs.rmSync(record);
@@ -199,9 +245,15 @@ test('core.hooksPath set: nothing is written, and localize prints the line for e
   const result = installGitHooks(app);
 
   assert.deepEqual(result.written, []);
-  assert.equal(fs.existsSync(path.join(root, '.husky')), false, 'nothing written there');
   assert.equal(
-    fs.readdirSync(hooksDir(root)).some((f) => (GIT_HOOKS as readonly string[]).includes(f)),
+    fs.existsSync(path.join(root, '.husky')),
+    false,
+    'nothing written there',
+  );
+  assert.equal(
+    fs
+      .readdirSync(hooksDir(root))
+      .some((f) => (GIT_HOOKS as readonly string[]).includes(f)),
     false,
     'nor in .git/hooks',
   );
@@ -213,13 +265,21 @@ test('core.hooksPath set: nothing is written, and localize prints the line for e
   // A husky hook file runs the line with sh from the top level; it reaches the app.
   const record = fakeGitHook(app);
   const pre = result.manual[2];
-  const r = spawnSync('sh', ['-e', '-c', `${pre.line}\necho after`, 'hook', 'x'], {
-    cwd: root,
-    encoding: 'utf8',
-    env: {...process.env, GIT_INDEX_FILE: '.git/index'},
-  });
+  const r = spawnSync(
+    'sh',
+    ['-e', '-c', `${pre.line}\necho after`, 'hook', 'x'],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      env: {...process.env, GIT_INDEX_FILE: '.git/index'},
+    },
+  );
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, 'after\n', 'the line leaves the rest of the hook file alone');
+  assert.equal(
+    r.stdout,
+    'after\n',
+    'the line leaves the rest of the hook file alone',
+  );
   const ran = JSON.parse(fs.readFileSync(record, 'utf8'));
   assert.equal(fs.realpathSync(ran.cwd), app);
   assert.deepEqual(ran.args, ['pre-commit', 'x']);
@@ -227,10 +287,18 @@ test('core.hooksPath set: nothing is written, and localize prints the line for e
 
   // localize prints the three lines and writes nothing.
   const deps = stubbed(app);
-  installAndBuild([{name: 'x', dir: 'packages-local/x', build: false}], {}, deps);
+  installAndBuild(
+    [{name: 'x', dir: 'packages-local/x', build: false}],
+    {},
+    deps,
+  );
   const out = deps.output();
-  assert.match(out, /core\.hooksPath is set \(\.husky\/_\), so no git hooks were written/);
-  for (const m of result.manual) assert.ok(out.includes(`  ${m.file}:\n    ${m.line}`), out);
+  assert.match(
+    out,
+    /core\.hooksPath is set \(\.husky\/_\), so no git hooks were written/,
+  );
+  for (const m of result.manual)
+    assert.ok(out.includes(`  ${m.file}:\n    ${m.line}`), out);
 });
 
 test('in a linked worktree localize warns once that the hooks are shared', (t) => {
@@ -244,7 +312,11 @@ test('in a linked worktree localize warns once that the hooks are shared', (t) =
   assert.equal(installGitHooks(root).sharedWithWorktrees, false);
 
   const deps = stubbed(wt);
-  installAndBuild([{name: 'x', dir: 'packages-local/x', build: false}], {}, deps);
+  installAndBuild(
+    [{name: 'x', dir: 'packages-local/x', build: false}],
+    {},
+    deps,
+  );
   const warnings = deps.warns.filter((w) => /linked worktree/.test(w));
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /shared by every worktree/);

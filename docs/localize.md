@@ -98,10 +98,10 @@ exactly as npm names them (`@_linked/rdfs`, `lodash`); there are no short names.
 act on the app root, the same one `build-all` uses: the nearest directory above (or at) the
 current one whose `package.json` has `workspaces`, then each higher one with `workspaces` whose
 globs match it (close to how npm finds it: `*` and `?` within a segment, `**` across depth, no dot
-directories, and a `!` negation excludes wherever it stands -- npm's re-inclusion by a later glob and
-`{a,b}` braces are not supported). The first ancestor whose globs do not match ends the climb. Of that chain the
-topmost one that is not itself a linked package wins. So running them inside `packages/foo` sets up
-and installs the app, not the member, while a git worktree nested in the app
+directories, and a `!` negation excludes wherever it stands -- npm's re-inclusion by a later glob
+and `{a,b}` braces are not supported). The first ancestor whose globs do not match ends the climb.
+Of that chain the topmost one that is not itself a linked package wins. So running them inside
+`packages/foo` sets up and installs the app, not the member, while a git worktree nested in the app
 (`<app>/.claude/worktrees/<wt>`, which no app glob matches) is its own app: a command run there
 never touches the main checkout. An app with no `workspaces` yet is the current directory (the
 set-up adds them).
@@ -407,8 +407,9 @@ ours, lock-at-rest prints, once per install that changed the tree (with the drif
 That run (it names a checkout that has a `.git`, or says `<any checkout's name>` when none has;
 `--build ''` builds nothing) writes the hooks and runs one `npm install`. When the hooks directory
 has a `pre-commit` that is not ours, `--adopt` would leave it alone, so the notice names that file
-and prints the one line to add to it instead (an `sh` line, for an `sh` hook); once the file runs `hooks/git-hook.cjs`, the notice
-stops. Under `core.hooksPath` the notice stays quiet: add the lines localize prints there.
+and prints the one line to add to it instead (an `sh` line, for an `sh` hook); once the file runs
+`hooks/git-hook.cjs`, the notice stops. Under `core.hooksPath` the notice stays quiet: add the
+lines localize prints there.
 
 ## `npm ci` with checkouts present fails
 
@@ -540,4 +541,5 @@ const code = localize(['@scope/thing'], {build: 'npm run build'}, deps);
 `localize`, `adopt`, `localizeParked`, `delocalize` and `list` are synchronous and return an exit
 code from the table above. Each takes `deps` — `{appRoot, run, log, warn, error}` — so you can
 point it at another directory or capture its output; `defaultDeps()` builds the usual one.
-`driftProblems(appRoot)` and `describeDrift(d)` give the drift report as data.
+`driftProblems(appRoot)` and `describeDrift(d)` give the drift report as data, and
+`satisfies(version, range)` is its range check (`null` when it cannot tell).

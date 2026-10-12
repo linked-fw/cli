@@ -8,9 +8,13 @@ import path from 'node:path';
 
 import {makeConsumer, rm, test} from './helpers.js';
 
-const {manifestPathspecs, expandGlobs, globsMatch, trackedGlobs, LEAK} = require(
-  path.resolve(__dirname, '../../../hooks/manifests.cjs'),
-);
+const {
+  manifestPathspecs,
+  expandGlobs,
+  globsMatch,
+  trackedGlobs,
+  LEAK,
+} = require(path.resolve(__dirname, '../../../hooks/manifests.cjs'));
 
 const consumer = (t, pkg = {}) => {
   const root = makeConsumer({pkg});
@@ -19,7 +23,9 @@ const consumer = (t, pkg = {}) => {
 };
 
 test('an array of workspaces: every glob but packages-local/*', (t) => {
-  const appRoot = consumer(t, {workspaces: ['packages/*', 'apps/*', 'packages-local/*']});
+  const appRoot = consumer(t, {
+    workspaces: ['packages/*', 'apps/*', 'packages-local/*'],
+  });
   assert.deepEqual(manifestPathspecs(appRoot), [
     'package.json',
     'packages/*/package.json',
@@ -29,7 +35,15 @@ test('an array of workspaces: every glob but packages-local/*', (t) => {
 
 test('the {packages: [...]} form, ./ prefixes, trailing slashes and negations', (t) => {
   const appRoot = consumer(t, {
-    workspaces: {packages: ['./packages/*', 'tools/cli/', '!packages/skip', 'packages-local/**', 'apps/*']},
+    workspaces: {
+      packages: [
+        './packages/*',
+        'tools/cli/',
+        '!packages/skip',
+        'packages-local/**',
+        'apps/*',
+      ],
+    },
   });
   assert.deepEqual(manifestPathspecs(appRoot), [
     'package.json',
@@ -49,12 +63,27 @@ test('no workspaces, or no package.json, is the root manifest alone', (t) => {
 
 test('globs expand to directories with a package.json, per glob, sorted', (t) => {
   const appRoot = consumer(t);
-  for (const dir of ['apps/b', 'apps/a', 'apps/no-manifest', 'packages/x', 'packages/x/nested/deep', 'apps/.hidden']) {
+  for (const dir of [
+    'apps/b',
+    'apps/a',
+    'apps/no-manifest',
+    'packages/x',
+    'packages/x/nested/deep',
+    'apps/.hidden',
+  ]) {
     fs.mkdirSync(path.join(appRoot, dir), {recursive: true});
-    if (!dir.endsWith('no-manifest')) fs.writeFileSync(path.join(appRoot, dir, 'package.json'), '{}');
+    if (!dir.endsWith('no-manifest'))
+      fs.writeFileSync(path.join(appRoot, dir, 'package.json'), '{}');
   }
-  assert.deepEqual(expandGlobs(appRoot, ['packages/*', 'apps/*']), ['packages/x', 'apps/a', 'apps/b']);
-  assert.deepEqual(expandGlobs(appRoot, ['packages/**']), ['packages/x', 'packages/x/nested/deep']);
+  assert.deepEqual(expandGlobs(appRoot, ['packages/*', 'apps/*']), [
+    'packages/x',
+    'apps/a',
+    'apps/b',
+  ]);
+  assert.deepEqual(expandGlobs(appRoot, ['packages/**']), [
+    'packages/x',
+    'packages/x/nested/deep',
+  ]);
   assert.deepEqual(expandGlobs(appRoot, ['missing/*']), []);
 });
 
@@ -78,5 +107,9 @@ test('globsMatch: a directory the globs would find, as expandGlobs walks them', 
     '',
   ])
     assert.equal(globsMatch(globs, rel), false, rel);
-  assert.equal(globsMatch(['.claude/worktrees/*'], '.claude/worktrees/wt'), true, 'named literally');
+  assert.equal(
+    globsMatch(['.claude/worktrees/*'], '.claude/worktrees/wt'),
+    true,
+    'named literally',
+  );
 });

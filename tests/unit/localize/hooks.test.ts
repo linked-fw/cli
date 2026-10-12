@@ -24,15 +24,24 @@ function baseEnv(extra = {}) {
     if (/^npm_/i.test(k) || /^GIT_/.test(k)) continue;
     env[k] = v;
   }
-  return {...env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', ...extra};
+  return {
+    ...env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    ...extra,
+  };
 }
 
 function git(cwd, ...args) {
-  const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
-    cwd,
-    encoding: 'utf8',
-    env: baseEnv(),
-  });
+  const r = spawnSync(
+    'git',
+    ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args],
+    {
+      cwd,
+      encoding: 'utf8',
+      env: baseEnv(),
+    },
+  );
   assert.equal(r.status, 0, r.stderr);
   return r.stdout.trim();
 }
@@ -57,7 +66,10 @@ const LEAKED_NO_GLOB = {
   },
 };
 // What `npm update` might write: a registry lockfile, different from the committed one.
-const UPDATED = {...LOCK, packages: {'': {name: 'app'}, 'node_modules/left': {version: '1.1.0'}}};
+const UPDATED = {
+  ...LOCK,
+  packages: {'': {name: 'app'}, 'node_modules/left': {version: '1.1.0'}},
+};
 const json = (v) => JSON.stringify(v, null, 2) + '\n';
 const read = (file) => fs.readFileSync(file, 'utf8');
 
@@ -65,15 +77,24 @@ const read = (file) => fs.readFileSync(file, 'utf8');
  * A committed app: package.json, package-lock.json, .gitignore for the checkouts. `sub` puts it in
  * a subdirectory of the repository; `files` adds committed files (app-relative).
  */
-function app(t, {workspaces = ['packages-local/*'], sub = '', files = {}} = {}) {
+function app(
+  t,
+  {workspaces = ['packages-local/*'], sub = '', files = {}} = {},
+) {
   const repo = tmpdir('localize-hooks-');
   t.after(() => rm(repo));
   const root = path.join(repo, sub);
   git(repo, 'init', '-q', '-b', 'main');
   fs.mkdirSync(root, {recursive: true});
-  fs.writeFileSync(path.join(root, 'package.json'), json({name: 'app', workspaces}));
+  fs.writeFileSync(
+    path.join(root, 'package.json'),
+    json({name: 'app', workspaces}),
+  );
   fs.writeFileSync(path.join(root, 'package-lock.json'), json(LOCK));
-  fs.writeFileSync(path.join(root, '.gitignore'), 'packages-local/\nnpm-calls\nnode_modules/\n.fake-bin/\n');
+  fs.writeFileSync(
+    path.join(root, '.gitignore'),
+    'packages-local/\nnpm-calls\nnode_modules/\n.fake-bin/\n',
+  );
   for (const [file, content] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(root, file)), {recursive: true});
     fs.writeFileSync(path.join(root, file), content);
@@ -87,9 +108,13 @@ function app(t, {workspaces = ['packages-local/*'], sub = '', files = {}} = {}) 
 function member(root, dir = 'a', name = '@x/a', {git: dotGit = 'dir'} = {}) {
   const d = path.join(root, 'packages-local', dir);
   fs.mkdirSync(d, {recursive: true});
-  fs.writeFileSync(path.join(d, 'package.json'), json({name, version: '1.0.0'}));
+  fs.writeFileSync(
+    path.join(d, 'package.json'),
+    json({name, version: '1.0.0'}),
+  );
   if (dotGit === 'dir') fs.mkdirSync(path.join(d, '.git'));
-  else if (dotGit === 'file') fs.writeFileSync(path.join(d, '.git'), 'gitdir: ../../.git/worktrees/x\n');
+  else if (dotGit === 'file')
+    fs.writeFileSync(path.join(d, '.git'), 'gitdir: ../../.git/worktrees/x\n');
 }
 
 /** A `npm` on the PATH that records its arguments in `<root>/npm-calls` and exits `status`. */
@@ -97,20 +122,30 @@ function fakeNpm(root, status = 0) {
   const bin = path.join(root, '.fake-bin');
   fs.mkdirSync(bin, {recursive: true});
   const npm = path.join(bin, 'npm');
-  fs.writeFileSync(npm, `#!/bin/sh\necho "$*" >> "${path.join(root, 'npm-calls')}"\nexit ${status}\n`);
+  fs.writeFileSync(
+    npm,
+    `#!/bin/sh\necho "$*" >> "${path.join(root, 'npm-calls')}"\nexit ${status}\n`,
+  );
   fs.chmodSync(npm, 0o755);
   return `${bin}${path.delimiter}${process.env.PATH}`;
 }
 const npmCalls = (root) => {
   try {
-    return fs.readFileSync(path.join(root, 'npm-calls'), 'utf8').trim().split('\n');
+    return fs
+      .readFileSync(path.join(root, 'npm-calls'), 'utf8')
+      .trim()
+      .split('\n');
   } catch {
     return [];
   }
 };
 
 function node(script, args, cwd, env = baseEnv()) {
-  return spawnSync(process.execPath, [script, ...args], {cwd, encoding: 'utf8', env});
+  return spawnSync(process.execPath, [script, ...args], {
+    cwd,
+    encoding: 'utf8',
+    env,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +177,11 @@ test('lock-at-rest: a changed package.json leaves the lockfile and says how to c
   member(root);
   fs.writeFileSync(
     path.join(root, 'package.json'),
-    json({name: 'app', workspaces: ['packages-local/*'], dependencies: {left: '^1.0.0'}}),
+    json({
+      name: 'app',
+      workspaces: ['packages-local/*'],
+      dependencies: {left: '^1.0.0'},
+    }),
   );
   fs.writeFileSync(path.join(root, 'package-lock.json'), json(LEAKED));
   const r = node(LOCK_AT_REST, [], root);
@@ -157,7 +196,12 @@ test('lock-at-rest: not a git repository, or no git at all, is exit 0 with nothi
   t.after(() => rm(dir));
   member(dir);
   fs.writeFileSync(path.join(dir, 'package-lock.json'), json(LEAKED));
-  let r = node(LOCK_AT_REST, [], dir, baseEnv({GIT_CEILING_DIRECTORIES: path.dirname(dir)}));
+  let r = node(
+    LOCK_AT_REST,
+    [],
+    dir,
+    baseEnv({GIT_CEILING_DIRECTORIES: path.dirname(dir)}),
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '');
 
@@ -202,7 +246,10 @@ test('lock-at-rest: a changed manifest in any workspace folder leaves the lockfi
     files: {'apps/x/package.json': json({name: 'x'})},
   });
   member(root);
-  fs.writeFileSync(path.join(root, 'apps/x/package.json'), json({name: 'x', dependencies: {left: '^1.0.0'}}));
+  fs.writeFileSync(
+    path.join(root, 'apps/x/package.json'),
+    json({name: 'x', dependencies: {left: '^1.0.0'}}),
+  );
   fs.writeFileSync(path.join(root, 'package-lock.json'), json(LEAKED));
   const r = node(LOCK_AT_REST, [], root);
   assert.equal(r.status, 0, r.stderr);
@@ -288,7 +335,6 @@ test('lock-at-rest: a clone with checkouts but no git hooks is told how to insta
   assert.equal(r.stderr.match(new RegExp(HOOKS_NOTICE.source, 'g'))?.length, 1);
   r = node(LOCK_AT_REST, [], root); // `dependencies` after `postinstall`
   assert.equal(r.stderr, '', 'not again for the same install');
-
 });
 
 test('lock-at-rest: the hooks notice names a checkout that is a git checkout, else any', (t) => {
@@ -297,12 +343,18 @@ test('lock-at-rest: the hooks notice names a checkout that is a git checkout, el
   member(root, 'b', '@x/b', {git: 'file'});
   installedTree(root);
   let r = node(LOCK_AT_REST, [], root);
-  assert.match(r.stderr, /run `npx linked localize @x\/b --adopt --build ''` once/);
+  assert.match(
+    r.stderr,
+    /run `npx linked localize @x\/b --adopt --build ''` once/,
+  );
 
   fs.rmSync(path.join(root, 'packages-local', 'b', '.git'));
   installedTree(root, {'node_modules/left': {version: '1.0.0'}});
   r = node(LOCK_AT_REST, [], root);
-  assert.match(r.stderr, /run `npx linked localize <any checkout's name> --adopt --build ''` once/);
+  assert.match(
+    r.stderr,
+    /run `npx linked localize <any checkout's name> --adopt --build ''` once/,
+  );
 });
 
 test('lock-at-rest: a pre-commit that is not ours is named, with the line to add, until it has it', (t) => {
@@ -314,7 +366,10 @@ test('lock-at-rest: a pre-commit that is not ours is named, with the line to add
   let r = node(LOCK_AT_REST, [], root);
   assert.equal(r.status, 0, r.stderr);
   const line = hookLine('pre-commit', 'web/');
-  assert.match(r.stderr, /\[lock-at-rest\] \.\.\/\.git\/hooks\/pre-commit is not ours/);
+  assert.match(
+    r.stderr,
+    /\[lock-at-rest\] \.\.\/\.git\/hooks\/pre-commit is not ours/,
+  );
   assert.ok(r.stderr.includes(`\n[lock-at-rest]   ${line}\n`), r.stderr);
   assert.doesNotMatch(r.stderr, /--adopt|git hooks are not installed/);
 
@@ -327,13 +382,24 @@ test('lock-at-rest: a pre-commit that is not ours is named, with the line to add
 
 test('a hand-added hook line refuses the commit even when it is not the last line', (t) => {
   const root = app(t);
-  const stub = path.join(root, 'node_modules', '@_linked', 'cli', 'hooks', 'git-hook.cjs');
+  const stub = path.join(
+    root,
+    'node_modules',
+    '@_linked',
+    'cli',
+    'hooks',
+    'git-hook.cjs',
+  );
   fs.mkdirSync(path.dirname(stub), {recursive: true});
   const hook = path.join(root, 'hand-hook');
   fs.writeFileSync(hook, `#!/bin/sh\n${hookLine('pre-commit')}\necho other\n`);
-  const run = () => spawnSync('sh', [hook], {cwd: root, encoding: 'utf8', env: baseEnv()});
+  const run = () =>
+    spawnSync('sh', [hook], {cwd: root, encoding: 'utf8', env: baseEnv()});
 
-  fs.writeFileSync(stub, "process.stderr.write('refused\\n'); process.exit(1);\n");
+  fs.writeFileSync(
+    stub,
+    "process.stderr.write('refused\\n'); process.exit(1);\n",
+  );
   let r = run();
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /refused/);
@@ -354,7 +420,9 @@ test('a hand-added hook line refuses the commit even when it is not the last lin
 
 test('lock-at-rest: checkouts left in packages-local/.setup-aside are pointed out on every install', (t) => {
   const root = app(t);
-  fs.mkdirSync(path.join(root, 'packages-local', '.setup-aside', 'a'), {recursive: true});
+  fs.mkdirSync(path.join(root, 'packages-local', '.setup-aside', 'a'), {
+    recursive: true,
+  });
   const ASIDE =
     /checkouts are set aside in packages-local\/\.setup-aside\/ \(an interrupted set-up\): `npx linked localize --list` moves them back/;
   for (let i = 0; i < 2; i++) {
@@ -362,7 +430,9 @@ test('lock-at-rest: checkouts left in packages-local/.setup-aside are pointed ou
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stderr, ASIDE);
   }
-  fs.rmSync(path.join(root, 'packages-local', '.setup-aside'), {recursive: true});
+  fs.rmSync(path.join(root, 'packages-local', '.setup-aside'), {
+    recursive: true,
+  });
   assert.equal(node(LOCK_AT_REST, [], root).stderr, '');
 });
 
@@ -372,7 +442,10 @@ test('lock-at-rest: no hooks notice once localize wrote the hooks, or under core
   installedTree(withHooks);
   // As localize writes them, without the developer's git config (a global core.hooksPath).
   const saved = {...process.env};
-  Object.assign(process.env, {GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1'});
+  Object.assign(process.env, {
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+  });
   let installed;
   try {
     installed = installGitHooks(withHooks);
@@ -411,7 +484,8 @@ test('lock-at-rest: the guarded command is a silent no-op without the cli, and r
   git(root, 'commit', '-q', '-m', 'setup');
   fs.writeFileSync(path.join(root, 'package-lock.json'), json(LEAKED));
 
-  const sh = (cmd) => spawnSync('sh', ['-c', cmd], {cwd: root, encoding: 'utf8', env: baseEnv()});
+  const sh = (cmd) =>
+    spawnSync('sh', ['-c', cmd], {cwd: root, encoding: 'utf8', env: baseEnv()});
   let r = sh(scripts.postinstall);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout + r.stderr, '');
@@ -453,7 +527,9 @@ test('pre-commit refuses when it cannot read a staged manifest', (t) => {
   fs.writeFileSync(path.join(root, 'package-lock.json'), json(UPDATED));
   git(root, 'add', 'package-lock.json');
   // A git that lists the index but fails to show a file from it.
-  const realGit = spawnSync('sh', ['-c', 'command -v git'], {encoding: 'utf8'}).stdout.trim();
+  const realGit = spawnSync('sh', ['-c', 'command -v git'], {
+    encoding: 'utf8',
+  }).stdout.trim();
   const bin = path.join(root, '.fake-bin');
   fs.mkdirSync(bin, {recursive: true});
   fs.writeFileSync(
@@ -461,9 +537,17 @@ test('pre-commit refuses when it cannot read a staged manifest', (t) => {
     `#!/bin/sh\nif [ "$1" = show ]; then echo "fatal: unable to read blob" >&2; exit 128; fi\nexec "${realGit}" "$@"\n`,
   );
   fs.chmodSync(path.join(bin, 'git'), 0o755);
-  const r = node(GIT_HOOK, ['pre-commit'], root, baseEnv({PATH: `${bin}${path.delimiter}${process.env.PATH}`}));
+  const r = node(
+    GIT_HOOK,
+    ['pre-commit'],
+    root,
+    baseEnv({PATH: `${bin}${path.delimiter}${process.env.PATH}`}),
+  );
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /refusing package-lock\.json: cannot read the staged copy: fatal: unable to read blob/);
+  assert.match(
+    r.stderr,
+    /refusing package-lock\.json: cannot read the staged copy: fatal: unable to read blob/,
+  );
   assert.match(r.stderr, /--no-verify/);
 });
 
@@ -475,7 +559,7 @@ test('pre-commit lets a staged deletion of the lockfile through', (t) => {
   assert.equal(r.stderr, '');
 });
 
-test('pre-commit in an app below the git top level reads the app\'s manifests', (t) => {
+test("pre-commit in an app below the git top level reads the app's manifests", (t) => {
   const root = app(t, {sub: 'web/app'});
   fs.writeFileSync(path.join(root, 'package-lock.json'), json(LEAKED_NO_GLOB));
   git(root, 'add', 'package-lock.json');
@@ -487,11 +571,16 @@ test('pre-commit in an app below the git top level reads the app\'s manifests', 
 test('pre-commit refuses a leaked lockfile over a megabyte', (t) => {
   const root = app(t);
   const filler = Object.fromEntries(
-    Array.from({length: 20000}, (_, i) => [`node_modules/pad-${i}`, {version: '1.0.0', resolved: 'x'.repeat(40)}]),
+    Array.from({length: 20000}, (_, i) => [
+      `node_modules/pad-${i}`,
+      {version: '1.0.0', resolved: 'x'.repeat(40)},
+    ]),
   );
   const big = {...LEAKED, packages: {...LEAKED.packages, ...filler}};
   fs.writeFileSync(path.join(root, 'package-lock.json'), json(big));
-  assert.ok(fs.statSync(path.join(root, 'package-lock.json')).size > 1024 * 1024);
+  assert.ok(
+    fs.statSync(path.join(root, 'package-lock.json')).size > 1024 * 1024,
+  );
   git(root, 'add', 'package-lock.json');
   const r = node(GIT_HOOK, ['pre-commit'], root);
   assert.equal(r.status, 1, r.stderr);
@@ -512,7 +601,12 @@ test('pre-commit lets the glob itself through', (t) => {
   const root = app(t);
   fs.writeFileSync(
     path.join(root, 'package-lock.json'),
-    json({...LOCK, packages: {'': {name: 'app', workspaces: ['packages/*', 'packages-local/*']}}}),
+    json({
+      ...LOCK,
+      packages: {
+        '': {name: 'app', workspaces: ['packages/*', 'packages-local/*']},
+      },
+    }),
   );
   git(root, 'add', 'package-lock.json');
   const r = node(GIT_HOOK, ['pre-commit'], root);
@@ -525,7 +619,12 @@ test('pre-commit lets the glob itself through', (t) => {
 test('post-checkout of files ($3 = 0) does nothing: no git, no npm', (t) => {
   const root = app(t);
   const head = git(root, 'rev-parse', 'HEAD');
-  const r = node(GIT_HOOK, ['post-checkout', head, head, '0'], root, baseEnv({PATH: '/nonexistent'}));
+  const r = node(
+    GIT_HOOK,
+    ['post-checkout', head, head, '0'],
+    root,
+    baseEnv({PATH: '/nonexistent'}),
+  );
   assert.equal(r.status, 0);
   assert.equal(r.stderr, '');
   assert.equal(r.stdout, '');
@@ -546,22 +645,44 @@ test('post-checkout of a branch installs when the manifests changed, and only th
   const root = app(t, {workspaces: ['packages/*', 'packages-local/*']});
   member(root);
   const PATH = fakeNpm(root);
-  const deps = twoCommits(root, 'packages/site/package.json', json({name: 'site'}));
-  let r = node(GIT_HOOK, ['post-checkout', deps.old, deps.new, '1'], root, baseEnv({PATH}));
+  const deps = twoCommits(
+    root,
+    'packages/site/package.json',
+    json({name: 'site'}),
+  );
+  let r = node(
+    GIT_HOOK,
+    ['post-checkout', deps.old, deps.new, '1'],
+    root,
+    baseEnv({PATH}),
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(npmCalls(root), ['install --no-audit --no-fund']);
 
   const other = twoCommits(root, 'README.md', 'docs only\n', 'docs');
-  r = node(GIT_HOOK, ['post-checkout', other.old, other.new, '1'], root, baseEnv({PATH}));
+  r = node(
+    GIT_HOOK,
+    ['post-checkout', other.old, other.new, '1'],
+    root,
+    baseEnv({PATH}),
+  );
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(npmCalls(root).length, 1, 'no install for a change outside the manifests');
+  assert.equal(
+    npmCalls(root).length,
+    1,
+    'no install for a change outside the manifests',
+  );
 });
 
 test('post-merge compares ORIG_HEAD with HEAD, and a failed install never fails git', (t) => {
   const root = app(t);
   member(root);
   const PATH = fakeNpm(root, 1);
-  twoCommits(root, 'package-lock.json', json({...LOCK, packages: {'': {name: 'app', version: '2.0.0'}}}));
+  twoCommits(
+    root,
+    'package-lock.json',
+    json({...LOCK, packages: {'': {name: 'app', version: '2.0.0'}}}),
+  );
   git(root, 'checkout', '-q', 'main');
   git(root, 'merge', '-q', '--ff-only', 'side');
   const r = node(GIT_HOOK, ['post-merge', '0'], root, baseEnv({PATH}));
@@ -583,18 +704,41 @@ test('post-merge in a work tree without checkouts runs no npm', (t) => {
 });
 
 test('post-checkout watches every workspace folder of an app below the git top level', (t) => {
-  const root = app(t, {sub: 'web/app', workspaces: ['apps/*', 'packages-local/*']});
+  const root = app(t, {
+    sub: 'web/app',
+    workspaces: ['apps/*', 'packages-local/*'],
+  });
   member(root);
   const PATH = fakeNpm(root);
   const repo = path.dirname(path.dirname(root));
   // Outside the app: not its dependencies.
-  const outside = twoCommits(repo, 'package.json', json({name: 'repo-root'}), 'outside');
-  let r = node(GIT_HOOK, ['post-checkout', outside.old, outside.new, '1'], root, baseEnv({PATH}));
+  const outside = twoCommits(
+    repo,
+    'package.json',
+    json({name: 'repo-root'}),
+    'outside',
+  );
+  let r = node(
+    GIT_HOOK,
+    ['post-checkout', outside.old, outside.new, '1'],
+    root,
+    baseEnv({PATH}),
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(npmCalls(root), []);
 
-  const inside = twoCommits(repo, 'web/app/apps/x/package.json', json({name: 'x'}), 'inside');
-  r = node(GIT_HOOK, ['post-checkout', inside.old, inside.new, '1'], root, baseEnv({PATH}));
+  const inside = twoCommits(
+    repo,
+    'web/app/apps/x/package.json',
+    json({name: 'x'}),
+    'inside',
+  );
+  r = node(
+    GIT_HOOK,
+    ['post-checkout', inside.old, inside.new, '1'],
+    root,
+    baseEnv({PATH}),
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(npmCalls(root), ['install --no-audit --no-fund']);
 });

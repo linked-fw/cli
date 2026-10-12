@@ -20,7 +20,8 @@ const TEMPLATE = path.join(CLI_ROOT, 'defaults', 'app-react-native');
 const TEN_MINUTES = 10 * 60 * 1000;
 const PREFIX = 'demo';
 
-const describeFull = process.env.RUN_TEMPLATE_FULL === '1' ? describe : describe.skip;
+const describeFull =
+  process.env.RUN_TEMPLATE_FULL === '1' ? describe : describe.skip;
 
 const run = (command: string, cwd: string) => {
   try {
@@ -38,7 +39,8 @@ const run = (command: string, cwd: string) => {
   }
 };
 
-const read = (app: string, file: string) => fs.readFileSync(path.join(app, file), 'utf8');
+const read = (app: string, file: string) =>
+  fs.readFileSync(path.join(app, file), 'utf8');
 
 const overlayLib = (app: string, pkg: string, lib: string) => {
   const target = path.join(app, 'node_modules', pkg, 'lib');
@@ -78,7 +80,10 @@ describeFull('create-app --template react-native (full)', () => {
     const hooks = path.join(app, 'node_modules', '@_linked', 'cli', 'hooks');
     fs.rmSync(hooks, {recursive: true, force: true});
     fs.cpSync(path.join(CLI_ROOT, 'hooks'), hooks, {recursive: true});
-    fs.chmodSync(path.join(app, 'node_modules/@_linked/cli/lib/esm/launch.js'), 0o755);
+    fs.chmodSync(
+      path.join(app, 'node_modules/@_linked/cli/lib/esm/launch.js'),
+      0o755,
+    );
   }, TEN_MINUTES);
 
   afterAll(() => {
@@ -121,19 +126,27 @@ describeFull('create-app --template react-native (full)', () => {
       expect([file, fs.existsSync(path.join(app, file))]).toEqual([file, true]);
     }
     expect(fs.existsSync(path.join(app, '.github'))).toBe(false);
-    expect(fs.existsSync(path.join(app, 'services/api/env.example.template'))).toBe(false);
+    expect(
+      fs.existsSync(path.join(app, 'services/api/env.example.template')),
+    ).toBe(false);
     expect(read(app, '.gitignore')).toContain('services/api/data/');
-    expect(read(app, 'apps/mobile/src/shell/storage.ts')).toContain("import './env';");
+    expect(read(app, 'apps/mobile/src/shell/storage.ts')).toContain(
+      "import './env';",
+    );
   });
 
   test('the shapes package builds with extensionless imports, without an opt-in', () => {
-    const shapes = JSON.parse(read(app, `packages/${PREFIX}-shapes/package.json`));
+    const shapes = JSON.parse(
+      read(app, `packages/${PREFIX}-shapes/package.json`),
+    );
     expect(shapes.linkedPackage).toBe(true);
     expect(shapes.linked).toBeUndefined();
   });
 
   test('dataset names come from the prefix', () => {
-    expect(read(app, 'services/api/.env.example')).toContain(`FUSEKI_DATASET=${PREFIX}-dev`);
+    expect(read(app, 'services/api/.env.example')).toContain(
+      `FUSEKI_DATASET=${PREFIX}-dev`,
+    );
     expect(read(app, 'services/api/linked.backend.datasets.json')).toContain(
       `\${FUSEKI_DATASET:-${PREFIX}-dev}`,
     );
@@ -148,13 +161,21 @@ describeFull('create-app --template react-native (full)', () => {
     expect(run('npm run check:react', app)).toMatch(/check:react OK/);
   });
 
-  test('npm run lint passes', () => {
-    run('npm run lint', app);
-  }, TEN_MINUTES);
+  test(
+    'npm run lint passes',
+    () => {
+      run('npm run lint', app);
+    },
+    TEN_MINUTES,
+  );
 
-  test('npm run typecheck passes', () => {
-    run('npm run typecheck', app);
-  }, TEN_MINUTES);
+  test(
+    'npm run typecheck passes',
+    () => {
+      run('npm run typecheck', app);
+    },
+    TEN_MINUTES,
+  );
 
   test(
     'npm test passes (app Jest and API node --test)',
@@ -165,7 +186,9 @@ describeFull('create-app --template react-native (full)', () => {
       const jest = out.match(/Tests:\s+(.*?)\s+total/);
       expect(jest).not.toBeNull();
       expect(jest![1]).not.toMatch(/failed/);
-      expect(Number(jest![1].match(/(\d+) passed/)?.[1] ?? 0)).toBeGreaterThan(0);
+      expect(Number(jest![1].match(/(\d+) passed/)?.[1] ?? 0)).toBeGreaterThan(
+        0,
+      );
       // node --test: no failures, at least one test passed.
       expect(out).toMatch(/# fail 0\b/);
       // Includes the storage load-order test and the wait-for-fuseki test.
@@ -183,9 +206,9 @@ describeFull('create-app --template react-native (full)', () => {
       const index = fs.readFileSync(path.join(esm, 'index.js'), 'utf8');
       expect(index).toContain("from './shapes/Example.js'");
       expect(index).toContain("import './package.js'");
-      expect(fs.readFileSync(path.join(esm, 'shapes', 'Example.js'), 'utf8')).toContain(
-        "from '../package.js'",
-      );
+      expect(
+        fs.readFileSync(path.join(esm, 'shapes', 'Example.js'), 'utf8'),
+      ).toContain("from '../package.js'");
       // And Node can load it (no ERR_MODULE_NOT_FOUND).
       const out = run(
         `node -e "import('${path.join(esm, 'index.js')}').then((m) => console.log(Object.keys(m).join(',')))"`,

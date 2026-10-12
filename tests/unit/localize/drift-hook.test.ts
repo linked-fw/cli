@@ -31,7 +31,15 @@ test('the report runs before exactly start, script, call and build-all', async (
   const ran: string[] = [];
   const program = quietProgram();
   installDriftHook(program, () => ran.push('report'));
-  const names = ['start', 'script', 'call', 'build-all', 'localize', 'build', 'publish'];
+  const names = [
+    'start',
+    'script',
+    'call',
+    'build-all',
+    'localize',
+    'build',
+    'publish',
+  ];
   for (const name of names) program.command(name).action(() => {});
 
   const triggered: string[] = [];
@@ -52,7 +60,10 @@ test('the report runs before exactly start, script, call and build-all', async (
   assert.equal(ran.length, 0, 'help never triggers it');
 
   // ...and the real program installs it, over commands with those names.
-  const cli = fs.readFileSync(path.join(__dirname, '../../../src/cli.ts'), 'utf8');
+  const cli = fs.readFileSync(
+    path.join(__dirname, '../../../src/cli.ts'),
+    'utf8',
+  );
   assert.match(cli, /^installDriftHook\(program\);$/m);
   for (const name of DRIFT_COMMANDS)
     assert.match(cli, new RegExp(`\\.command\\('${name}[ '\\]]`), name);
@@ -81,7 +92,10 @@ test('drift hook prints on stderr and never throws', async (t) => {
     console.warn = original;
   }
   assert.equal(warned.length, 1);
-  assert.match(warned[0], /^\[localize\] drift: @x\/a@1\.0\.0 .* "\^2\.0\.0" of <root>$/);
+  assert.match(
+    warned[0],
+    /^\[localize\] drift: @x\/a@1\.0\.0 .* "\^2\.0\.0" of <root>$/,
+  );
 
   // A report that throws does not stop the command.
   const program = quietProgram();

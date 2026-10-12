@@ -65,23 +65,23 @@ import {linkDirectory} from '../utils/platform.js';
 /** What a new checkout is built with when `--build` does not say. */
 export const DEFAULT_BUILD_COMMAND = 'linked build';
 /** The cli builds itself: `linked build` IS the cli, and a fresh checkout of it has no `lib/`. */
-export const CLI_PACKAGE = '@_linked/cli';
-export const CLI_BUILD_COMMAND = 'npm run build';
+const CLI_PACKAGE = '@_linked/cli';
+const CLI_BUILD_COMMAND = 'npm run build';
 /** The one install a run makes, at the app root. */
 export const INSTALL_ARGS = ['install', '--no-audit', '--no-fund'];
 /** Where a cloned monorepo lives, inside `packages-local/` but outside its glob. */
-export const REPOS_DIR = `${LOCAL_DIR}/.repos`;
+const REPOS_DIR = `${LOCAL_DIR}/.repos`;
 /**
  * Where the set-up's lockfile run puts the checkouts while npm makes it:
  * inside the gitignored `packages-local/`, outside its glob (npm skips dot
  * directories). A run interrupted there leaves them in it; the next
  * `localize`, `delocalize` or `--list` moves them back (`restoreSetAside`).
  */
-export const SETUP_ASIDE_DIR = `${LOCAL_DIR}/.setup-aside`;
+const SETUP_ASIDE_DIR = `${LOCAL_DIR}/.setup-aside`;
 /** The app's lockfile, kept clean of checkouts. */
 export const LOCKFILE = 'package-lock.json';
 /** What an app recorded checkouts in before they were workspace members. */
-export const LEGACY_MANIFEST = 'local-packages.json';
+const LEGACY_MANIFEST = 'local-packages.json';
 
 export interface LocalizeOptions {
   /** Where checkouts live. Only `packages-local` is accepted: the workspace glob names it. */
@@ -372,7 +372,7 @@ function reportSetup(changes: SetupChange[], deps: Deps): void {
 }
 
 /** What `captureSetupLockfile` runs: the lockfile for the new `package.json`, nothing installed. */
-export const SETUP_LOCK_ARGS = [
+const SETUP_LOCK_ARGS = [
   'install',
   '--package-lock-only',
   '--ignore-scripts',
@@ -404,7 +404,9 @@ function captureSetupLockfile(
   const edited = editedSetupLockfile(lockfile, workspacesBefore, deps);
   if (edited !== null) return edited;
   const moveAside = localMembers(deps.appRoot).length > 0;
-  deps.log(`[localize] npm ${SETUP_LOCK_ARGS.join(' ')} (the set-up's lockfile)`);
+  deps.log(
+    `[localize] npm ${SETUP_LOCK_ARGS.join(' ')} (the set-up's lockfile)`,
+  );
   if (moveAside) setAside(deps);
   let r: RunResult;
   try {
@@ -616,7 +618,7 @@ function runBuild(
   return 'ok';
 }
 
-export function buildCommandFor(
+function buildCommandFor(
   name: string,
   opts: Pick<LocalizeOptions, 'build'>,
 ): string {
@@ -638,7 +640,10 @@ export function reportError(e: unknown, deps: Pick<Deps, 'error'>): number {
  * `rev-parse --abbrev-ref` fails there, and `create-package` adopts a fresh
  * `git init` before its first commit.
  */
-export function currentBranch(checkout: string, deps: Pick<Deps, 'run'>): string {
+export function currentBranch(
+  checkout: string,
+  deps: Pick<Deps, 'run'>,
+): string {
   const sym = deps.run('git', ['symbolic-ref', '--short', '-q', 'HEAD'], {
     cwd: checkout,
   });

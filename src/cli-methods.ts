@@ -61,7 +61,10 @@ import {glob} from 'glob';
 import ora, {Ora} from 'ora';
 import stagedGitFiles from 'staged-git-files';
 import {packagePublishesCjs} from './package-manifest.js';
-import {asNamespace, defaultOntologyNamespace} from './utils/ontologyNamespace.js';
+import {
+  asNamespace,
+  defaultOntologyNamespace,
+} from './utils/ontologyNamespace.js';
 import {
   decidePackageKind,
   ontologySlugFor,
@@ -162,7 +165,17 @@ type AppIdentity = {
   hyphenName: string;
 };
 
-export const createApp = async (name, basePath = process.cwd(), options: {appName?: string, appPrefix?: string, appDomain?: string, skipInstall?: boolean, template?: AppTemplate} = {}) => {
+export const createApp = async (
+  name,
+  basePath = process.cwd(),
+  options: {
+    appName?: string;
+    appPrefix?: string;
+    appDomain?: string;
+    skipInstall?: boolean;
+    template?: AppTemplate;
+  } = {},
+) => {
   // Reject unknown templates before prompting or writing anything.
   const template = options.template;
   if (
@@ -251,7 +264,11 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
   // Scaffold from the canonical template repo (single source of truth; CN's
   // server-side createProject clones the same repo). Shallow clone, then drop
   // .git so the new app starts with clean history.
-  await execPromise(`git clone --depth 1 https://github.com/linked-fw/app-template.git "${targetFolder}"`, false, false);
+  await execPromise(
+    `git clone --depth 1 https://github.com/linked-fw/app-template.git "${targetFolder}"`,
+    false,
+    false,
+  );
   fs.removeSync(path.join(targetFolder, '.git'));
   //make sure the data folder exists (even though its empty).. copying empty folders does not work with fs.copySync
   fs.mkdirSync(path.join(targetFolder, 'data'), {recursive: true});
@@ -383,7 +400,10 @@ export function reactNativeBundleId(
 export const RN_PREFIX_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /** Throws when the prefix is invalid or the target folder is non-empty. */
-function assertReactNativeScaffoldable(targetFolder: string, appPrefix: string) {
+function assertReactNativeScaffoldable(
+  targetFolder: string,
+  appPrefix: string,
+) {
   if (typeof appPrefix !== 'string' || !RN_PREFIX_PATTERN.test(appPrefix)) {
     throw new Error(
       `Invalid app prefix "${appPrefix ?? ''}": it must match ${RN_PREFIX_PATTERN.source} ` +
@@ -463,7 +483,9 @@ export async function scaffoldReactNativeApp(
       path.join(getScriptDir(), '..', 'defaults', 'app-react-native'),
     ].find((dir) => fs.existsSync(dir));
   if (!templateDir) {
-    throw new Error('React Native template not found (defaults/app-react-native)');
+    throw new Error(
+      'React Native template not found (defaults/app-react-native)',
+    );
   }
   const shapesName = `${appPrefix}-shapes`;
 
@@ -624,8 +646,16 @@ export function applyAppIdentity(
   // 3. pm2 process names + VS Code launch name (template hardcodes 'app').
   const renames: Array<[string, RegExp, string]> = [
     ['pm2.config.js', /name:\s*'app'/, `name: '${hyphenName}'`],
-    ['pm2-staging.config.js', /name:\s*'app-staging'/, `name: '${hyphenName}-staging'`],
-    [path.join('.vscode', 'launch.json'), /"name":\s*"Run app"/, `"name": "Run ${hyphenName}"`],
+    [
+      'pm2-staging.config.js',
+      /name:\s*'app-staging'/,
+      `name: '${hyphenName}-staging'`,
+    ],
+    [
+      path.join('.vscode', 'launch.json'),
+      /"name":\s*"Run app"/,
+      `"name": "Run ${hyphenName}"`,
+    ],
   ];
   for (const [rel, re, replacement] of renames) {
     const f = path.join(targetFolder, rel);
@@ -658,7 +688,7 @@ export function warn(...messages) {
   });
 }
 export function logError(...errors) {
-  errors.forEach((error:Error) => {
+  errors.forEach((error: Error) => {
     console.error(chalk.redBright('Error: ') + error);
   });
 }
@@ -1013,7 +1043,10 @@ export async function buildAll(options): Promise<void> {
     'Building all linked packages of this repository in order of dependencies',
   );
 
-  const plan = planBuildAll('./', findWorkspaceRoot(process.cwd()) ?? undefined);
+  const plan = planBuildAll(
+    './',
+    findWorkspaceRoot(process.cwd()) ?? undefined,
+  );
   printBuildAllPlan(plan);
 
   if (plan.build.size === 0) {
@@ -1044,14 +1077,22 @@ export async function buildAll(options): Promise<void> {
     const names = [...order.pre.keys()].join(', ');
     const them = order.pre.size === 1 ? 'it' : 'them';
     console.log(
-      chalk.blue(`Building ${names} first: ${tool.packageName} depends on ${them}.`),
+      chalk.blue(
+        `Building ${names} first: ${tool.packageName} depends on ${them}.`,
+      ),
     );
-    const built = await buildInDependencyOrder(order.pre, order.from, sync, done, {
-      stopNote:
-        `${tool.packageName} needs ${names}, so build-all stopped before it and ` +
-        `the other ${plural(order.rest.size)}, which build with it. ` +
-        `Fix the failure and run build-all again.`,
-    });
+    const built = await buildInDependencyOrder(
+      order.pre,
+      order.from,
+      sync,
+      done,
+      {
+        stopNote:
+          `${tool.packageName} needs ${names}, so build-all stopped before it and ` +
+          `the other ${plural(order.rest.size)}, which build with it. ` +
+          `Fix the failure and run build-all again.`,
+      },
+    );
     if (!built) return;
   } else {
     order.pre.forEach(passOver);
@@ -1272,7 +1313,13 @@ function buildInDependencyOrder(
       const problems =
         failed.size > 0 || notBuilt.size > 0 || unscheduled.length > 0;
       if (problems || !then) {
-        printBuildAllSummary(done, failed, notBuilt, unscheduled, failureOutput);
+        printBuildAllSummary(
+          done,
+          failed,
+          notBuilt,
+          unscheduled,
+          failureOutput,
+        );
       }
       if (problems) {
         if (then) console.error(chalk.red(then.stopNote));
@@ -1438,7 +1485,12 @@ export const createOntology = async (
   // ontology module's whole export namespace, and a module cannot import itself once a
   // bundler is involved -- Rollup elides the self-reference and the app dies at boot.
   fs.copySync(
-    defaultsDir('package-ontology', 'src', 'ontologies', 'example-ontology.register.ts'),
+    defaultsDir(
+      'package-ontology',
+      'src',
+      'ontologies',
+      'example-ontology.register.ts',
+    ),
     targetRegisterFile,
   );
 
@@ -1460,7 +1512,12 @@ export const createOntology = async (
     targetDataFile,
   );
   fs.copySync(
-    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.json.d.ts'),
+    defaultsDir(
+      'package-ontology',
+      'src',
+      'data',
+      'example-ontology.json.d.ts',
+    ),
     targetDataFile2,
   );
 
@@ -1508,12 +1565,18 @@ const ensureBackendImportsShapes = function (root: string = process.cwd()) {
   if (!fs.existsSync(backendPath)) return;
   let contents = fs.readFileSync(backendPath, 'utf-8');
   if (contents.includes('./shapes/index')) return;
-  fs.writeFileSync(backendPath, withEolOf(`import './shapes/index.js';\n`, contents) + contents);
+  fs.writeFileSync(
+    backendPath,
+    withEolOf(`import './shapes/index.js';\n`, contents) + contents,
+  );
 };
 
 // Register a shape in the shapes barrel (src/shapes/index.ts), creating it if needed, and
 // make sure both the main index and backend.ts import the barrel. Idempotent.
-export const addShapeToBarrel = function (shapeHyphenName: string, root: string = process.cwd()) {
+export const addShapeToBarrel = function (
+  shapeHyphenName: string,
+  root: string = process.cwd(),
+) {
   const shapesDir = path.join(root, 'src', 'shapes');
   fs.ensureDirSync(shapesDir);
   const barrelPath = path.join(shapesDir, 'index.ts');
@@ -1707,10 +1770,7 @@ export const createShape = async (name, basePath = process.cwd()) => {
   //copy default shape file
   // log("Creating files for shape '" + name + "'");
   let targetFile = path.join(targetFolder, hyphenName + '.ts');
-  fs.copySync(
-    defaultsDir('shape.ts'),
-    targetFile,
-  );
+  fs.copySync(defaultsDir('shape.ts'), targetFile);
 
   //replace variables in some of the copied files
   await replaceVariablesInFiles(targetFile);
@@ -1726,7 +1786,9 @@ export const createShape = async (name, basePath = process.cwd()) => {
   // The barrel sits next to the shape: in the source folder's parent, not the cwd, which
   // is only the same folder when the command runs from the package or app root.
   const barrelPath = addShapeToBarrel(hyphenName, path.dirname(sourceFolder));
-  log(`Registered the shape in ${chalk.magenta(barrelPath.replace(basePath, ''))}`);
+  log(
+    `Registered the shape in ${chalk.magenta(barrelPath.replace(basePath, ''))}`,
+  );
 };
 
 export const createSetComponent = async (name, basePath = process.cwd()) => {
@@ -1737,16 +1799,10 @@ export const createSetComponent = async (name, basePath = process.cwd()) => {
   //copy default shape file
   log("Creating files for set component '" + name + "'");
   let targetFile = path.join(targetFolder, hyphenName + '.tsx');
-  fs.copySync(
-    defaultsDir('set-component.tsx'),
-    targetFile,
-  );
+  fs.copySync(defaultsDir('set-component.tsx'), targetFile);
 
   let targetFile2 = path.join(targetFolder, hyphenName + '.scss');
-  fs.copySync(
-    defaultsDir('component.scss'),
-    targetFile2,
-  );
+  fs.copySync(defaultsDir('component.scss'), targetFile2);
 
   //replace variables in some of the copied files
   await replaceVariablesInFiles(targetFile, targetFile2);
@@ -1775,16 +1831,10 @@ export const createComponent = async (name, basePath = process.cwd()) => {
   //copy default shape file
   log("Creating files for component '" + name + "'");
   let targetFile = path.join(targetFolder, hyphenName + '.tsx');
-  fs.copySync(
-    defaultsDir('component.tsx'),
-    targetFile,
-  );
+  fs.copySync(defaultsDir('component.tsx'), targetFile);
 
   let targetFile2 = path.join(targetFolder, hyphenName + '.scss');
-  fs.copySync(
-    defaultsDir('component.scss'),
-    targetFile2,
-  );
+  fs.copySync(defaultsDir('component.scss'), targetFile2);
 
   //replace variables in some of the copied files
   await replaceVariablesInFiles(targetFile, targetFile2);
@@ -1830,7 +1880,9 @@ export const checkImports = async (
     // Skip test sources. Test files (and their helpers/probes) are not part
     // of the shipped package, so the import rules do not apply to them.
     if (
-      /(?:^|[\\/])(?:tests?|__tests__|test-helpers)(?:[\\/]|$)/.test(filename) ||
+      /(?:^|[\\/])(?:tests?|__tests__|test-helpers)(?:[\\/]|$)/.test(
+        filename,
+      ) ||
       /\.(?:test|spec)\.tsx?$/.test(file) ||
       /^type-probe.*\.tsx?$/.test(file)
     ) {
@@ -2135,8 +2187,9 @@ export const startServer = async (
 ) => {
   await ensureEnvironmentLoaded();
 
-  let linkedConfig = (await importFile(path.join(process.cwd(), 'linked.config.js')))
-    .default;
+  let linkedConfig = (
+    await importFile(path.join(process.cwd(), 'linked.config.js'))
+  ).default;
 
   // function scssLoadcall(source, filename) {
   //   return 'console.log("SCSS CALL: ' + filename + '");\n' + source;
@@ -2164,8 +2217,9 @@ export const startServer = async (
       appPromise = (await importFile(path.join(process.cwd(), 'lib', 'App.js')))
         .default;
     } else {
-      appPromise = (await importFile(path.join(process.cwd(), 'src', 'App.tsx')))
-        .default;
+      appPromise = (
+        await importFile(path.join(process.cwd(), 'src', 'App.tsx'))
+      ).default;
     }
     linkedConfig.server.loadAppComponent = async () => {
       return appPromise;
@@ -2211,9 +2265,8 @@ export const buildBackend = async () => {
   await ensureEnvironmentLoaded();
 
   const appRoot = process.cwd();
-  const {buildBackendWithVite, copyBackendStylesheets} = await import(
-    './app-release/build-backend.js'
-  );
+  const {buildBackendWithVite, copyBackendStylesheets} =
+    await import('./app-release/build-backend.js');
 
   // Step 1: Compile with Vite (it empties lib/ itself)
   const compileSpinner = ora({
@@ -2429,9 +2482,12 @@ export const createPackage = async (
     remote: options.remote,
     isTTY,
   });
-  if (kindDecided.kind === 'refuse') throw new CreatePackageError(kindDecided.message);
+  if (kindDecided.kind === 'refuse')
+    throw new CreatePackageError(kindDecided.message);
   const packageKind: PackageKind =
-    kindDecided.kind === 'ask' ? await askPackageKind(name) : kindDecided.packageKind;
+    kindDecided.kind === 'ask'
+      ? await askPackageKind(name)
+      : kindDecided.packageKind;
 
   const appRoot = findLinkedAppRoot(basePath);
   const decided = decideCreatePackageTarget({appRoot, options, isTTY});
@@ -2455,7 +2511,12 @@ export const createPackage = async (
   // Nothing is written until every target is free.
   const targets = await Promise.all(
     packages.map(async ({name: packageName}) => {
-      const targetFolder = await packageTargetFolder(packageName, basePath, appRoot, decision);
+      const targetFolder = await packageTargetFolder(
+        packageName,
+        basePath,
+        appRoot,
+        decision,
+      );
       if (fs.existsSync(targetFolder)) {
         throw new CreatePackageError(
           `${targetFolder} already exists. Refusing to write a new package over it.`,
@@ -2475,7 +2536,13 @@ export const createPackage = async (
   );
   for (const [i, {kind, name: packageName}] of packages.entries()) {
     const targetFolder = targets[i];
-    await scaffoldPackage(packageName, kind, targetFolder, uriBase, root?.baseUri);
+    await scaffoldPackage(
+      packageName,
+      kind,
+      targetFolder,
+      uriBase,
+      root?.baseUri,
+    );
     if (kind === 'assets' && packageKind === 'both') {
       // The pair is one unit: the asset package's shapes use the ontology
       // created with it. `ontology` comes first in `scaffoldKinds`, so its
@@ -2489,13 +2556,20 @@ export const createPackage = async (
       );
     }
     const skipped = () =>
-      log(`Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`);
+      log(
+        `Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`,
+      );
     if (decision.kind === 'outside') {
       if (options.skipInstall) skipped();
       else await installStandalonePackage(targetFolder);
     } else if (decision.location === 'packages') {
       // The app's package.json is wired either way: that is files, not install.
-      await installWorkspacePackage(packageName, targetFolder, appRoot, options.skipInstall);
+      await installWorkspacePackage(
+        packageName,
+        targetFolder,
+        appRoot,
+        options.skipInstall,
+      );
     } else if (options.skipInstall) {
       // Files, not install: the app is set up for checkouts either way.
       await setUpAppForCheckouts(appRoot);
@@ -2630,7 +2704,10 @@ async function scaffoldPackage(
 
   if (baseUri) {
     const packageTs = path.join(targetFolder, 'src', 'package.ts');
-    fs.writeFileSync(packageTs, withBaseUri(fs.readFileSync(packageTs, 'utf8'), baseUri));
+    fs.writeFileSync(
+      packageTs,
+      withBaseUri(fs.readFileSync(packageTs, 'utf8'), baseUri),
+    );
   }
 
   if (kind !== 'ontology') return;
@@ -2690,7 +2767,8 @@ async function askPackageLocation(
   while (answer !== '1' && answer !== '2') {
     answer = await promptUser('Choose 1 or 2: ');
   }
-  if (answer === '1') return {kind: 'resolved', location: 'packages', push: false};
+  if (answer === '1')
+    return {kind: 'resolved', location: 'packages', push: false};
 
   const remote = await promptUser(
     'Remote git URL for its repository (optional, Enter to skip): ',
@@ -2793,15 +2871,22 @@ async function installWorkspacePackage(
   const appPkg = JSON.parse(appPkgText);
   const workspaces = ensureWorkspaceGlob(appPkg);
   if (workspaces.warning) console.warn(chalk.yellow(workspaces.warning));
-  const version = fs.readJsonSync(path.join(targetFolder, 'package.json')).version;
+  const version = fs.readJsonSync(
+    path.join(targetFolder, 'package.json'),
+  ).version;
   appPkg.dependencies = {...appPkg.dependencies, [name]: `^${version}`};
-  fs.writeFileSync(appPkgPath, withEolOf(JSON.stringify(appPkg, null, 2) + '\n', appPkgText));
+  fs.writeFileSync(
+    appPkgPath,
+    withEolOf(JSON.stringify(appPkg, null, 2) + '\n', appPkgText),
+  );
   log(
     `Added ${name}@^${version} to ${path.relative(process.cwd(), appPkgPath) || 'package.json'}` +
       (workspaces.changed ? ' and packages/* to its workspaces' : ''),
   );
   if (skipInstall) {
-    log(`Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`);
+    log(
+      `Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`,
+    );
     return;
   }
 
@@ -2843,11 +2928,15 @@ async function installOwnRepoPackage(
   };
 
   if (!git(['init', '--quiet'], targetFolder)) {
-    return fail(`git init failed in ${rel}; the package is scaffolded but not linked.`);
+    return fail(
+      `git init failed in ${rel}; the package is scaffolded but not linked.`,
+    );
   }
   if (remote) {
     if (!git(['remote', 'add', 'origin', remote], targetFolder)) {
-      return fail(`git remote add origin ${remote} failed in ${rel}; nothing was linked.`);
+      return fail(
+        `git remote add origin ${remote} failed in ${rel}; nothing was linked.`,
+      );
     }
     const pkg = fs.readJsonSync(pkgPath);
     pkg.repository = {type: 'git', url: repositoryUrlFor(remote)};
@@ -2887,13 +2976,18 @@ async function installOwnRepoPackage(
   let pushed = false;
   if (push && committed) {
     pushed = git(['push', '--quiet', '-u', 'origin', 'HEAD'], targetFolder);
-    if (!pushed) fail(`Could not push to ${remote}. Push it yourself: git push -u origin HEAD`);
+    if (!pushed)
+      fail(
+        `Could not push to ${remote}. Push it yourself: git push -u origin HEAD`,
+      );
   }
 
   const version = fs.readJsonSync(pkgPath).version;
   log(
     `Prepared ${name} in ${chalk.magenta(rel)}, in its own git repository` +
-      (remote ? ` (origin ${remote}${pushed ? ', pushed' : ''})` : ' (no remote yet)'),
+      (remote
+        ? ` (origin ${remote}${pushed ? ', pushed' : ''})`
+        : ' (no remote yet)'),
     `It is a workspace member through the app's packages-local/* glob, so npm links it.`,
     `It is not in the app's dependencies: until it is published a version range would fail npm install.`,
     `  After publishing: ${chalk.blueBright(`npm install ${name}@^${version}`)}`,
@@ -3017,8 +3111,8 @@ export const buildPackage = async (
 ) => {
   // Ensure packagePath is absolute and points to a directory containing package.json; if not, go up until we find one
   // First, resolve to absolute path
-  let currentPath = path.isAbsolute(packagePath) 
-    ? packagePath 
+  let currentPath = path.isAbsolute(packagePath)
+    ? packagePath
     : path.resolve(process.cwd(), packagePath);
   while (!fs.existsSync(path.join(currentPath, 'package.json'))) {
     const parentPath = path.dirname(currentPath);
@@ -3231,164 +3325,167 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
   const inspectShapes = () =>
     (inspection ??= inspectShapeReferences(packagePath));
   return [
-  {
-    name: 'Checking imports',
-    apply: () => checkImports(packagePath + '/src'),
-  },
-  {
-    name: 'Compiling ESM',
-    apply: async () => {
-      return compilePackageESM(packagePath);
+    {
+      name: 'Checking imports',
+      apply: () => checkImports(packagePath + '/src'),
     },
-  },
-  {
-    name: 'Compiling CJS',
-    apply: async () => {
-      return compilePackageCJS(packagePath);
+    {
+      name: 'Compiling ESM',
+      apply: async () => {
+        return compilePackageESM(packagePath);
+      },
     },
-  },
-  {
-    name: 'Copying files to lib folder',
-    apply: async () => {
-      const files = await glob(packagePath + '/src/**/*.{json,d.ts,css,scss}');
-      let cjsPublished = false;
-      try {
-        cjsPublished = packagePublishesCjs(
-          JSON.parse(
-            fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
-          ),
+    {
+      name: 'Compiling CJS',
+      apply: async () => {
+        return compilePackageCJS(packagePath);
+      },
+    },
+    {
+      name: 'Copying files to lib folder',
+      apply: async () => {
+        const files = await glob(
+          packagePath + '/src/**/*.{json,d.ts,css,scss}',
         );
-      } catch {}
-      return Promise.all(
-        files.map(async (file) => {
-          try {
-            await fs.copy(
-              file,
-              packagePath +
-                '/lib/esm/' +
-                file.replace(packagePath + '/src/', ''),
-            );
-            // Only mirror into lib/cjs when there is a CJS build to mirror.
-            if (cjsPublished) {
-              await fs.copy(
-                file,
-                packagePath +
-                  '/lib/cjs/' +
-                  file.replace(packagePath + '/src/', ''),
-              );
-            }
-            return true;
-          } catch (err) {
-            console.warn(err);
-            return false;
-          }
-        }),
-      ).then((allResults) => {
-        return allResults.every((r) => r === true);
-      });
-    },
-  },
-  {
-    name: 'Dual package support',
-    apply: () => {
-      // Skip if no tsconfig files (e.g. pure-CSS packages).
-      if (
-        !fs.existsSync(path.join(packagePath, 'tsconfig-esm.json')) ||
-        !fs.existsSync(path.join(packagePath, 'tsconfig-cjs.json'))
-      ) {
-        return Promise.resolve(true);
-      }
-      // Nothing to make dual when only one format is published — otherwise this
-      // leaves a lib/cjs holding a lone `{"type":"commonjs"}` marker and no code.
-      try {
-        if (
-          !packagePublishesCjs(
+        let cjsPublished = false;
+        try {
+          cjsPublished = packagePublishesCjs(
             JSON.parse(
               fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
             ),
-          )
+          );
+        } catch {}
+        return Promise.all(
+          files.map(async (file) => {
+            try {
+              await fs.copy(
+                file,
+                packagePath +
+                  '/lib/esm/' +
+                  file.replace(packagePath + '/src/', ''),
+              );
+              // Only mirror into lib/cjs when there is a CJS build to mirror.
+              if (cjsPublished) {
+                await fs.copy(
+                  file,
+                  packagePath +
+                    '/lib/cjs/' +
+                    file.replace(packagePath + '/src/', ''),
+                );
+              }
+              return true;
+            } catch (err) {
+              console.warn(err);
+              return false;
+            }
+          }),
+        ).then((allResults) => {
+          return allResults.every((r) => r === true);
+        });
+      },
+    },
+    {
+      name: 'Dual package support',
+      apply: () => {
+        // Skip if no tsconfig files (e.g. pure-CSS packages).
+        if (
+          !fs.existsSync(path.join(packagePath, 'tsconfig-esm.json')) ||
+          !fs.existsSync(path.join(packagePath, 'tsconfig-cjs.json'))
         ) {
           return Promise.resolve(true);
         }
-      } catch {}
-      // Resolve the binary from the nearest node_modules (supports both
-      // per-package and workspace-root installs of tsconfig-to-dual-package).
-      return execPromise(
-        'npx tsconfig-to-dual-package ./tsconfig-cjs.json ./tsconfig-esm.json',
-        false,
-        false,
-        {cwd: packagePath},
-      ).then((res) => {
-        return res === '';
-      });
+        // Nothing to make dual when only one format is published — otherwise this
+        // leaves a lib/cjs holding a lone `{"type":"commonjs"}` marker and no code.
+        try {
+          if (
+            !packagePublishesCjs(
+              JSON.parse(
+                fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
+              ),
+            )
+          ) {
+            return Promise.resolve(true);
+          }
+        } catch {}
+        // Resolve the binary from the nearest node_modules (supports both
+        // per-package and workspace-root installs of tsconfig-to-dual-package).
+        return execPromise(
+          'npx tsconfig-to-dual-package ./tsconfig-cjs.json ./tsconfig-esm.json',
+          false,
+          false,
+          {cwd: packagePath},
+        ).then((res) => {
+          return res === '';
+        });
+      },
     },
-  },
-  {
-    name: 'Removing old files from lib folder',
-    apply: async () => {
-      return removeOldFiles(packagePath);
+    {
+      name: 'Removing old files from lib folder',
+      apply: async () => {
+        return removeOldFiles(packagePath);
+      },
     },
-  },
-  {
-    // MUST run after 'Copying files to lib folder' and after 'Removing old
-    // files from lib folder', because the rewrite resolves each specifier
-    // against the files actually present in lib/esm:
-    // - the copy step brings in the assets (`./x.scss`) and hand-written
-    //   `.d.ts` from src; before it, an asset import looks unresolvable (a
-    //   spurious "build with warnings") and a copied `.d.ts` is never rewritten;
-    // - the cleanup step deletes stale output; before it, a leftover `x.js`
-    //   makes './x' resolve to './x.js' and the cleanup then removes the file
-    //   the specifier now points at.
-    name: 'Rewriting ESM import specifiers',
-    apply: async () => {
-      // No tsconfig-esm.json means the ESM compile was skipped (e.g. pure-CSS
-      // packages), so there is nothing to rewrite and nothing to fail over.
-      if (!fs.existsSync(path.join(packagePath, 'tsconfig-esm.json'))) {
-        return true;
-      }
-      const libEsm = path.join(packagePath, 'lib', 'esm');
-      if (!fs.existsSync(libEsm)) {
-        return {
-          error:
-            'lib/esm was not emitted while tsconfig-esm.json is present. Check the ESM compile.',
-        };
-      }
-      const {changed, unresolved} = await rewriteExtensionlessImports(libEsm);
-      if (unresolved.length > 0) {
-        return `could not resolve ${unresolved.length} import(s), left unchanged: ${unresolved.join(', ')}`;
-      }
-      return changed > 0 ? {info: `rewrote ${changed} file(s)`} : true;
+    {
+      // MUST run after 'Copying files to lib folder' and after 'Removing old
+      // files from lib folder', because the rewrite resolves each specifier
+      // against the files actually present in lib/esm:
+      // - the copy step brings in the assets (`./x.scss`) and hand-written
+      //   `.d.ts` from src; before it, an asset import looks unresolvable (a
+      //   spurious "build with warnings") and a copied `.d.ts` is never rewritten;
+      // - the cleanup step deletes stale output; before it, a leftover `x.js`
+      //   makes './x' resolve to './x.js' and the cleanup then removes the file
+      //   the specifier now points at.
+      name: 'Rewriting ESM import specifiers',
+      apply: async () => {
+        // No tsconfig-esm.json means the ESM compile was skipped (e.g. pure-CSS
+        // packages), so there is nothing to rewrite and nothing to fail over.
+        if (!fs.existsSync(path.join(packagePath, 'tsconfig-esm.json'))) {
+          return true;
+        }
+        const libEsm = path.join(packagePath, 'lib', 'esm');
+        if (!fs.existsSync(libEsm)) {
+          return {
+            error:
+              'lib/esm was not emitted while tsconfig-esm.json is present. Check the ESM compile.',
+          };
+        }
+        const {changed, unresolved} = await rewriteExtensionlessImports(libEsm);
+        if (unresolved.length > 0) {
+          return `could not resolve ${unresolved.length} import(s), left unchanged: ${unresolved.join(', ')}`;
+        }
+        return changed > 0 ? {info: `rewrote ${changed} file(s)`} : true;
+      },
     },
-  },
-  {
-    // Reads the emitted lib/esm, so it runs after everything that writes it.
-    name: 'Checking shape names',
-    apply: () => checkShapeNames(packagePath),
-  },
-  {
-    // Loads each compiled shape module on its own, so it needs the final
-    // lib/esm too. Fails the build: an unresolved reference is a query that
-    // throws "Shape class not found" in a consumer's bundle.
-    name: 'Checking shape references',
-    apply: () => checkShapeReferences(packagePath, undefined, inspectShapes()),
-  },
-  {
-    // Same per-module loads: loading lib/esm/shapes/index.js alone must register
-    // every shape of this package that its shape modules register one by one,
-    // because apps load a package's shapes with `import '<pkg>/shapes/index'`.
-    name: 'Checking shapes/index',
-    apply: () => checkShapesIndex(packagePath, undefined, inspectShapes()),
-  },
-  {
-    // A bundler drops the side-effect-only imports in shapes/index of a module
-    // package.json calls side-effect-free.
-    name: 'Checking sideEffects',
-    apply: async () => checkShapesSideEffects(packagePath),
-  },
-  {
-    name: 'Checking dependencies',
-    apply: () => depCheck(packagePath),
-  },
+    {
+      // Reads the emitted lib/esm, so it runs after everything that writes it.
+      name: 'Checking shape names',
+      apply: () => checkShapeNames(packagePath),
+    },
+    {
+      // Loads each compiled shape module on its own, so it needs the final
+      // lib/esm too. Fails the build: an unresolved reference is a query that
+      // throws "Shape class not found" in a consumer's bundle.
+      name: 'Checking shape references',
+      apply: () =>
+        checkShapeReferences(packagePath, undefined, inspectShapes()),
+    },
+    {
+      // Same per-module loads: loading lib/esm/shapes/index.js alone must register
+      // every shape of this package that its shape modules register one by one,
+      // because apps load a package's shapes with `import '<pkg>/shapes/index'`.
+      name: 'Checking shapes/index',
+      apply: () => checkShapesIndex(packagePath, undefined, inspectShapes()),
+    },
+    {
+      // A bundler drops the side-effect-only imports in shapes/index of a module
+      // package.json calls side-effect-free.
+      name: 'Checking sideEffects',
+      apply: async () => checkShapesSideEffects(packagePath),
+    },
+    {
+      name: 'Checking dependencies',
+      apply: () => depCheck(packagePath),
+    },
   ];
 };
 
@@ -3980,7 +4077,13 @@ export var addCapacitor = async function (basePath = process.cwd()) {
   );
   log('Added new run script to package.json');
 
-  await execPromise(`npm install --save-dev @capacitor/cli`, true, false, null, true);
+  await execPromise(
+    `npm install --save-dev @capacitor/cli`,
+    true,
+    false,
+    null,
+    true,
+  );
   await execPromise(
     `npm install @capacitor/android @capacitor/core @capacitor/app @capacitor/ios`,
     false,
@@ -4026,7 +4129,9 @@ export var executeCommandForPackage = function (packageName, command) {
     const pm = detectPackageManager(packageDetails.path);
     const runner = pm === 'yarn' ? 'yarn' : 'npx';
     const runnerArgs = pm === 'yarn' ? ['linked'] : ['--no-install', 'linked'];
-    const commandArgs = command ? String(command).split(/\s+/).filter(Boolean) : [];
+    const commandArgs = command
+      ? String(command).split(/\s+/).filter(Boolean)
+      : [];
 
     log(
       "Executing '" +

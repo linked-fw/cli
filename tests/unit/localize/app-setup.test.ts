@@ -42,7 +42,10 @@ test('adds the glob and both hook scripts once; a second call changes nothing', 
 
   const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
   assert.deepEqual(ensureAppSetup(appRoot), []);
-  assert.equal(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'), before);
+  assert.equal(
+    fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
+    before,
+  );
 });
 
 test('an app without workspaces gets the glob as its only one', (t) => {
@@ -69,7 +72,10 @@ test('replaces linked localize --relink, appends to any other script, keeps one 
     JSON.stringify({
       name: 'consumer',
       workspaces: ['packages-local/*'],
-      scripts: {postinstall: 'foo && npx linked localize --relink', dependencies: `${HOOK} && bar`},
+      scripts: {
+        postinstall: 'foo && npx linked localize --relink',
+        dependencies: `${HOOK} && bar`,
+      },
     }),
   );
   ensureAppSetup(appRoot);
@@ -94,7 +100,10 @@ test('upgrades the unguarded hook in place, alone or inside an && chain', (t) =>
   const changes = ensureAppSetup(appRoot);
   assert.deepEqual(
     changes.filter((c) => c.file === 'package.json').map((c) => c.what),
-    [`scripts.postinstall: "${OLD}" -> "${HOOK}"`, `scripts.dependencies: "foo && ${OLD} && bar" -> "foo && ${HOOK} && bar"`],
+    [
+      `scripts.postinstall: "${OLD}" -> "${HOOK}"`,
+      `scripts.dependencies: "foo && ${OLD} && bar" -> "foo && ${HOOK} && bar"`,
+    ],
   );
   const text = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
   const {scripts} = JSON.parse(text);
@@ -110,13 +119,25 @@ test('keeps the indentation, key order and trailing newline', (t) => {
   const file = path.join(appRoot, 'package.json');
   fs.writeFileSync(
     file,
-    JSON.stringify({name: 'app', scripts: {build: 'x'}, workspaces: ['packages/*'], z: 1}, null, 2) + '\n',
+    JSON.stringify(
+      {name: 'app', scripts: {build: 'x'}, workspaces: ['packages/*'], z: 1},
+      null,
+      2,
+    ) + '\n',
   );
   ensureAppSetup(appRoot);
   const text = fs.readFileSync(file, 'utf8');
   assert.ok(text.endsWith('}\n'));
-  assert.match(text, /^\{\n {2}"name": "app",\n {2}"scripts": \{\n {4}"build": "x",/);
-  assert.deepEqual(Object.keys(JSON.parse(text)), ['name', 'scripts', 'workspaces', 'z']);
+  assert.match(
+    text,
+    /^\{\n {2}"name": "app",\n {2}"scripts": \{\n {4}"build": "x",/,
+  );
+  assert.deepEqual(Object.keys(JSON.parse(text)), [
+    'name',
+    'scripts',
+    'workspaces',
+    'z',
+  ]);
 
   fs.writeFileSync(file, JSON.stringify({name: 'app'}, null, '\t'));
   ensureAppSetup(appRoot);
@@ -130,9 +151,10 @@ test('.gitignore lines are added once, under a comment, and an equivalent line c
   const file = path.join(appRoot, '.gitignore');
   fs.writeFileSync(file, 'node_modules\n/packages-local');
   const changes = ensureAppSetup(appRoot);
-  assert.deepEqual(changes.filter((c) => c.file === '.gitignore'), [
-    {file: '.gitignore', what: 'ignore .packages-local.parked/'},
-  ]);
+  assert.deepEqual(
+    changes.filter((c) => c.file === '.gitignore'),
+    [{file: '.gitignore', what: 'ignore .packages-local.parked/'}],
+  );
   assert.equal(
     fs.readFileSync(file, 'utf8'),
     'node_modules\n/packages-local\n\n# linked localize\n.packages-local.parked/\n',

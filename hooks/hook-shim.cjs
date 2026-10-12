@@ -54,4 +54,10 @@ function runsOurHook(text) {
   return text.includes(HOOK_MARKER) || text.includes(HOOK_SCRIPT);
 }
 
-module.exports = {HOOK_MARKER, HOOK_SCRIPT, hookCommands, hookLine, runsOurHook};
+module.exports = {
+  HOOK_MARKER,
+  HOOK_SCRIPT,
+  hookCommands,
+  hookLine,
+  runsOurHook,
+};

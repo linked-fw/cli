@@ -85,7 +85,9 @@ export function findWorkspaceRoot(start: string): string | null {
  * globs list `packages-local/*`.
  */
 function underPackagesLocal(globs: string[], rel: string): boolean {
-  return rel.startsWith('packages-local/') && globs.includes('packages-local/*');
+  return (
+    rel.startsWith('packages-local/') && globs.includes('packages-local/*')
+  );
 }
 
 function nearestWithWorkspaces(

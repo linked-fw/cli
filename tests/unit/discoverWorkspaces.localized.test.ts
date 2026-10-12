@@ -33,7 +33,9 @@ describe('discoverWorkspaces with a localized checkout', () => {
   let checkout: string;
 
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'linked-localized-')));
+    tmp = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'linked-localized-')),
+    );
     app = path.join(tmp, 'app');
     // The app is a workspace root whose globs cover `packages/*` only —
     // `packages-local/` is outside every glob (not set up yet).
@@ -45,7 +47,11 @@ describe('discoverWorkspaces with a localized checkout', () => {
     });
     fs.mkdirSync(path.join(app, 'src'), {recursive: true});
     checkout = path.join(app, 'packages-local', 'pkg');
-    makePackage(checkout, {name: '@fixture/pkg', version: '1.0.0', linkedPackage: true});
+    makePackage(checkout, {
+      name: '@fixture/pkg',
+      version: '1.0.0',
+      linkedPackage: true,
+    });
     const nm = path.join(app, 'node_modules', '@fixture');
     fs.mkdirSync(nm, {recursive: true});
     fs.symlinkSync(checkout, path.join(nm, 'pkg'), 'dir');
@@ -85,12 +91,20 @@ describe('discoverWorkspaces with a localized checkout', () => {
     // Same rule for the ordinary `packages/*` case: the glob pass already uses
     // real directories, so this only pins that the fix does not regress it.
     const real = path.join(tmp, 'elsewhere', 'other');
-    makePackage(real, {name: '@fixture/other', version: '1.0.0', linkedPackage: true});
+    makePackage(real, {
+      name: '@fixture/other',
+      version: '1.0.0',
+      linkedPackage: true,
+    });
     const appPkgPath = path.join(app, 'package.json');
     const appPkg = JSON.parse(fs.readFileSync(appPkgPath, 'utf8'));
     appPkg.dependencies['@fixture/other'] = '^1.0.0';
     writeJson(appPkgPath, appPkg);
-    fs.symlinkSync(real, path.join(app, 'node_modules', '@fixture', 'other'), 'dir');
+    fs.symlinkSync(
+      real,
+      path.join(app, 'node_modules', '@fixture', 'other'),
+      'dir',
+    );
     const entries = await discoverWorkspaces([], app);
     const match = entries.find((e) => e.name === '@fixture/other');
     expect(match?.srcDir).toBe(path.join(real, 'src'));
@@ -109,7 +123,9 @@ describe('discoverWorkspaces with two localized checkouts, one depending on the 
   let app: string;
 
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'linked-localized-pair-')));
+    tmp = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'linked-localized-pair-')),
+    );
     app = path.join(tmp, 'app');
     writeJson(path.join(app, 'package.json'), {
       name: 'app',

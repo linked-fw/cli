@@ -16,14 +16,21 @@
 // lockfile lags an edit until the next install. It only reports; nothing here fails a command.
 //
 // The one implementation: lock-at-rest.cjs requires it after an install, and the cli's
-// src/localize/drift.ts loads it for `linked localize --list` and the check before `linked start`.
+// src/localize/drift.ts loads it (and its range check) for `linked localize --list` and the check
+// before `linked start`.
 // Plain, unbuilt CommonJS with Node built-ins only; `semver` is used when it can be required from
 // here (the cli depends on it), and without it no range is checked.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 
-const {LOCAL_DIR, readJson, trackedGlobs, expandGlobs, localMembers} = require('./manifests.cjs');
+const {
+  LOCAL_DIR,
+  readJson,
+  trackedGlobs,
+  expandGlobs,
+  localMembers,
+} = require('./manifests.cjs');
 
 let semver = null;
 try {
@@ -34,9 +41,18 @@ try {
 
 // One copy each, app-wide, localized or not: they hold registries of classes (or React's
 // context), so a second copy splits the app in two.
-const SINGLETONS = Object.freeze(['@_linked/core', '@_linked/react', '@_linked/server-utils']);
+const SINGLETONS = Object.freeze([
+  '@_linked/core',
+  '@_linked/react',
+  '@_linked/server-utils',
+]);
 
-const DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
+const DEP_FIELDS = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies',
+];
 
 // What an app without `workspaces` is read with: the layout linked apps use.
 const DEFAULT_GLOBS = ['packages/*'];
@@ -48,7 +64,8 @@ const DEFAULT_GLOBS = ['packages/*'];
  * prereleases follow npm's rule.
  */
 function satisfies(version, range) {
-  if (!semver || typeof version !== 'string' || typeof range !== 'string') return null;
+  if (!semver || typeof version !== 'string' || typeof range !== 'string')
+    return null;
   if (semver.valid(version) === null) return null;
   if (semver.validRange(range) === null) return null;
   return semver.satisfies(version, range);
@@ -56,8 +73,13 @@ function satisfies(version, range) {
 
 /** Every drift in the installed tree, in a stable order. No install yet means none. */
 function driftProblems(appRoot) {
-  const lock = readJson(path.join(appRoot, 'node_modules', '.package-lock.json'));
-  const packages = lock && typeof lock.packages === 'object' && lock.packages !== null ? lock.packages : null;
+  const lock = readJson(
+    path.join(appRoot, 'node_modules', '.package-lock.json'),
+  );
+  const packages =
+    lock && typeof lock.packages === 'object' && lock.packages !== null
+      ? lock.packages
+      : null;
   if (!packages) return [];
 
   const members = localMembers(appRoot);
@@ -67,7 +89,10 @@ function driftProblems(appRoot) {
   const memberKey = new RegExp(`^${LOCAL_DIR}/[^/]+$`);
   const keys = Object.keys(packages).sort();
   for (const key of keys) {
-    if (memberKey.test(key) && !fs.existsSync(path.join(appRoot, key, 'package.json')))
+    if (
+      memberKey.test(key) &&
+      !fs.existsSync(path.join(appRoot, key, 'package.json'))
+    )
       problems.push({kind: 'missing-dir', dir: key});
   }
 
@@ -118,9 +143,10 @@ function driftProblems(appRoot) {
  * everything whose ranges npm resolves.
  */
 function importers(appRoot, members) {
-  const tracked = expandGlobs(appRoot, trackedGlobs(appRoot, DEFAULT_GLOBS)).filter(
-    (dir) => dir !== LOCAL_DIR && !dir.startsWith(`${LOCAL_DIR}/`),
-  );
+  const tracked = expandGlobs(
+    appRoot,
+    trackedGlobs(appRoot, DEFAULT_GLOBS),
+  ).filter((dir) => dir !== LOCAL_DIR && !dir.startsWith(`${LOCAL_DIR}/`));
   return ['.', ...tracked, ...members.map((m) => m.dir)];
 }
 
@@ -140,4 +166,4 @@ function describeDrift(d) {
   }
 }
 
-module.exports = {SINGLETONS, driftProblems, describeDrift};
+module.exports = {driftProblems, describeDrift, satisfies};

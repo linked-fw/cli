@@ -41,7 +41,7 @@ describe('build-all package discovery', () => {
   afterEach(() => fs.rmSync(tmp, {recursive: true, force: true}));
 
   /**
-   * A tree shaped like Create Now's: an app root with five workspace members
+   * A tree shaped like a real app's: an app root with five workspace members
    * (one flagged app, one with no build script, one dependency that forgot
    * the flag, one the app does not depend on) plus localized checkouts in
    * `packages-local/`, which this app's globs do not cover yet (it has not
@@ -176,7 +176,10 @@ describe('build-all package discovery', () => {
     expect(reasons['@w/unrelated']).toMatch(/dependency tree/);
 
     // Nothing is discovered silently: found == built + skipped, exactly.
-    const accounted = [...plan.build.keys(), ...plan.skipped.map((s) => s.packageName)];
+    const accounted = [
+      ...plan.build.keys(),
+      ...plan.skipped.map((s) => s.packageName),
+    ];
     expect(accounted.sort()).toEqual(
       discoverLocalPackages(tmp)
         .map((p) => p.packageName)

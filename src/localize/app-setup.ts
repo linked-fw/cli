@@ -27,7 +27,7 @@ export interface SetupChange {
   what: string;
 }
 
-export const WORKSPACE_GLOB = `${LOCAL_DIR}/*`;
+const WORKSPACE_GLOB = `${LOCAL_DIR}/*`;
 /**
  * What the app's `postinstall` and `dependencies` run: the hook by its path,
  * not through `linked` (see hooks/lock-at-rest.cjs), and only when the cli is
@@ -101,7 +101,10 @@ function setupPackageJson(appRoot: string): SetupChange[] {
   if (changes.length) {
     const indent = text.match(/^([ \t]+)"/m)?.[1] ?? '  ';
     const eol = text.endsWith('\n') ? '\n' : '';
-    fs.writeFileSync(file, withEolOf(JSON.stringify(pkg, null, indent) + eol, text));
+    fs.writeFileSync(
+      file,
+      withEolOf(JSON.stringify(pkg, null, indent) + eol, text),
+    );
   }
   return changes;
 }
@@ -202,9 +205,6 @@ function readPackageJson(file: string): {
     );
   }
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg))
-    throw new LocalizeError(
-      `${file} is not a JSON object.`,
-      EXIT_REFUSED,
-    );
+    throw new LocalizeError(`${file} is not a JSON object.`, EXIT_REFUSED);
   return {text, pkg: pkg as Record<string, any>};
 }

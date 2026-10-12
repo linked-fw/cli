@@ -15,14 +15,20 @@ const {createHash} = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const {LEAK, LOCAL_DIR, localMembers, manifestPathspecs} = require('./manifests.cjs');
+const {
+  LEAK,
+  LOCAL_DIR,
+  localMembers,
+  manifestPathspecs,
+} = require('./manifests.cjs');
 const {hookLine, runsOurHook} = require('./hook-shim.cjs');
 const {terminalDevice} = require('./platform.cjs');
 
 // An app's lockfile is often over a megabyte, execFileSync's default buffer.
 const MAX_BUFFER = 256 * 1024 * 1024;
 const LOCKFILE = 'package-lock.json';
-const ADVICE = 'To change dependencies: npx linked delocalize, npm install <dep>, commit, then npx linked localize --parked.';
+const ADVICE =
+  'To change dependencies: npx linked delocalize, npm install <dep>, commit, then npx linked localize --parked.';
 // Where an interrupted first set-up leaves the checkouts: SETUP_ASIDE_DIR in src/localize/localize.ts.
 const SETUP_ASIDE = `${LOCAL_DIR}/.setup-aside`;
 
@@ -78,9 +84,23 @@ function run() {
     try {
       if (git('rev-parse', '--is-inside-work-tree').trim() !== 'true') return;
       // A changed manifest means the developer is changing dependencies: leave the lockfile alone.
-      changed = git('diff', '--name-only', '--relative', 'HEAD', '--', ...manifestPathspecs(root)).trim();
+      changed = git(
+        'diff',
+        '--name-only',
+        '--relative',
+        'HEAD',
+        '--',
+        ...manifestPathspecs(root),
+      ).trim();
       // Tracked and different from HEAD; an app that does not commit its lockfile has nothing to restore.
-      lockDirty = git('diff', '--name-only', '--relative', 'HEAD', '--', LOCKFILE).trim();
+      lockDirty = git(
+        'diff',
+        '--name-only',
+        '--relative',
+        'HEAD',
+        '--',
+        LOCKFILE,
+      ).trim();
     } catch {
       return; // no git, not a work tree, no HEAD, or git refused
     }
@@ -88,8 +108,12 @@ function run() {
 
     const linked = `${members.map((m) => m.dir).join(', ')} stay linked in node_modules`;
     if (changed) {
-      say(`WARNING: ${changed.split('\n').join(', ')} differ(s) from HEAD while checkouts are linked (${linked}).`);
-      say(`${LOCKFILE} now references packages-local and must NOT be committed.`);
+      say(
+        `WARNING: ${changed.split('\n').join(', ')} differ(s) from HEAD while checkouts are linked (${linked}).`,
+      );
+      say(
+        `${LOCKFILE} now references packages-local and must NOT be committed.`,
+      );
       say(ADVICE);
       return;
     }
@@ -101,18 +125,29 @@ function run() {
       return;
     }
     try {
+      // A staged lockfile that lists a checkout is no better than the work tree's: go back to
+      // HEAD. Otherwise the staged one is a deliberate change of the developer's: go back to it.
       if (LEAK.test(index)) {
         git('checkout', 'HEAD', '--', LOCKFILE);
-        say(`restored the committed ${LOCKFILE} (the staged one listed a checkout; ${linked})`);
+        say(
+          `restored the committed ${LOCKFILE} (the staged one listed a checkout; ${linked})`,
+        );
       } else {
         if (!git('diff', '--name-only', '--', LOCKFILE).trim()) return; // the work tree is the index
-        const stagedChange = git('diff', '--cached', '--name-only', '--', LOCKFILE).trim() !== '';
+        const stagedChange =
+          git('diff', '--cached', '--name-only', '--', LOCKFILE).trim() !== '';
         git('checkout', '--', LOCKFILE);
-        say(`restored the ${stagedChange ? 'staged' : 'committed'} ${LOCKFILE} (${linked})`);
+        say(
+          `restored the ${stagedChange ? 'staged' : 'committed'} ${LOCKFILE} (${linked})`,
+        );
       }
-      say('Changes to dependencies made while localized are not kept: they need `linked delocalize` first.');
+      say(
+        'Changes to dependencies made while localized are not kept: they need `linked delocalize` first.',
+      );
     } catch (e) {
-      say(`could not restore ${LOCKFILE}: ${String((e && e.stderr) || e).trim()}`);
+      say(
+        `could not restore ${LOCKFILE}: ${String((e && e.stderr) || e).trim()}`,
+      );
     }
   }
 
@@ -123,7 +158,8 @@ function run() {
   // none otherwise.
   function hooksNotice(members) {
     try {
-      if (git('rev-parse', '--is-inside-work-tree').trim() !== 'true') return [];
+      if (git('rev-parse', '--is-inside-work-tree').trim() !== 'true')
+        return [];
     } catch {
       return [];
     }
@@ -134,7 +170,11 @@ function run() {
     }
     let file, prefix;
     try {
-      file = path.resolve(root, git('rev-parse', '--git-path', 'hooks').trim(), 'pre-commit');
+      file = path.resolve(
+        root,
+        git('rev-parse', '--git-path', 'hooks').trim(),
+        'pre-commit',
+      );
       prefix = git('rev-parse', '--show-prefix').trim();
     } catch {
       return [];
@@ -147,9 +187,13 @@ function run() {
     }
     if (text === null) {
       // --adopt needs a git checkout: name one that is.
-      const checkout = members.find((m) => fs.existsSync(path.join(root, m.dir, '.git')));
+      const checkout = members.find((m) =>
+        fs.existsSync(path.join(root, m.dir, '.git')),
+      );
       const name = checkout ? checkout.name : "<any checkout's name>";
-      return [`git hooks are not installed in this clone: run \`npx linked localize ${name} --adopt --build ''\` once`];
+      return [
+        `git hooks are not installed in this clone: run \`npx linked localize ${name} --adopt --build ''\` once`,
+      ];
     }
     if (runsOurHook(text)) return [];
     // localize leaves a hook it did not write alone, so --adopt would not help: add ours by hand.
@@ -175,14 +219,20 @@ function run() {
       return; // nothing installed
     }
     const stamp = `${createHash('sha1').update(content).digest('hex')}\n`;
-    const stampFile = path.join(nodeModules, '.cache', 'linked-localize', 'drift-stamp');
+    const stampFile = path.join(
+      nodeModules,
+      '.cache',
+      'linked-localize',
+      'drift-stamp',
+    );
     try {
       if (fs.readFileSync(stampFile, 'utf8') === stamp) return;
     } catch {
       /* no report yet */
     }
     const {driftProblems, describeDrift} = require('./drift.cjs');
-    for (const d of driftProblems(root)) write(`[localize] drift: ${describeDrift(d)}\n`);
+    for (const d of driftProblems(root))
+      write(`[localize] drift: ${describeDrift(d)}\n`);
     for (const line of hooksNotice(members)) say(line);
     try {
       fs.mkdirSync(path.dirname(stampFile), {recursive: true});
@@ -195,7 +245,9 @@ function run() {
   try {
     // Rare, and the checkouts there are invisible to npm until moved back: said on every install.
     if (fs.existsSync(path.join(root, SETUP_ASIDE)))
-      say(`checkouts are set aside in ${SETUP_ASIDE}/ (an interrupted set-up): \`npx linked localize --list\` moves them back`);
+      say(
+        `checkouts are set aside in ${SETUP_ASIDE}/ (an interrupted set-up): \`npx linked localize --list\` moves them back`,
+      );
     const members = localMembers(root);
     if (!members.length) return; // nothing localized: npm owns the lockfile as usual
     restore(members);

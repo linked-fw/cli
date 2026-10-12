@@ -17,15 +17,22 @@ import {
 const APP = '/app';
 
 describe('decideCreatePackageTarget', () => {
-  const decide = (options: object, isTTY = false, appRoot: string | null = APP) =>
-    decideCreatePackageTarget({appRoot, options, isTTY});
+  const decide = (
+    options: object,
+    isTTY = false,
+    appRoot: string | null = APP,
+  ) => decideCreatePackageTarget({appRoot, options, isTTY});
 
   it('keeps the old behaviour outside an app', () => {
     expect(decide({}, true, null)).toEqual({kind: 'outside'});
   });
 
   it('refuses location flags outside an app', () => {
-    for (const options of [{location: 'packages'}, {remote: 'x'}, {push: true}]) {
+    for (const options of [
+      {location: 'packages'},
+      {remote: 'x'},
+      {push: true},
+    ]) {
       expect(decide(options, true, null).kind).toBe('refuse');
     }
   });
@@ -60,9 +67,12 @@ describe('decideCreatePackageTarget', () => {
   });
 
   it('refuses the contradictions', () => {
-    expect((decide({push: true}) as any).message).toMatch(/--push needs --remote/);
+    expect((decide({push: true}) as any).message).toMatch(
+      /--push needs --remote/,
+    );
     expect(
-      (decide({location: 'packages', remote: 'https://x/r.git'}) as any).message,
+      (decide({location: 'packages', remote: 'https://x/r.git'}) as any)
+        .message,
     ).toMatch(/packages-local/);
     expect((decide({location: 'elsewhere'}) as any).message).toMatch(
       /must be one of packages, packages-local/,
@@ -73,7 +83,9 @@ describe('decideCreatePackageTarget', () => {
 describe('findLinkedAppRoot', () => {
   let tmp: string;
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'linked-app-root-')));
+    tmp = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'linked-app-root-')),
+    );
   });
   afterEach(() => fs.rmSync(tmp, {recursive: true, force: true}));
 
@@ -92,7 +104,10 @@ describe('findLinkedAppRoot', () => {
   });
 
   it('returns null when no linkedApp is above', () => {
-    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({name: 'lib'}));
+    fs.writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({name: 'lib'}),
+    );
     // the walk continues above tmp, but no ancestor of an os tmpdir is a linked app
     expect(findLinkedAppRoot(tmp)).toBeNull();
   });

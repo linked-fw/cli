@@ -44,7 +44,16 @@ export interface PlanOptions {
 }
 
 /** Names that are batch-file shims on Windows, not executables. */
-const WINDOWS_SHIMS = new Set(['npm', 'npx', 'yarn', 'pnpm', 'corepack', 'linked', 'tsc', 'vite']);
+const WINDOWS_SHIMS = new Set([
+  'npm',
+  'npx',
+  'yarn',
+  'pnpm',
+  'corepack',
+  'linked',
+  'tsc',
+  'vite',
+]);
 
 /** What `cmd.exe` treats specially outside quotes (cross-spawn's set). */
 const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
@@ -80,8 +89,11 @@ function isWindowsShim(cmd: string): boolean {
  */
 function reparsesArgs(file: string): boolean {
   if (!/\.cmd$/i.test(file)) return false;
-  if (/(^|[\\/])node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i.test(file)) return true;
-  return WINDOWS_SHIMS.has(path.win32.basename(file).slice(0, -'.cmd'.length).toLowerCase());
+  if (/(^|[\\/])node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i.test(file))
+    return true;
+  return WINDOWS_SHIMS.has(
+    path.win32.basename(file).slice(0, -'.cmd'.length).toLowerCase(),
+  );
 }
 
 /**
@@ -102,7 +114,9 @@ function npmScript(
   if (started !== 'npm-cli.js' && started !== 'npx-cli.js') return null;
   const wanted = `${cmd}-cli.js`;
   const script =
-    started === wanted ? execPath : path.win32.join(path.win32.dirname(execPath), wanted);
+    started === wanted
+      ? execPath
+      : path.win32.join(path.win32.dirname(execPath), wanted);
   return exists(script) ? script : null;
 }
 
@@ -118,12 +132,23 @@ export function planCommand(
   }
   const name = cmd.toLowerCase();
   if (name === 'npm' || name === 'npx') {
-    const script = npmScript(name, opts.env ?? process.env, opts.exists ?? fs.existsSync);
+    const script = npmScript(
+      name,
+      opts.env ?? process.env,
+      opts.exists ?? fs.existsSync,
+    );
     if (script) {
-      return {command: opts.execPath ?? process.execPath, args: [script, ...args], shell: false};
+      return {
+        command: opts.execPath ?? process.execPath,
+        args: [script, ...args],
+        shell: false,
+      };
     }
   }
-  const file = /\.(cmd|bat|exe)$/i.test(cmd) || !WINDOWS_SHIMS.has(name) ? cmd : `${cmd}.cmd`;
+  const file =
+    /\.(cmd|bat|exe)$/i.test(cmd) || !WINDOWS_SHIMS.has(name)
+      ? cmd
+      : `${cmd}.cmd`;
   const doubleEscape = reparsesArgs(file);
   const line = [
     // A path with spaces is quoted; a bare name stays bare so cmd.exe searches PATH for it.
@@ -190,7 +215,9 @@ export function runCommand(
       stderr += chunk;
       if (echo) process.stderr.write(chunk);
     });
-    child.on('error', (e) => resolve({status: 1, stdout, stderr: stderr + e.message}));
+    child.on('error', (e) =>
+      resolve({status: 1, stdout, stderr: stderr + e.message}),
+    );
     child.on('close', (code) => resolve({status: code ?? 1, stdout, stderr}));
     if (input !== undefined) child.stdin?.end(input);
     else child.stdin?.end();

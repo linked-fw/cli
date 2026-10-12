@@ -17,7 +17,7 @@ export function existsOrLink(p: string): boolean {
   return fs.existsSync(p) || isSymlink(p);
 }
 
-export function isGitCheckout(p: string): boolean {
+function isGitCheckout(p: string): boolean {
   return fs.existsSync(path.join(p, '.git'));
 }
 
@@ -36,7 +36,7 @@ export function readJson(file: string): any {
 }
 
 /** Where the link at `p` points, absolute, whether or not the target exists. */
-export function linkTargetOf(p: string): string {
+function linkTargetOf(p: string): string {
   try {
     return fs.realpathSync(p);
   } catch {

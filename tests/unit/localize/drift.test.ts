@@ -90,7 +90,10 @@ test('a nested copy of a singleton that is not localized is flagged', (t) => {
       at: 'node_modules/foo/node_modules/@_linked/core',
     },
   ]);
-  assert.match(describeDrift(drift[0]), /nested copy of @_linked\/core@2\.20\.0/);
+  assert.match(
+    describeDrift(drift[0]),
+    /nested copy of @_linked\/core@2\.20\.0/,
+  );
 });
 
 test("a root range the checkout misses is a range-miss of '<root>'", (t) => {
@@ -98,7 +101,10 @@ test("a root range the checkout misses is a range-miss of '<root>'", (t) => {
   checkout(appRoot, '_linked-core', {name: '@_linked/core', version: '2.28.3'});
   hiddenLock(appRoot, {
     'packages-local/_linked-core': {name: '@_linked/core', version: '2.28.3'},
-    'node_modules/@_linked/core': {resolved: 'packages-local/_linked-core', link: true},
+    'node_modules/@_linked/core': {
+      resolved: 'packages-local/_linked-core',
+      link: true,
+    },
   });
   const drift = driftProblems(appRoot);
   assert.deepEqual(drift, [
@@ -122,15 +128,27 @@ test('ranges come from packages/* and from other checkouts too', (t) => {
   const appRoot = consumer(t);
   hiddenLock(appRoot, linkedPair(appRoot));
   // b's live manifest moves ahead of a; the hidden lockfile has not seen it yet.
-  checkout(appRoot, 'b', {name: '@x/b', version: '2.0.0', peerDependencies: {'@x/a': '^1.3.0'}});
+  checkout(appRoot, 'b', {
+    name: '@x/b',
+    version: '2.0.0',
+    peerDependencies: {'@x/a': '^1.3.0'},
+  });
   fs.mkdirSync(path.join(appRoot, 'packages', 'site'), {recursive: true});
   fs.writeFileSync(
     path.join(appRoot, 'packages', 'site', 'package.json'),
-    JSON.stringify({name: 'site', devDependencies: {'@x/b': '^3.0.0', '@x/a': 'workspace:*'}}),
+    JSON.stringify({
+      name: 'site',
+      devDependencies: {'@x/b': '^3.0.0', '@x/a': 'workspace:*'},
+    }),
   );
   assert.deepEqual(
-    driftProblems(appRoot).map((d) => d.kind === 'range-miss' && `${d.importer} ${d.field} ${d.name}`),
-    ['packages/site devDependencies @x/b', 'packages-local/b peerDependencies @x/a'],
+    driftProblems(appRoot).map(
+      (d) => d.kind === 'range-miss' && `${d.importer} ${d.field} ${d.name}`,
+    ),
+    [
+      'packages/site devDependencies @x/b',
+      'packages-local/b peerDependencies @x/a',
+    ],
   );
 });
 

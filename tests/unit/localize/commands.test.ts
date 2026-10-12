@@ -37,14 +37,19 @@ function cloning(appRoot, pkgFor, handler?) {
   return stubbed(appRoot, (inv) => {
     if (inv.cmd === 'git' && inv.args[0] === 'clone') {
       const name = pkgFor.name;
-      seedCheckout(appRoot, path.relative(appRoot, inv.args[inv.args.length - 1]), {
-        version: '1.0.0',
-        ...pkgFor,
-        name,
-      });
+      seedCheckout(
+        appRoot,
+        path.relative(appRoot, inv.args[inv.args.length - 1]),
+        {
+          version: '1.0.0',
+          ...pkgFor,
+          name,
+        },
+      );
       return ok();
     }
-    if (inv.cmd === 'git' && inv.args[0] === 'symbolic-ref') return ok('main\n');
+    if (inv.cmd === 'git' && inv.args[0] === 'symbolic-ref')
+      return ok('main\n');
     return handler?.(inv);
   });
 }
@@ -53,20 +58,27 @@ function cloning(appRoot, pkgFor, handler?) {
 const trace = (deps, appRoot) =>
   deps.calls
     .filter((c) => !(c.cmd === 'git' && c.args[0] !== 'clone'))
-    .map(
-      (c) =>
-        `${c.cmd}${c.args.length ? ' ' + c.args.join(' ') : ''} @ ${
-          c.cwd ? path.relative(appRoot, c.cwd) || '.' : '-'
-        }`.replace(appRoot + path.sep, ''),
+    .map((c) =>
+      `${c.cmd}${c.args.length ? ' ' + c.args.join(' ') : ''} @ ${
+        c.cwd ? path.relative(appRoot, c.cwd) || '.' : '-'
+      }`.replace(appRoot + path.sep, ''),
     );
 
 // --- localize --------------------------------------------------------------
 
 test('localize clones, sets up, installs once at the root, then builds', (t) => {
-  const appRoot = consumer(t, {dependencies: {'@x/a': '^1.0.0'}}, {setUp: false});
+  const appRoot = consumer(
+    t,
+    {dependencies: {'@x/a': '^1.0.0'}},
+    {setUp: false},
+  );
   const deps = cloning(appRoot, {name: '@x/a'});
 
-  const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
+  const code = localize(
+    ['@x/a'],
+    {repo: 'https://example.invalid/a.git'},
+    deps,
+  );
 
   assert.equal(code, 0, deps.output());
   assert.deepEqual(trace(deps, appRoot), [
@@ -75,7 +87,9 @@ test('localize clones, sets up, installs once at the root, then builds', (t) => 
     'npm install --no-audit --no-fund @ .',
     'linked build @ packages-local/x-a',
   ]);
-  const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
+  );
   assert.deepEqual(pkg.workspaces, ['packages-local/*']);
   assert.match(pkg.scripts.postinstall, /hooks\/lock-at-rest\.cjs/);
   assert.match(
@@ -93,7 +107,10 @@ function writingLockfile(appRoot, {lockOnly, installed}) {
     if (inv.cmd !== 'npm' || inv.args[0] !== 'install') return undefined;
     if (inv.args.includes('--package-lock-only')) {
       // npm sees no checkout: the set-up moved none in yet.
-      assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
+      assert.equal(
+        fs.existsSync(path.join(appRoot, 'packages-local/x-a')),
+        false,
+      );
       if (lockOnly === null) return fail('npm ERR! ENOTFOUND registry');
       fs.writeFileSync(lockfile, lockOnly);
     } else {
@@ -113,16 +130,27 @@ test('first set-up: the lockfile npm makes before the clone is written back afte
     installed: '{"packages": {"packages-local/x-a": {}}}\n',
   });
 
-  assert.equal(localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps), 0, deps.output());
+  assert.equal(
+    localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps),
+    0,
+    deps.output(),
+  );
 
   assert.deepEqual(trace(deps, appRoot).slice(0, 3), [
     'npm install --package-lock-only --ignore-scripts --no-audit --no-fund @ .',
     'git clone -- https://example.invalid/a.git packages-local/x-a @ -',
     'npm install --no-audit --no-fund @ .',
   ]);
-  assert.equal(fs.readFileSync(lockfile, 'utf8'), setupLock, 'the set-up lockfile, not the install\'s');
+  assert.equal(
+    fs.readFileSync(lockfile, 'utf8'),
+    setupLock,
+    "the set-up lockfile, not the install's",
+  );
   assert.match(deps.output(), /put back the set-up's lockfile/);
-  assert.match(deps.output(), /git add package\.json package-lock\.json \.gitignore/);
+  assert.match(
+    deps.output(),
+    /git add package\.json package-lock\.json \.gitignore/,
+  );
   assert.doesNotMatch(deps.output(), /npx linked delocalize/);
 });
 
@@ -131,10 +159,20 @@ test('first set-up: when npm cannot make the lockfile, the manual steps are prin
   const installed = '{"packages": {"packages-local/x-a": {}}}\n';
   const deps = writingLockfile(appRoot, {lockOnly: null, installed});
 
-  assert.equal(localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps), 0, deps.output());
+  assert.equal(
+    localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps),
+    0,
+    deps.output(),
+  );
 
-  assert.equal(fs.readFileSync(path.join(appRoot, 'package-lock.json'), 'utf8'), installed);
-  assert.match(deps.output(), /could not make the set-up's package-lock\.json in one step/);
+  assert.equal(
+    fs.readFileSync(path.join(appRoot, 'package-lock.json'), 'utf8'),
+    installed,
+  );
+  assert.match(
+    deps.output(),
+    /could not make the set-up's package-lock\.json in one step/,
+  );
   assert.match(deps.output(), /ENOTFOUND/);
   assert.match(deps.output(), /npx linked delocalize\n {2}npm install\n/);
   assert.match(deps.output(), /npx linked localize --parked/);
@@ -155,7 +193,14 @@ test('first set-up: a root entry with workspaces and an install script is edited
         version: '1.0.0',
         lockfileVersion: 3,
         requires: true,
-        packages: {'': {name: 'consumer', version: '1.0.0', hasInstallScript: true, workspaces}},
+        packages: {
+          '': {
+            name: 'consumer',
+            version: '1.0.0',
+            hasInstallScript: true,
+            workspaces,
+          },
+        },
       },
       null,
       2,
@@ -166,11 +211,24 @@ test('first set-up: a root entry with workspaces and an install script is edited
     installed: '{"packages": {"packages-local/x-a": {}}}\n',
   });
 
-  assert.equal(localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps), 0, deps.output());
+  assert.equal(
+    localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps),
+    0,
+    deps.output(),
+  );
 
-  assert.equal(deps.calls.some((c) => c.args.includes('--package-lock-only')), false);
-  assert.equal(fs.readFileSync(lockfile, 'utf8'), lock(['packages/*', 'packages-local/*']));
-  assert.match(deps.output(), /root entry's "workspaces" now matches package\.json/);
+  assert.equal(
+    deps.calls.some((c) => c.args.includes('--package-lock-only')),
+    false,
+  );
+  assert.equal(
+    fs.readFileSync(lockfile, 'utf8'),
+    lock(['packages/*', 'packages-local/*']),
+  );
+  assert.match(
+    deps.output(),
+    /root entry's "workspaces" now matches package\.json/,
+  );
   assert.match(deps.output(), /put back the set-up's lockfile/);
   assert.doesNotMatch(deps.output(), /npx linked delocalize/);
 });
@@ -178,8 +236,14 @@ test('first set-up: a root entry with workspaces and an install script is edited
 test('an app already set up makes no set-up lockfile', (t) => {
   const appRoot = consumer(t);
   const deps = cloning(appRoot, {name: '@x/a'});
-  assert.equal(localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps), 0);
-  assert.equal(deps.calls.some((c) => c.args.includes('--package-lock-only')), false);
+  assert.equal(
+    localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps),
+    0,
+  );
+  assert.equal(
+    deps.calls.some((c) => c.args.includes('--package-lock-only')),
+    false,
+  );
   assert.doesNotMatch(deps.output(), /commit these|set-up/);
 });
 
@@ -188,16 +252,25 @@ test('one install for several names, and a failing build only warns (exit 5)', (
   let n = 0;
   const deps = stubbed(appRoot, (inv) => {
     if (inv.cmd === 'git' && inv.args[0] === 'clone') {
-      seedCheckout(appRoot, path.relative(appRoot, inv.args[inv.args.length - 1]), {
-        name: ['@x/a', '@x/b'][n++],
-        version: '1.0.0',
-      });
+      seedCheckout(
+        appRoot,
+        path.relative(appRoot, inv.args[inv.args.length - 1]),
+        {
+          name: ['@x/a', '@x/b'][n++],
+          version: '1.0.0',
+        },
+      );
       return ok();
     }
-    if (inv.cmd === 'linked build' && inv.cwd.endsWith('x-b')) return fail('tsc broke');
+    if (inv.cmd === 'linked build' && inv.cwd.endsWith('x-b'))
+      return fail('tsc broke');
   });
 
-  const code = localize(['@x/a', '@x/b'], {repo: 'https://example.invalid/r.git'}, deps);
+  const code = localize(
+    ['@x/a', '@x/b'],
+    {repo: 'https://example.invalid/r.git'},
+    deps,
+  );
 
   assert.equal(code, 5, deps.output());
   assert.equal(deps.npmCalls().length, 1, 'one npm install for both');
@@ -208,7 +281,10 @@ test('one install for several names, and a failing build only warns (exit 5)', (
 test('localize builds the cli with npm run build, and --build overrides every default', (t) => {
   const appRoot = consumer(t);
   const deps = cloning(appRoot, {name: '@_linked/cli'});
-  assert.equal(localize(['@_linked/cli'], {repo: 'https://example.invalid/cli.git'}, deps), 0);
+  assert.equal(
+    localize(['@_linked/cli'], {repo: 'https://example.invalid/cli.git'}, deps),
+    0,
+  );
   assert.ok(
     trace(deps, appRoot).includes('npm run build @ packages-local/_linked-cli'),
     trace(deps, appRoot).join('\n'),
@@ -216,9 +292,14 @@ test('localize builds the cli with npm run build, and --build overrides every de
 
   const appRoot2 = consumer(t);
   const deps2 = cloning(appRoot2, {name: '@_linked/cli'});
-  localize(['@_linked/cli'], {repo: 'https://example.invalid/cli.git', build: ''}, deps2);
+  localize(
+    ['@_linked/cli'],
+    {repo: 'https://example.invalid/cli.git', build: ''},
+    deps2,
+  );
   assert.equal(
-    deps2.calls.filter((c) => /build/.test(c.cmd) || c.args.includes('build')).length,
+    deps2.calls.filter((c) => /build/.test(c.cmd) || c.args.includes('build'))
+      .length,
     0,
     "--build '' builds nothing",
   );
@@ -229,15 +310,23 @@ test('the cli builds before the others and then gets its bin linked', (t) => {
   let n = 0;
   const deps = stubbed(appRoot, (inv) => {
     if (inv.cmd === 'git' && inv.args[0] === 'clone') {
-      seedCheckout(appRoot, path.relative(appRoot, inv.args[inv.args.length - 1]), {
-        name: ['@x/a', '@_linked/cli'][n++],
-        version: '1.0.0',
-      });
+      seedCheckout(
+        appRoot,
+        path.relative(appRoot, inv.args[inv.args.length - 1]),
+        {
+          name: ['@x/a', '@_linked/cli'][n++],
+          version: '1.0.0',
+        },
+      );
       return ok();
     }
   });
 
-  const code = localize(['@x/a', '@_linked/cli'], {repo: 'https://example.invalid/r.git'}, deps);
+  const code = localize(
+    ['@x/a', '@_linked/cli'],
+    {repo: 'https://example.invalid/r.git'},
+    deps,
+  );
 
   assert.equal(code, 0, deps.output());
   assert.deepEqual(trace(deps, appRoot).slice(2), [
@@ -254,7 +343,10 @@ test('a failed cli build links no bin', (t) => {
     inv.cmd === 'npm run build' ? fail('core has no lib/') : undefined,
   );
 
-  assert.equal(localize(['@_linked/cli'], {repo: 'https://example.invalid/cli.git'}, deps), 5);
+  assert.equal(
+    localize(['@_linked/cli'], {repo: 'https://example.invalid/cli.git'}, deps),
+    5,
+  );
   assert.equal(
     deps.calls.filter((c) => c.cmd === 'npm' && c.args[0] === 'rebuild').length,
     0,
@@ -264,10 +356,17 @@ test('a failed cli build links no bin', (t) => {
 
 test('an override on a checkout already localized refuses localizing another', (t) => {
   const appRoot = consumer(t, {overrides: {'@_linked/core': '$@_linked/core'}});
-  seedCheckout(appRoot, 'packages-local/_linked-core', {name: '@_linked/core', version: '1.0.0'});
+  seedCheckout(appRoot, 'packages-local/_linked-core', {
+    name: '@_linked/core',
+    version: '1.0.0',
+  });
   const deps = cloning(appRoot, {name: '@x/a'});
 
-  const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
+  const code = localize(
+    ['@x/a'],
+    {repo: 'https://example.invalid/a.git'},
+    deps,
+  );
 
   assert.equal(code, 6, deps.output());
   assert.match(deps.output(), /"@_linked\/core"/);
@@ -280,40 +379,67 @@ test('localize refuses a conflicting override: exit 6, the key named, nothing cl
   const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
   const deps = cloning(appRoot, {name: '@_linked/core'});
 
-  const code = localize(['@_linked/core'], {repo: 'https://example.invalid/core.git'}, deps);
+  const code = localize(
+    ['@_linked/core'],
+    {repo: 'https://example.invalid/core.git'},
+    deps,
+  );
 
   assert.equal(code, 6);
   assert.match(deps.output(), /"@_linked\/core"/);
   assert.match(deps.output(), /Remove that key from "overrides"/);
   assert.equal(deps.calls.length, 0, 'nothing ran');
-  assert.equal(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'), before);
+  assert.equal(
+    fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
+    before,
+  );
   assert.equal(fs.existsSync(path.join(appRoot, 'packages-local')), false);
 });
 
 test('localize takes a parked checkout back: no clone, no build, one install', (t) => {
   const appRoot = consumer(t);
-  seedCheckout(appRoot, '.packages-local.parked/x-a', {name: '@x/a', version: '1.0.0'});
+  seedCheckout(appRoot, '.packages-local.parked/x-a', {
+    name: '@x/a',
+    version: '1.0.0',
+  });
   const deps = stubbed(appRoot);
 
   const code = localize(['@x/a'], {}, deps);
 
   assert.equal(code, 0, deps.output());
-  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/x-a/package.json')));
-  assert.equal(fs.existsSync(path.join(appRoot, '.packages-local.parked/x-a')), false);
-  assert.deepEqual(trace(deps, appRoot), ['npm install --no-audit --no-fund @ .']);
+  assert.ok(
+    fs.existsSync(path.join(appRoot, 'packages-local/x-a/package.json')),
+  );
+  assert.equal(
+    fs.existsSync(path.join(appRoot, '.packages-local.parked/x-a')),
+    false,
+  );
+  assert.deepEqual(trace(deps, appRoot), [
+    'npm install --no-audit --no-fund @ .',
+  ]);
 });
 
 test('localize refuses (exit 6) to take back a parked name that is a member under another directory', (t) => {
   const appRoot = consumer(t);
-  seedCheckout(appRoot, '.packages-local.parked/x-a', {name: '@x/a', version: '1.0.0'});
-  seedCheckout(appRoot, 'packages-local/a-by-hand', {name: '@x/a', version: '1.0.0'});
+  seedCheckout(appRoot, '.packages-local.parked/x-a', {
+    name: '@x/a',
+    version: '1.0.0',
+  });
+  seedCheckout(appRoot, 'packages-local/a-by-hand', {
+    name: '@x/a',
+    version: '1.0.0',
+  });
   const deps = stubbed(appRoot);
 
   assert.equal(localize(['@x/a'], {}, deps), 6);
 
   assert.match(deps.output(), /packages-local\/a-by-hand is @x\/a already/);
   assert.doesNotMatch(deps.output(), /\[localize\] \[localize\]/);
-  assert.ok(fs.existsSync(path.join(appRoot, '.packages-local.parked/x-a/package.json')));
+  assert.ok(
+    fs.existsSync(
+      path.join(appRoot, '.packages-local.parked/x-a/package.json'),
+    ),
+  );
   assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
   assert.equal(deps.npmCalls().length, 0);
 });
@@ -323,7 +449,11 @@ test('an existing directory is refused with an --adopt hint, and nothing is inst
   seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
   const deps = stubbed(appRoot);
 
-  const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
+  const code = localize(
+    ['@x/a'],
+    {repo: 'https://example.invalid/a.git'},
+    deps,
+  );
 
   assert.equal(code, 6);
   assert.match(deps.output(), /linked localize @x\/a --adopt/);
@@ -334,7 +464,11 @@ test('a clone that is not the package is removed again, so it never becomes a me
   const appRoot = consumer(t);
   const deps = cloning(appRoot, {name: 'monorepo-root'});
 
-  const code = localize(['@x/a'], {repo: 'https://example.invalid/mono.git'}, deps);
+  const code = localize(
+    ['@x/a'],
+    {repo: 'https://example.invalid/mono.git'},
+    deps,
+  );
 
   assert.equal(code, 6);
   assert.match(deps.output(), /declares itself as "monorepo-root"/);
@@ -349,11 +483,18 @@ test('a failed root install exits 7 and builds nothing', (t) => {
     inv.cmd === 'npm' ? fail('ERESOLVE') : undefined,
   );
 
-  const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
+  const code = localize(
+    ['@x/a'],
+    {repo: 'https://example.invalid/a.git'},
+    deps,
+  );
 
   assert.equal(code, 7);
   assert.match(deps.output(), /ERESOLVE/);
-  assert.equal(deps.calls.some((c) => c.cmd === 'linked build'), false);
+  assert.equal(
+    deps.calls.some((c) => c.cmd === 'linked build'),
+    false,
+  );
 });
 
 test('a set-up refusal is printed with one [localize] prefix, like every other refusal', (t) => {
@@ -373,7 +514,14 @@ test('--dir other than packages-local is a usage error (exit 2)', (t) => {
   const appRoot = consumer(t);
   const deps = stubbed(appRoot);
   assert.equal(localize(['@x/a'], {dir: 'vendor'}, deps), 2);
-  assert.equal(localize(['@x/a'], {dir: 'packages-local/'}, stubbed(appRoot, () => fail())), 4);
+  assert.equal(
+    localize(
+      ['@x/a'],
+      {dir: 'packages-local/'},
+      stubbed(appRoot, () => fail()),
+    ),
+    4,
+  );
 });
 
 // --- delocalize ------------------------------------------------------------
@@ -385,33 +533,56 @@ test('delocalize the last checkout parks it and runs npm ci', (t) => {
 
   assert.equal(delocalize(['@x/a'], {}, deps), 0, deps.output());
 
-  assert.ok(fs.existsSync(path.join(appRoot, '.packages-local.parked/x-a/package.json')));
+  assert.ok(
+    fs.existsSync(
+      path.join(appRoot, '.packages-local.parked/x-a/package.json'),
+    ),
+  );
   assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
   assert.deepEqual(trace(deps, appRoot), ['npm ci --no-audit --no-fund @ .']);
-  assert.match(deps.output(), /npm ci --no-audit --no-fund \(app root; the committed package-lock\.json, unchanged\)/);
-  const git = deps.calls.filter((c) => c.cmd === 'git').map((c) => c.args.join(' '));
-  assert.ok(git.includes('ls-files --error-unmatch -- package-lock.json'), git.join('\n'));
-  assert.ok(git.includes('diff --quiet HEAD -- package.json package-lock.json'), git.join('\n'));
+  assert.match(
+    deps.output(),
+    /npm ci --no-audit --no-fund \(app root; the committed package-lock\.json, unchanged\)/,
+  );
+  const git = deps.calls
+    .filter((c) => c.cmd === 'git')
+    .map((c) => c.args.join(' '));
+  assert.ok(
+    git.includes('ls-files --error-unmatch -- package-lock.json'),
+    git.join('\n'),
+  );
+  assert.ok(
+    git.includes('diff --quiet HEAD -- package.json package-lock.json'),
+    git.join('\n'),
+  );
   assert.match(deps.output(), /linked localize @x\/a` takes it back/);
 });
 
 test('delocalize the last checkout runs npm install, not npm ci, without a clean tracked lockfile', (t) => {
   for (const [why, failing, said] of [
     ['untracked', 'ls-files', /package-lock\.json is not tracked by git/],
-    ['changed', 'diff', /package\.json or package-lock\.json differs from HEAD/],
+    [
+      'changed',
+      'diff',
+      /package\.json or package-lock\.json differs from HEAD/,
+    ],
   ] as const) {
     const appRoot = consumer(t);
-    seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
+    seedCheckout(appRoot, 'packages-local/x-a', {
+      name: '@x/a',
+      version: '1.0.0',
+    });
     const deps = stubbed(appRoot, (inv) =>
       inv.cmd === 'git' && inv.args[0] === failing ? fail('', 1) : undefined,
     );
 
     assert.equal(delocalize(['@x/a'], {}, deps), 0, `${why}: ${deps.output()}`);
 
-    assert.deepEqual(trace(deps, appRoot), [
-      'npm install --no-audit --no-fund @ .',
-      'npm rebuild @x/a @ .',
-    ], why);
+    assert.deepEqual(
+      trace(deps, appRoot),
+      ['npm install --no-audit --no-fund @ .', 'npm rebuild @x/a @ .'],
+      why,
+    );
     assert.match(deps.output(), said, why);
   }
 });
@@ -434,7 +605,10 @@ test('delocalize one of two runs npm install then npm rebuild <name>', (t) => {
 
 test('delocalize --purge refuses on unpushed commits, and --force deletes', (t) => {
   const appRoot = consumer(t);
-  const dir = seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
+  const dir = seedCheckout(appRoot, 'packages-local/x-a', {
+    name: '@x/a',
+    version: '1.0.0',
+  });
   const unpushed = (inv) =>
     inv.cmd === 'git' && inv.args[0] === 'log' ? ok('abc123 wip\n') : undefined;
 
@@ -447,12 +621,18 @@ test('delocalize --purge refuses on unpushed commits, and --force deletes', (t) 
   const forced = stubbed(appRoot, unpushed);
   assert.equal(delocalize(['@x/a'], {purge: true, force: true}, forced), 0);
   assert.equal(fs.existsSync(dir), false);
-  assert.equal(fs.existsSync(path.join(appRoot, '.packages-local.parked')), false);
+  assert.equal(
+    fs.existsSync(path.join(appRoot, '.packages-local.parked')),
+    false,
+  );
 });
 
 test('delocalize of something not localized warns (exit 5) and installs nothing', (t) => {
   const appRoot = consumer(t);
-  seedCheckout(appRoot, '.packages-local.parked/x-a', {name: '@x/a', version: '1.0.0'});
+  seedCheckout(appRoot, '.packages-local.parked/x-a', {
+    name: '@x/a',
+    version: '1.0.0',
+  });
   const deps = stubbed(appRoot);
   assert.equal(delocalize(['@x/a', '@x/zzz'], {}, deps), 5);
   assert.match(deps.output(), /already parked/);
@@ -510,7 +690,10 @@ test('a monorepo package is a link into packages-local/.repos, and parks and com
 test('--list shows members, parked and a range-miss line; --list --check exits 1 then', (t) => {
   const appRoot = consumer(t, {dependencies: {'@x/a': '^2.0.0'}});
   seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.4.0'});
-  seedCheckout(appRoot, '.packages-local.parked/x-b', {name: '@x/b', version: '3.0.0'});
+  seedCheckout(appRoot, '.packages-local.parked/x-b', {
+    name: '@x/b',
+    version: '3.0.0',
+  });
   fs.writeFileSync(
     path.join(appRoot, 'node_modules/.package-lock.json'),
     JSON.stringify({
@@ -521,14 +704,22 @@ test('--list shows members, parked and a range-miss line; --list --check exits 1
     }),
   );
   const branch = (inv) =>
-    inv.cmd === 'git' && inv.args[0] === 'symbolic-ref' ? ok('feat/x\n') : undefined;
+    inv.cmd === 'git' && inv.args[0] === 'symbolic-ref'
+      ? ok('feat/x\n')
+      : undefined;
 
   const deps = stubbed(appRoot, branch);
   assert.equal(list({}, deps), 0);
   const out = deps.output();
   assert.match(out, /@x\/a\s+packages-local\/x-a\s+feat\/x\s+1\.4\.0/);
-  assert.match(out, /@x\/b\s+\.packages-local\.parked\/x-b\s+feat\/x\s+3\.0\.0\s+\(parked\)/);
-  assert.match(out, /drift: @x\/a@1\.4\.0 \(packages-local\/x-a\) does not satisfy dependencies "\^2\.0\.0" of <root>/);
+  assert.match(
+    out,
+    /@x\/b\s+\.packages-local\.parked\/x-b\s+feat\/x\s+3\.0\.0\s+\(parked\)/,
+  );
+  assert.match(
+    out,
+    /drift: @x\/a@1\.4\.0 \(packages-local\/x-a\) does not satisfy dependencies "\^2\.0\.0" of <root>/,
+  );
   assert.match(out, /1 localized · 1 parked · 1 drift/);
 
   const check = stubbed(appRoot, branch);
@@ -547,7 +738,10 @@ test('--list says nothing when nothing is localized, and --check exits 0', (t) =
 
 test('a leftover local-packages.json gets one migration hint and is otherwise ignored', (t) => {
   const appRoot = consumer(t);
-  fs.writeFileSync(path.join(appRoot, 'local-packages.json'), '{"packages": {"@x/a": {}}}');
+  fs.writeFileSync(
+    path.join(appRoot, 'local-packages.json'),
+    '{"packages": {"@x/a": {}}}',
+  );
   const deps = stubbed(appRoot);
   assert.equal(list({}, deps), 0);
   assert.equal(deps.warns.length, 1);
@@ -559,33 +753,63 @@ test('a leftover local-packages.json gets one migration hint and is otherwise ig
 test('checkouts an interrupted set-up left in packages-local/.setup-aside are moved back first', (t) => {
   for (const command of ['list', 'delocalize', 'localize'] as const) {
     const appRoot = consumer(t);
-    seedCheckout(appRoot, 'packages-local/.setup-aside/x-a', {name: '@x/a', version: '1.0.0'});
+    seedCheckout(appRoot, 'packages-local/.setup-aside/x-a', {
+      name: '@x/a',
+      version: '1.0.0',
+    });
     const deps = stubbed(appRoot, (inv) =>
-      inv.cmd === 'git' && inv.args[0] === 'symbolic-ref' ? ok('main\n') : undefined,
+      inv.cmd === 'git' && inv.args[0] === 'symbolic-ref'
+        ? ok('main\n')
+        : undefined,
     );
     if (command === 'list') assert.equal(list({}, deps), 0, deps.output());
     // Nothing named so: the restored checkout is what is parked.
-    if (command === 'delocalize') assert.equal(delocalize([], {}, deps), 0, deps.output());
+    if (command === 'delocalize')
+      assert.equal(delocalize([], {}, deps), 0, deps.output());
     if (command === 'localize')
-      assert.equal(localize(['@x/a'], {}, deps), 6, 'then refused as already there');
+      assert.equal(
+        localize(['@x/a'], {}, deps),
+        6,
+        'then refused as already there',
+      );
     assert.match(
       deps.output(),
       /moved 1 checkout back from packages-local\/\.setup-aside\/ into packages-local\//,
       command,
     );
-    assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside')), false, command);
-    const home = command === 'delocalize' ? '.packages-local.parked/x-a' : 'packages-local/x-a';
-    assert.ok(fs.existsSync(path.join(appRoot, home, 'package.json')), `${command}: ${home}`);
+    assert.equal(
+      fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside')),
+      false,
+      command,
+    );
+    const home =
+      command === 'delocalize'
+        ? '.packages-local.parked/x-a'
+        : 'packages-local/x-a';
+    assert.ok(
+      fs.existsSync(path.join(appRoot, home, 'package.json')),
+      `${command}: ${home}`,
+    );
   }
 });
 
 test('a leftover that clashes with a checkout of the same name refuses (exit 6) and moves nothing', (t) => {
   const appRoot = consumer(t);
-  seedCheckout(appRoot, 'packages-local/.setup-aside/x-a', {name: '@x/a', version: '1.0.0'});
+  seedCheckout(appRoot, 'packages-local/.setup-aside/x-a', {
+    name: '@x/a',
+    version: '1.0.0',
+  });
   seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '2.0.0'});
   const deps = stubbed(appRoot);
   assert.equal(list({}, deps), 6);
-  assert.match(deps.output(), /packages-local\/x-a now exists too.*Nothing was moved/s);
-  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside/x-a/package.json')));
+  assert.match(
+    deps.output(),
+    /packages-local\/x-a now exists too.*Nothing was moved/s,
+  );
+  assert.ok(
+    fs.existsSync(
+      path.join(appRoot, 'packages-local/.setup-aside/x-a/package.json'),
+    ),
+  );
   assert.equal(deps.calls.length, 0);
 });
