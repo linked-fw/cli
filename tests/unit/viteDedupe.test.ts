@@ -3,10 +3,11 @@ import os from 'os';
 import path from 'path';
 import {createViteConfig} from '../../src/vite-config';
 
-// `resolve.dedupe` holds only the standalone pair: the two context-holding
-// packages a standalone app's two `ssrLoadModule` loads must share. Localized
-// checkouts are workspace members (`packages-local/*`), so npm links and
-// dedupes them and Vite needs no list of its own.
+// `resolve.dedupe` holds the standalone pair (the two context-holding packages
+// a standalone app's two `ssrLoadModule` loads must share) and, in every mode,
+// `react` and `react-dom` when the app has them. Localized checkouts are
+// workspace members (`packages-local/*`), so npm links and dedupes them and
+// Vite needs no list of its own.
 
 function writeJson(file: string, json: unknown) {
   fs.mkdirSync(path.dirname(file), {recursive: true});
@@ -80,10 +81,29 @@ describe('resolve.dedupe', () => {
     expect(config.resolve.dedupe).toEqual([
       '@_linked/server-utils',
       '@_linked/react',
+      'react',
     ]);
   });
 
-  it('dedupes nothing outside standalone dev', async () => {
+  it('outside standalone dev, dedupes react and react-dom where the app has them', async () => {
+    expect((await resolvedConfig('production')).resolve.dedupe).toEqual([
+      'react',
+    ]);
+    writeJson(path.join(app, 'node_modules', 'react-dom', 'package.json'), {
+      name: 'react-dom',
+      version: '19.0.0',
+    });
+    expect((await resolvedConfig('production')).resolve.dedupe).toEqual([
+      'react',
+      'react-dom',
+    ]);
+  });
+
+  it('dedupes nothing outside standalone dev when the app has no React', async () => {
+    fs.rmSync(path.join(app, 'node_modules', 'react'), {
+      recursive: true,
+      force: true,
+    });
     const config = await resolvedConfig('production');
     expect(config.resolve.dedupe).toEqual([]);
   });

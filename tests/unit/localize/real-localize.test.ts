@@ -2,200 +2,149 @@
  * THE test. Everything else in this suite stubs the subprocess runner; this
  * one does not.
  *
- * It runs a real `git clone` and a real `npm install`, and asserts the single
- * property that is easiest to lose and most expensive to lose:
+ * It runs a real `git clone` and a real `npm install` in an app set up the way
+ * `linked localize` sets one up (`"packages-local/*"` in `workspaces`, the
+ * lock-at-rest hook in `postinstall` and `dependencies`), committed to git,
+ * and asserts the two properties the design rests on:
  *
- *   **the install happens INSIDE the checkout.**
+ *   1. npm links the checkout: `node_modules/<name>` is a symlink into
+ *      `packages-local/`, and the checkout's dependency is installed for it;
+ *   2. the working tree is clean afterwards: the hook put the committed
+ *      lockfile back, so `git status --porcelain` is empty.
  *
- * The history: installing from the consumer instead, with
- * `npm install <path> --no-save`, hard-failed an app's boot on a missing peer
- * dependency (`lucide-react`). Module resolution happens from the symlink's
- * REAL path, whose ancestors have no `node_modules`, so a checkout that does
- * not carry its own installed tree cannot resolve anything. The tool that this
- * one was extracted from had 89 tests and every one of them stubbed the
- * runner, so `git clone` and `npm install` never executed and this constraint
- * was protected by nothing but a commit message.
+ * Then the round trip: delocalize parks the checkout and `npm ci` restores the
+ * registry tree, and localize takes it back, all with a clean tree.
  *
- * The assertions below fail for a reimplementation that moves the install back
- * to the consumer: the dependency would land in the consumer's `node_modules`
- * and not in the checkout's, and the consumer's lockfile would move.
+ * The hook is run from this repository (`hooks/lock-at-rest.cjs`) by absolute
+ * path: the fixture app has no `node_modules/@_linked/cli` to run it from.
  *
- * Marked `slow:` -- it does real subprocess work, a few seconds in all, and
- * gets a long timeout for a cold npm cache. It runs in `test:unit`, the suite
- * CI runs, because a constraint nobody runs is not protected.
+ * Marked `slow:` -- real subprocess work, a few seconds in all, with a long
+ * timeout for a cold npm cache. It runs in `test:unit`, the suite CI runs.
  */
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import {localize} from '../../../src/localize/localize.js';
 import {delocalize} from '../../../src/localize/delocalize.js';
-import {relink} from '../../../src/localize/relink.js';
-import {readManifest} from '../../../src/localize/manifest.js';
 import {buildFixtureRepo} from './fixtures/build-fixture-repo.js';
-import {makeConsumer, realDeps, rm, test, tmpdir} from './helpers.js';
+import {makeConsumer, realDeps, rm, scrubbedNpmEnv, test, tmpdir} from './helpers.js';
 
 /** A real clone and a real install; generous for a cold npm cache on CI. */
 const SLOW = 120_000;
 
+const LOCK_AT_REST = path.resolve(__dirname, '../../../hooks/lock-at-rest.cjs');
+
+const gitEnv = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'localize tests',
+  GIT_AUTHOR_EMAIL: 'tests@localize.invalid',
+  GIT_COMMITTER_NAME: 'localize tests',
+  GIT_COMMITTER_EMAIL: 'tests@localize.invalid',
+};
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync('git', args, {cwd, encoding: 'utf8', env: gitEnv});
+
+/**
+ * An app already set up for checkouts, installed with none and committed:
+ * the state a developer is in after committing localize's one-time setup.
+ */
+function setUpApp(): string {
+  const hook = `node ${JSON.stringify(LOCK_AT_REST)}`;
+  const appRoot = makeConsumer({
+    pkg: {
+      workspaces: ['packages-local/*'],
+      scripts: {postinstall: hook, dependencies: hook},
+    },
+  });
+  fs.writeFileSync(
+    path.join(appRoot, '.gitignore'),
+    'node_modules/\npackages-local/\n.packages-local.parked/\n',
+  );
+  execFileSync('npm', ['install', '--no-audit', '--no-fund'], {
+    cwd: appRoot,
+    env: scrubbedNpmEnv(),
+    stdio: 'pipe',
+  });
+  git(appRoot, 'init', '-q', '-b', 'main');
+  git(appRoot, 'add', '-A');
+  git(appRoot, 'commit', '-q', '-m', 'app');
+  return appRoot;
+}
+
+const status = (appRoot: string) => git(appRoot, 'status', '--porcelain');
+
 test(
-  'slow: a real localize clones, installs inside the checkout and links it',
+  'slow: a real localize clones, npm links the checkout, and the tree is clean after the hook',
   async (t) => {
     const scratch = tmpdir('localize-fixture-');
     const {repoUrl, depName, name} = buildFixtureRepo(scratch);
-    // The relink hooks are already there: localize adds them when they are
-    // missing (adopt.test.ts), and that edit is the only one it may make.
-    const appRoot = makeConsumer({
-      pkg: {
-        dependencies: {[name]: '^1.0.0'},
-        scripts: {
-          postinstall: 'linked localize --relink',
-          dependencies: 'linked localize --relink',
-        },
-      },
-    });
+    const appRoot = setUpApp();
     t.after(() => {
       rm(scratch);
       rm(appRoot);
     });
-
-    const lockPath = path.join(appRoot, 'package-lock.json');
-    fs.writeFileSync(
-      lockPath,
-      JSON.stringify(
-        {name: 'consumer', lockfileVersion: 3, requires: true, packages: {}},
-        null,
-        2,
-      ) + '\n',
-    );
-    const pkgBefore = fs.readFileSync(path.join(appRoot, 'package.json'));
-    const lockBefore = fs.readFileSync(lockPath);
+    const lockBefore = fs.readFileSync(path.join(appRoot, 'package-lock.json'));
 
     const deps = realDeps(appRoot);
     // `--repo` rather than a registry lookup: the fixture package is not
-    // published anywhere, and the registry lookup is covered by its own tests.
-    // Everything after resolution -- clone, install, link, record -- is real.
-    const code = localize([name], {repo: repoUrl}, deps);
-
+    // published anywhere. Everything after resolution is real.
+    const code = localize([name], {repo: repoUrl, build: ''}, deps);
     assert.equal(code, 0, `localize failed:\n${deps.output()}`);
+    assert.doesNotMatch(deps.output(), /set up this app/, 'already set up');
 
     const checkout = path.join(appRoot, 'packages-local', name);
+    assert.ok(fs.existsSync(path.join(checkout, '.git')), 'a real clone');
 
-    // 1. a real clone
-    assert.ok(
-      fs.existsSync(path.join(checkout, '.git')),
-      'the checkout is a git repository',
-    );
-    assert.ok(
-      fs.existsSync(path.join(checkout, 'src', 'index.js')),
-      'the checkout has editable source',
-    );
-
-    // 2. THE CONSTRAINT: the dependency tree is inside the checkout.
-    const depInCheckout = path.join(
-      checkout,
-      'node_modules',
-      depName,
-      'package.json',
-    );
-    assert.ok(
-      fs.existsSync(depInCheckout),
-      `the checkout must carry its own installed dependencies -- ${depName} is not in ` +
-        `${path.relative(appRoot, path.dirname(depInCheckout))}. An install run from the consumer ` +
-        `instead of from the checkout is the regression this test exists to catch.`,
-    );
-    assert.equal(
-      JSON.parse(fs.readFileSync(depInCheckout, 'utf8')).name,
-      depName,
-    );
-
-    // ...and NOT in the consumer's.
-    assert.equal(
-      fs.existsSync(path.join(appRoot, 'node_modules', depName)),
-      false,
-      `${depName} leaked into the consumer's node_modules, which means the install ran from the ` +
-        `consumer rather than from the checkout.`,
-    );
-
-    // 3. the link is a symlink, written by fs.symlink, resolving to the checkout
+    // 1. npm linked the member, and installed its dependency for it.
     const link = path.join(appRoot, 'node_modules', name);
-    assert.ok(
-      fs.lstatSync(link).isSymbolicLink(),
-      'node_modules/<name> is a symlink',
-    );
+    assert.ok(fs.lstatSync(link).isSymbolicLink(), 'node_modules/<name> is a symlink');
     assert.equal(fs.realpathSync(link), fs.realpathSync(checkout));
-    // Relative, so the tree survives being moved or bind-mounted elsewhere.
-    assert.equal(
-      path.isAbsolute(fs.readlinkSync(link)),
-      false,
-      'the symlink target is relative',
-    );
-
-    // 4. the consumer's manifests are byte-identical. This is the property the
-    //    whole design exists for, so it is compared as BYTES, not as parsed JSON.
-    assert.deepEqual(
-      fs.readFileSync(path.join(appRoot, 'package.json')),
-      pkgBefore,
-      'package.json unchanged',
-    );
-    assert.deepEqual(
-      fs.readFileSync(lockPath),
-      lockBefore,
-      'package-lock.json unchanged',
-    );
-
-    // 5. recorded, so CI no-ops and --relink can restore it
-    const manifest = readManifest(appRoot, deps);
-    assert.deepEqual(Object.keys(manifest.entries), [name]);
-    assert.equal(
-      manifest.entries[name].path,
-      path.join('packages-local', name),
-    );
-    assert.equal(manifest.entries[name].branch, 'main');
-    assert.equal(manifest.entries[name].range, '^1.0.0');
-
-    // 6. the package actually resolves through the link, from source
     const mod = await import(path.join(link, 'src', 'index.js'));
     assert.equal(mod.widget, 'from source');
-
-    // --- relink restores what `npm ci` would have destroyed -------------------
-    fs.unlinkSync(link);
-    assert.equal(relink(deps), 0);
     assert.ok(
-      fs.lstatSync(link).isSymbolicLink(),
-      'relink recreated the symlink',
+      fs.existsSync(path.join(appRoot, 'node_modules', depName, 'package.json')),
+      `${depName} was installed with the root install`,
     );
-    assert.equal(fs.realpathSync(link), fs.realpathSync(checkout));
 
-    // --- delocalize unlinks, keeps the work, and still touches nothing --------
-    assert.equal(delocalize([name], {}, deps), 0, deps.output());
-    assert.equal(fs.existsSync(link), false, 'the link is gone');
-    assert.ok(
-      fs.existsSync(path.join(checkout, 'src', 'index.js')),
-      'the checkout is left on disk',
-    );
-    assert.match(
-      deps.output(),
-      /npm install --no-save fixture-widget@\^1\.0\.0/,
-    );
-    assert.deepEqual(Object.keys(readManifest(appRoot, deps).entries), []);
+    // 2. the hook restored the committed lockfile: nothing to commit.
+    assert.equal(status(appRoot), '', 'git status --porcelain is empty');
     assert.deepEqual(
-      fs.readFileSync(path.join(appRoot, 'package.json')),
-      pkgBefore,
+      fs.readFileSync(path.join(appRoot, 'package-lock.json')),
+      lockBefore,
     );
-    assert.deepEqual(fs.readFileSync(lockPath), lockBefore);
+    // ...while npm's own record of the tree has the member.
+    const hidden = JSON.parse(
+      fs.readFileSync(path.join(appRoot, 'node_modules/.package-lock.json'), 'utf8'),
+    );
+    assert.ok(hidden.packages[`packages-local/${name}`], 'the hidden lockfile lists it');
+
+    // --- delocalize parks it, npm ci restores the registry tree -------------
+    assert.equal(delocalize([name], {}, deps), 0, deps.output());
+    assert.equal(fs.existsSync(link), false, 'no member, no link');
+    assert.ok(
+      fs.existsSync(path.join(appRoot, '.packages-local.parked', name, 'src', 'index.js')),
+      'the work is parked, not deleted',
+    );
+    assert.equal(status(appRoot), '');
+
+    // --- and localize takes it back, without cloning -----------------------
+    assert.equal(localize([name], {repo: 'unused'}, deps), 0, deps.output());
+    assert.equal(fs.realpathSync(link), fs.realpathSync(checkout));
+    assert.equal(status(appRoot), '');
   },
   SLOW,
 );
 
 test(
-  'slow: a real localize of a package inside a monorepo installs in the package directory',
+  'slow: a real localize of a package inside a monorepo links the package, not the repository root',
   (t) => {
     const scratch = tmpdir('localize-fixture-');
     const {repoUrl, depName, name} = buildFixtureRepo(scratch, {
       subdir: 'packages/widget',
     });
-    const appRoot = makeConsumer();
+    const appRoot = setUpApp();
     t.after(() => {
       rm(scratch);
       rm(appRoot);
@@ -204,45 +153,37 @@ test(
     const deps = realDeps(appRoot);
     const code = localize(
       [name],
-      {repo: repoUrl, subdir: 'packages/widget'},
+      {repo: repoUrl, subdir: 'packages/widget', build: ''},
       deps,
     );
     assert.equal(code, 0, deps.output());
 
-    const clone = path.join(appRoot, 'packages-local', name);
+    const clone = path.join(appRoot, 'packages-local', '.repos', name);
     const pkgDir = path.join(clone, 'packages', 'widget');
-
-    // The clone is the whole repository; the install and the link are the package.
-    assert.ok(fs.existsSync(path.join(clone, '.git')));
-    assert.ok(
-      fs.existsSync(path.join(pkgDir, 'node_modules', depName)),
-      'the install ran in the package directory, not at the repository root',
-    );
-    assert.equal(
-      fs.existsSync(path.join(clone, 'node_modules', depName)),
-      false,
-      'nothing was installed at the repository root',
-    );
+    assert.ok(fs.existsSync(path.join(clone, '.git')), 'the clone is the whole repository');
     assert.equal(
       fs.realpathSync(path.join(appRoot, 'node_modules', name)),
       fs.realpathSync(pkgDir),
     );
+    assert.ok(fs.existsSync(path.join(appRoot, 'node_modules', depName)));
     assert.equal(
-      readManifest(appRoot, deps).entries[name].path,
-      path.join('packages-local', name, 'packages', 'widget'),
+      fs.existsSync(path.join(appRoot, 'node_modules', 'fixture-monorepo-root')),
+      false,
+      'the repository root is not a member',
     );
+    assert.equal(status(appRoot), '');
   },
   SLOW,
 );
 
 test(
-  'slow: a real localize refuses a monorepo root rather than linking the wrong package',
+  'slow: a real localize refuses a monorepo root and leaves no clone behind',
   (t) => {
     const scratch = tmpdir('localize-fixture-');
     const {repoUrl, name} = buildFixtureRepo(scratch, {
       subdir: 'packages/widget',
     });
-    const appRoot = makeConsumer();
+    const appRoot = setUpApp();
     t.after(() => {
       rm(scratch);
       rm(appRoot);
@@ -256,15 +197,11 @@ test(
     assert.match(deps.output(), /declares itself as "fixture-monorepo-root"/);
     assert.match(deps.output(), /--subdir/);
     assert.equal(
-      fs.existsSync(path.join(appRoot, 'node_modules', name)),
-      false,
-      'nothing was linked',
+      fs.readdirSync(path.join(appRoot, 'packages-local')).join(','),
+      '',
+      'no clone left in packages-local/',
     );
-    assert.deepEqual(
-      Object.keys(readManifest(appRoot, deps).entries),
-      [],
-      'nothing was recorded',
-    );
+    assert.equal(fs.existsSync(path.join(appRoot, 'node_modules', name)), false);
   },
   SLOW,
 );

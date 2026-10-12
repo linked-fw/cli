@@ -9,12 +9,13 @@
  * - `packages-local/` — the package has a repository of its own. It goes where
  *   `linked localize` keeps checkouts, under the same name localize would give
  *   it (`@_linked/foo` → `packages-local/_linked-foo`), and is handed to
- *   localize's `adopt`, so the two can never disagree about it.
+ *   localize's `adopt`, so the two can never disagree about it. Like every
+ *   checkout it is a workspace member through the app's `packages-local/*`
+ *   glob.
  */
 import fs from 'fs';
 import path from 'path';
 import type {PackageKind} from './packageKind.js';
-import {ensureRelinkHooks} from './relinkHooks.js';
 
 export const PACKAGE_LOCATIONS = ['packages', 'packages-local'] as const;
 export type PackageLocation = (typeof PACKAGE_LOCATIONS)[number];
@@ -156,20 +157,25 @@ export function bareName(name: string): string {
 }
 
 /**
- * Make sure the app's `workspaces` covers `packages/*`, so a package created
- * there is a workspace member. Mutates `pkg`.
+ * Make sure the app's `workspaces` covers `<location>/*` (default
+ * `packages/*`), so a package created there is a workspace member. Mutates
+ * `pkg`.
  *
  * @returns whether it changed, and a warning when it cannot tell.
  */
-export function ensureWorkspaceGlob(pkg: Record<string, any>): {
+export function ensureWorkspaceGlob(
+  pkg: Record<string, any>,
+  location: PackageLocation = 'packages',
+): {
   changed: boolean;
   warning?: string;
 } {
+  const glob = `${location}/*`;
   const covers = (globs: unknown[]) =>
-    globs.some((g) => g === 'packages/*' || g === 'packages/**');
+    globs.some((g) => g === glob || g === `${location}/**`);
 
   if (pkg.workspaces === undefined) {
-    pkg.workspaces = ['packages/*'];
+    pkg.workspaces = [glob];
     return {changed: true};
   }
   const globs = Array.isArray(pkg.workspaces)
@@ -180,26 +186,12 @@ export function ensureWorkspaceGlob(pkg: Record<string, any>): {
   if (!globs) {
     return {
       changed: false,
-      warning: `the app's "workspaces" field has a shape this command does not edit; make sure it covers packages/*.`,
+      warning: `the app's "workspaces" field has a shape this command does not edit; make sure it covers ${glob}.`,
     };
   }
   if (covers(globs)) return {changed: false};
-  globs.push('packages/*');
+  globs.push(glob);
   return {changed: true};
-}
-
-export {RELINK_COMMAND, ensureRelinkHooks} from './relinkHooks.js';
-
-/**
- * Make sure the app's `postinstall` AND `dependencies` scripts recreate
- * localize's links -- see `./relinkHooks.js` for why npm needs both. Kept
- * under its old name for existing callers; prefer `ensureRelinkHooks`.
- * Mutates `pkg`.
- *
- * @returns true when it changed `pkg`.
- */
-export function ensureRelinkPostinstall(pkg: Record<string, any>): boolean {
-  return ensureRelinkHooks(pkg).length > 0;
 }
 
 /**

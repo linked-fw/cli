@@ -371,8 +371,8 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
  * ones that ship `src/`.
  *
  * A dep ships `src/` when it is a symlinked workspace clone, a `link:`/`portal:`
- * dev install, or a LOCALIZED checkout (`packages-local/<pkg>`, in no workspace
- * glob). That's what lets a STANDALONE app (not itself a workspace root — e.g. a
+ * dev install, or a LOCALIZED checkout (`packages-local/<pkg>`, in an app
+ * not set up for localizing yet). That's what lets a STANDALONE app (not itself a workspace root — e.g. a
  * per-branch clone under /apps) resolve a linked package's `.tsx` sources with
  * extension probing, instead of falling through to the package's
  * `development → ./src/*.ts` export (which misses `.tsx` like LinkedServer). A
@@ -397,8 +397,8 @@ export async function discoverLinkedSourceDependencies(
 ): Promise<WorkspaceEntry[]> {
   const out: WorkspaceEntry[] = [];
   const seen = new Set<string>();
-  // The walk (breadth-first, keyed on the installed directory) is shared with
-  // `resolve.dedupe` and `linked localize`; see discoverInstalledLinkedPackages.
+  // The walk is breadth-first and keyed on the installed directory; see
+  // discoverInstalledLinkedPackages.
   for (const pkg of await discoverInstalledLinkedPackages(cwd)) {
     const entry = await readSourcePackage(pkg.realRoot);
     if (entry && !seen.has(entry.name)) {
@@ -619,6 +619,26 @@ export function ssrNoExternal(
  * block in `createViteConfig`.
  */
 const STANDALONE_DEDUPE = ['@_linked/server-utils', '@_linked/react'];
+
+/**
+ * Deduped in every mode when the app has them installed: one React for the
+ * whole tree, whoever imports it. A workspace member's own `react` (an older
+ * checkout, a package with a stale lockfile) would otherwise give hooks a
+ * second dispatcher.
+ */
+const REACT_DEDUPE = ['react', 'react-dom'];
+
+/** `resolve.dedupe`: the standalone pair when standalone, then React where the app has it. */
+export async function dedupeFor(
+  appRoot: string,
+  isStandalone: boolean,
+): Promise<string[]> {
+  const react: string[] = [];
+  for (const name of REACT_DEDUPE) {
+    if (await readInstalledPkg(name, appRoot)) react.push(name);
+  }
+  return [...(isStandalone ? STANDALONE_DEDUPE : []), ...react];
+}
 
 /**
  * The `process.env.*` values inlined into the browser bundle — and only there.
@@ -860,11 +880,13 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // (LinkedServer + the app graph) resolve to ONE `server-utils`/`react`
       // instance — otherwise their `AppContext` objects differ and
       // `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
-      // Localized checkouts need no dedupe: they are workspace members
-      // (`packages-local/*`), so npm links and dedupes them like any other.
+      // Every mode also dedupes `react` and `react-dom` when the app has them
+      // (`dedupeFor`). Localized checkouts need nothing more: they are
+      // workspace members (`packages-local/*`), so npm links and dedupes them
+      // like any other.
       resolve: {
         ...(isStandalone ? {conditions: ['module', 'node']} : {}),
-        dedupe: isStandalone ? [...STANDALONE_DEDUPE] : [],
+        dedupe: await dedupeFor(process.cwd(), isStandalone),
       },
       // `ssr.external` is a minimal allowlist of
       // npm deps that genuinely can't (or shouldn't) go through Vite's

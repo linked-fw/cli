@@ -11,7 +11,7 @@ import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
 import {isLinkedPackageJson} from './installed-packages.js';
-import {localMembers} from './localize/members.js';
+import {LOCAL_DIR, localMembers} from './localize/members.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 // Shared with the CSS loader's mode resolution, which must pick the same profiles.
 import {readEnvNamesFromArgv} from './loader-mode.js';
@@ -205,7 +205,7 @@ export interface LocalPackage extends PackageDetails {
  * the globs finds them as workspace members; it is still walked on its own for
  * an app that has not been set up yet (no glob, or no `workspaces` at all).
  */
-export const LOCAL_PACKAGES_DIR = 'packages-local';
+export const LOCAL_PACKAGES_DIR = LOCAL_DIR;
 
 /**
  * Walk the app's `package.json` `workspaces` field and return every

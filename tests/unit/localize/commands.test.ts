@@ -1,7 +1,7 @@
 /**
- * Guards, listing, delocalize and the postinstall hook, with the subprocess
- * runner stubbed. The properties that need a REAL subprocess live in
- * real-localize.test.js; these are the ones a stub can honestly show.
+ * localize, delocalize and --list with the subprocess runner stubbed: the
+ * order of what runs and where, the guards, and the moves on disk. What needs
+ * a REAL clone and a REAL npm lives in real-localize.test.ts.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,454 +10,338 @@ import path from 'node:path';
 import {localize} from '../../../src/localize/localize.js';
 import {delocalize} from '../../../src/localize/delocalize.js';
 import {list} from '../../../src/localize/list.js';
-import {relink} from '../../../src/localize/relink.js';
-import {writeManifest, readManifest} from '../../../src/localize/manifest.js';
-import {fail, makeConsumer, ok, rm, stubbed, test, tmpdir} from './helpers.js';
+import {fail, makeConsumer, ok, rm, stubbed, test} from './helpers.js';
 
-const consumer = (t, pkg) => {
+const consumer = (t, pkg = {}) => {
   const root = makeConsumer({pkg});
   t.after(() => rm(root));
   return root;
 };
 
-/** A checkout on disk, as if a previous localize had made it. */
-function seedCheckout(
-  appRoot,
-  name,
-  {version = '1.0.0', dir = 'packages-local'} = {},
-) {
-  const checkout = path.join(appRoot, dir, name);
-  fs.mkdirSync(path.join(checkout, '.git'), {recursive: true});
-  fs.writeFileSync(
-    path.join(checkout, 'package.json'),
-    JSON.stringify({name, version}),
-  );
-  return checkout;
+/** A checkout on disk, as a clone would leave it. */
+function seedCheckout(appRoot, rel, pkg) {
+  const dir = path.join(appRoot, rel);
+  fs.mkdirSync(path.join(dir, '.git'), {recursive: true});
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+  return dir;
 }
 
-function link(appRoot, name, target) {
-  const l = path.join(appRoot, 'node_modules', name);
-  fs.mkdirSync(path.dirname(l), {recursive: true});
-  fs.symlinkSync(path.relative(path.dirname(l), target), l, 'dir');
-  return l;
+/** A runner whose `git clone <url> <dir>` leaves a checkout of `pkg` at `<dir>`. */
+function cloning(appRoot, pkgFor, handler?) {
+  return stubbed(appRoot, (inv) => {
+    if (inv.cmd === 'git' && inv.args[0] === 'clone') {
+      const name = pkgFor.name;
+      seedCheckout(appRoot, path.relative(appRoot, inv.args[2]), {
+        version: '1.0.0',
+        ...pkgFor,
+        name,
+      });
+      return ok();
+    }
+    if (inv.cmd === 'git' && inv.args[0] === 'symbolic-ref') return ok('main\n');
+    return handler?.(inv);
+  });
 }
 
-// --- guards ----------------------------------------------------------------
+/** What ran, as `cmd args… @ cwd relative to the app`. */
+const trace = (deps, appRoot) =>
+  deps.calls
+    .filter((c) => !(c.cmd === 'git' && c.args[0] !== 'clone'))
+    .map(
+      (c) =>
+        `${c.cmd}${c.args.length ? ' ' + c.args.join(' ') : ''} @ ${
+          c.cwd ? path.relative(appRoot, c.cwd) || '.' : '-'
+        }`.replace(appRoot + path.sep, ''),
+    );
 
-test('a symlink pointing outside the checkout dir is refused, and --force overrides', (t) => {
-  const appRoot = consumer(t);
-  const foreign = tmpdir('localize-foreign-');
-  t.after(() => rm(foreign));
-  fs.writeFileSync(
-    path.join(foreign, 'package.json'),
-    JSON.stringify({name: 'widget', version: '1.0.0'}),
+// --- localize --------------------------------------------------------------
+
+test('localize clones, sets up, installs once at the root, then builds', (t) => {
+  const appRoot = consumer(t, {dependencies: {'@x/a': '^1.0.0'}});
+  const deps = cloning(appRoot, {name: '@x/a'});
+
+  const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
+
+  assert.equal(code, 0, deps.output());
+  assert.deepEqual(trace(deps, appRoot), [
+    'git clone https://example.invalid/a.git packages-local/x-a @ -',
+    'npm install --no-audit --no-fund @ .',
+    'linked build @ packages-local/x-a',
+  ]);
+  const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
+  assert.deepEqual(pkg.workspaces, ['packages-local/*']);
+  assert.match(pkg.scripts.postinstall, /hooks\/lock-at-rest\.cjs/);
+  assert.match(
+    fs.readFileSync(path.join(appRoot, '.gitignore'), 'utf8'),
+    /packages-local\/\n\.packages-local\.parked\//,
   );
-  link(appRoot, 'widget', foreign);
-
-  const deps = stubbed(appRoot);
-  assert.equal(localize(['widget'], {repo: 'r'}, deps), 6);
-  assert.match(deps.output(), /Refusing to overwrite someone else's link/);
-  assert.equal(deps.calls.length, 0, 'it refused before cloning anything');
-
-  // --force gets past the guard (the clone is stubbed, so it stops at the
-  // missing package.json -- but it did try).
-  const forced = stubbed(appRoot);
-  localize(['widget'], {repo: 'r', force: true}, forced);
-  assert.ok(
-    forced.calls.some((c) => c.args[0] === 'clone'),
-    '--force proceeds to the clone',
-  );
+  assert.match(deps.output(), /commit these/);
+  assert.match(deps.output(), /@x\/a -> packages-local\/x-a \(branch main\)/);
 });
 
-test('a failed install links nothing and records nothing', (t) => {
+test('one install for several names, and a failing build only warns (exit 5)', (t) => {
   const appRoot = consumer(t);
+  let n = 0;
   const deps = stubbed(appRoot, (inv) => {
-    if (inv.args[0] === 'clone') {
-      const dest = inv.args[2];
-      fs.mkdirSync(dest, {recursive: true});
-      fs.mkdirSync(path.join(dest, '.git'), {recursive: true});
-      fs.writeFileSync(
-        path.join(dest, 'package.json'),
-        JSON.stringify({name: 'widget', version: '1.0.0'}),
-      );
+    if (inv.cmd === 'git' && inv.args[0] === 'clone') {
+      seedCheckout(appRoot, path.relative(appRoot, inv.args[2]), {
+        name: ['@x/a', '@x/b'][n++],
+        version: '1.0.0',
+      });
       return ok();
     }
-    if (inv.cmd === 'npm' && inv.args[0] === 'install')
-      return {status: 1, stdout: '', stderr: 'ERESOLVE'};
-    return ok();
+    if (inv.cmd === 'linked build' && inv.cwd.endsWith('x-b')) return fail('tsc broke');
   });
 
-  assert.equal(localize(['widget'], {repo: 'r'}, deps), 7);
-  assert.match(deps.output(), /npm install failed/);
-  assert.match(deps.output(), /left on disk/);
-  assert.equal(
-    fs.existsSync(path.join(appRoot, 'node_modules', 'widget')),
-    false,
-  );
-  assert.deepEqual(Object.keys(readManifest(appRoot, deps).entries), []);
+  const code = localize(['@x/a', '@x/b'], {repo: 'https://example.invalid/r.git'}, deps);
+
+  assert.equal(code, 5, deps.output());
+  assert.equal(deps.npmCalls().length, 1, 'one npm install for both');
+  assert.match(deps.output(), /x-b: `linked build` failed/);
+  assert.match(deps.output(), /tsc broke/);
 });
 
-test('the install runs in the checkout; nothing runs at the consumer root', (t) => {
+test('localize builds the cli with npm run build, and --build overrides every default', (t) => {
   const appRoot = consumer(t);
-  const deps = stubbed(appRoot, (inv) => {
-    if (inv.args[0] === 'clone') {
-      const dest = inv.args[2];
-      fs.mkdirSync(path.join(dest, '.git'), {recursive: true});
-      fs.writeFileSync(
-        path.join(dest, 'package.json'),
-        JSON.stringify({name: 'widget', version: '1.0.0'}),
-      );
-      return ok();
-    }
-    if (inv.args[0] === 'rev-parse') return ok('main\n');
-    return ok();
-  });
-
-  assert.equal(localize(['widget'], {repo: 'r'}, deps), 0, deps.output());
-  const installs = deps.npmCalls().filter((c) => c.args[0] === 'install');
-  assert.equal(installs.length, 1);
-  assert.equal(installs[0].cwd, path.join(appRoot, 'packages-local', 'widget'));
-  assert.notEqual(installs[0].cwd, appRoot);
-});
-
-test('a configured build failure warns and still links; no build command runs nothing', (t) => {
-  const seed = (inv) => {
-    if (inv.args[0] === 'clone') {
-      const dest = inv.args[2];
-      fs.mkdirSync(path.join(dest, '.git'), {recursive: true});
-      fs.writeFileSync(
-        path.join(dest, 'package.json'),
-        JSON.stringify({name: 'widget', version: '1.0.0'}),
-      );
-      return ok();
-    }
-    if (inv.args[0] === 'rev-parse') return ok('main\n');
-    return ok();
-  };
-
-  const withBuild = stubbed(consumer(t), (inv) =>
-    inv.cmd === 'npm run build'
-      ? {status: 1, stdout: '', stderr: 'tsc exploded'}
-      : seed(inv),
-  );
-  assert.equal(
-    localize(['widget'], {repo: 'r', build: 'npm run build'}, withBuild),
-    5,
-  );
-  assert.match(withBuild.output(), /exactly what you are about to fix/);
+  const deps = cloning(appRoot, {name: '@_linked/cli'});
+  assert.equal(localize(['@_linked/cli'], {repo: 'https://example.invalid/cli.git'}, deps), 0);
   assert.ok(
-    fs
-      .lstatSync(path.join(withBuild.appRoot, 'node_modules', 'widget'))
-      .isSymbolicLink(),
+    trace(deps, appRoot).includes('npm run build @ packages-local/_linked-cli'),
+    trace(deps, appRoot).join('\n'),
   );
 
-  const noBuild = stubbed(consumer(t), seed);
-  assert.equal(localize(['widget'], {repo: 'r'}, noBuild), 0);
+  const appRoot2 = consumer(t);
+  const deps2 = cloning(appRoot2, {name: '@_linked/cli'});
+  localize(['@_linked/cli'], {repo: 'https://example.invalid/cli.git', build: ''}, deps2);
   assert.equal(
-    noBuild.calls.some((c) => /build/.test(c.cmd)),
-    false,
-    'localize does not look for a builder of its own',
+    deps2.calls.filter((c) => /build/.test(c.cmd) || c.args.includes('build')).length,
+    0,
+    "--build '' builds nothing",
   );
 });
 
-// --- list ------------------------------------------------------------------
+test('localize refuses a conflicting override: exit 6, the key named, nothing cloned or changed', (t) => {
+  const appRoot = consumer(t, {overrides: {'@_linked/core': '$@_linked/core'}});
+  const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
+  const deps = cloning(appRoot, {name: '@_linked/core'});
 
-test('--list distinguishes the four states, and --check fails only on the costly ones', (t) => {
+  const code = localize(['@_linked/core'], {repo: 'https://example.invalid/core.git'}, deps);
+
+  assert.equal(code, 6);
+  assert.match(deps.output(), /"@_linked\/core"/);
+  assert.match(deps.output(), /Remove that key from "overrides"/);
+  assert.equal(deps.calls.length, 0, 'nothing ran');
+  assert.equal(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'), before);
+  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local')), false);
+});
+
+test('localize takes a parked checkout back: no clone, no build, one install', (t) => {
   const appRoot = consumer(t);
+  seedCheckout(appRoot, '.packages-local.parked/x-a', {name: '@x/a', version: '1.0.0'});
   const deps = stubbed(appRoot);
 
-  const linkedCheckout = seedCheckout(appRoot, 'linked-one');
-  link(appRoot, 'linked-one', linkedCheckout);
-  seedCheckout(appRoot, 'not-linked-one'); // checkout present, no symlink: what `npm ci` leaves
-  const untrackedTarget = tmpdir('localize-untracked-');
-  t.after(() => rm(untrackedTarget));
-  link(appRoot, 'untracked-one', untrackedTarget);
+  const code = localize(['@x/a'], {}, deps);
 
-  writeManifest(appRoot, {
-    dir: 'packages-local',
-    packages: {
-      'linked-one': {
-        repo: 'r',
-        path: 'packages-local/linked-one',
-        branch: 'main',
-      },
-      'not-linked-one': {
-        repo: 'r',
-        path: 'packages-local/not-linked-one',
-        branch: 'main',
-      },
-      'gone-one': {repo: 'r', path: 'packages-local/gone-one', branch: 'main'},
-      'broken-one': {repo: 'r'},
-    },
-  });
-
-  assert.equal(list({}, deps), 0, '--list alone always exits 0');
-  const out = deps.output();
-  assert.match(out, /linked-one\s+linked/);
-  assert.match(
-    out,
-    /not-linked-one\s+NOT LINKED\s+\S+\s+main\s+checkout present/,
-  );
-  assert.match(out, /gone-one\s+NOT LINKED\s+\S+\s+—\s+CHECKOUT MISSING/);
-  assert.match(out, /untracked-one\s+linked\s+.*not in local-packages\.json/);
-  assert.match(out, /broken-one\s+NOT LINKED\s+.*malformed entry/);
-  assert.match(
-    out,
-    /1 linked · 2 not linked · 1 untracked link · 1 malformed entry/,
-  );
-
-  assert.equal(list({check: true}, stubbed(appRoot)), 1);
+  assert.equal(code, 0, deps.output());
+  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/x-a/package.json')));
+  assert.equal(fs.existsSync(path.join(appRoot, '.packages-local.parked/x-a')), false);
+  assert.deepEqual(trace(deps, appRoot), ['npm install --no-audit --no-fund @ .']);
 });
 
-test('--list says nothing at all when nothing is localized', (t) => {
-  const deps = stubbed(consumer(t));
-  assert.equal(list({}, deps), 0);
-  assert.equal(deps.output(), '');
+test('an existing directory is refused with an --adopt hint, and nothing is installed', (t) => {
+  const appRoot = consumer(t);
+  seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
+  const deps = stubbed(appRoot);
+
+  const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
+
+  assert.equal(code, 6);
+  assert.match(deps.output(), /linked localize @x\/a --adopt/);
+  assert.equal(deps.calls.length, 0);
+});
+
+test('a clone that is not the package is removed again, so it never becomes a member', (t) => {
+  const appRoot = consumer(t);
+  const deps = cloning(appRoot, {name: 'monorepo-root'});
+
+  const code = localize(['@x/a'], {repo: 'https://example.invalid/mono.git'}, deps);
+
+  assert.equal(code, 6);
+  assert.match(deps.output(), /declares itself as "monorepo-root"/);
+  assert.match(deps.output(), /--subdir/);
+  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
+  assert.equal(deps.npmCalls().length, 0);
+});
+
+test('a failed root install exits 7 and builds nothing', (t) => {
+  const appRoot = consumer(t);
+  const deps = cloning(appRoot, {name: '@x/a'}, (inv) =>
+    inv.cmd === 'npm' ? fail('ERESOLVE') : undefined,
+  );
+
+  const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
+
+  assert.equal(code, 7);
+  assert.match(deps.output(), /ERESOLVE/);
+  assert.equal(deps.calls.some((c) => c.cmd === 'linked build'), false);
+});
+
+test('--dir other than packages-local is a usage error (exit 2)', (t) => {
+  const appRoot = consumer(t);
+  const deps = stubbed(appRoot);
+  assert.equal(localize(['@x/a'], {dir: 'vendor'}, deps), 2);
+  assert.equal(localize(['@x/a'], {dir: 'packages-local/'}, stubbed(appRoot, () => fail())), 4);
 });
 
 // --- delocalize ------------------------------------------------------------
 
-test('delocalize keeps the checkout, prints --no-save, and forgets the entry', (t) => {
-  const appRoot = consumer(t, {dependencies: {widget: '^2.0.0'}});
-  const checkout = seedCheckout(appRoot, 'widget');
-  link(appRoot, 'widget', checkout);
-  writeManifest(appRoot, {
-    dir: 'packages-local',
-    packages: {
-      widget: {
-        repo: 'r',
-        path: 'packages-local/widget',
-        branch: 'main',
-        range: '^2.0.0',
-      },
-    },
-  });
-
-  const deps = stubbed(appRoot);
-  assert.equal(delocalize(['widget'], {}, deps), 0);
-  assert.equal(
-    fs.existsSync(path.join(appRoot, 'node_modules', 'widget')),
-    false,
-  );
-  assert.ok(fs.existsSync(checkout), 'the checkout is left on disk');
-  // --no-save is load-bearing: without it, following this line rewrites the
-  // range and the lockfile -- the exact diff the tool exists to prevent.
-  assert.match(deps.output(), /npm install --no-save widget@\^2\.0\.0/);
-  assert.equal(
-    deps.npmCalls().length,
-    0,
-    'it printed the command, it did not run it',
-  );
-  assert.deepEqual(Object.keys(readManifest(appRoot, deps).entries), []);
-});
-
-test('delocalize leaves a real directory and a foreign link alone', (t) => {
+test('delocalize the last checkout parks it and runs npm ci', (t) => {
   const appRoot = consumer(t);
-  fs.mkdirSync(path.join(appRoot, 'node_modules', 'realdir'), {
-    recursive: true,
-  });
-  const foreign = tmpdir('localize-foreign-');
-  t.after(() => rm(foreign));
-  link(appRoot, 'foreignlink', foreign);
-  writeManifest(appRoot, {
-    dir: 'packages-local',
-    packages: {
-      realdir: {repo: 'r', path: 'packages-local/realdir', branch: 'main'},
-      foreignlink: {
-        repo: 'r',
-        path: 'packages-local/foreignlink',
-        branch: 'main',
-      },
-    },
-  });
-
+  seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
   const deps = stubbed(appRoot);
-  assert.equal(delocalize([], {}, deps), 5);
-  assert.match(
-    deps.output(),
-    /realdir is a real directory, not a link — left alone/,
-  );
-  assert.match(
-    deps.output(),
-    /foreignlink links to .*outside packages-local — left alone/,
-  );
-  assert.ok(fs.existsSync(path.join(appRoot, 'node_modules', 'realdir')));
-  assert.ok(fs.existsSync(path.join(appRoot, 'node_modules', 'foreignlink')));
+
+  assert.equal(delocalize(['@x/a'], {}, deps), 0, deps.output());
+
+  assert.ok(fs.existsSync(path.join(appRoot, '.packages-local.parked/x-a/package.json')));
+  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
+  assert.deepEqual(trace(deps, appRoot), ['npm ci --no-audit --no-fund @ .']);
+  assert.match(deps.output(), /linked localize @x\/a` takes it back/);
 });
 
-test('--purge refuses on uncommitted work unless forced', (t) => {
+test('delocalize one of two runs npm install then npm rebuild <name>', (t) => {
   const appRoot = consumer(t);
-  const checkout = seedCheckout(appRoot, 'widget');
-  link(appRoot, 'widget', checkout);
-  const entry = {
-    dir: 'packages-local',
-    packages: {
-      widget: {repo: 'r', path: 'packages-local/widget', branch: 'main'},
-    },
-  };
-  writeManifest(appRoot, entry);
+  seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
+  seedCheckout(appRoot, 'packages-local/x-b', {name: '@x/b', version: '1.0.0'});
+  const deps = stubbed(appRoot);
 
-  const dirty = (inv) =>
-    inv.args[0] === 'status' ? ok(' M src/index.js\n') : ok();
-  const deps = stubbed(appRoot, dirty);
-  assert.equal(delocalize(['widget'], {purge: true}, deps), 5);
-  assert.match(deps.output(), /1 uncommitted change/);
-  assert.ok(fs.existsSync(checkout), 'the work is still there');
+  // A short name works when it is unambiguous.
+  assert.equal(delocalize(['b'], {}, deps), 0, deps.output());
 
-  writeManifest(appRoot, entry);
-  const forced = stubbed(appRoot, dirty);
-  assert.equal(delocalize(['widget'], {purge: true, force: true}, forced), 0);
-  assert.equal(fs.existsSync(checkout), false);
+  assert.deepEqual(trace(deps, appRoot), [
+    'npm install --no-audit --no-fund @ .',
+    'npm rebuild @x/b @ .',
+  ]);
+  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/x-a')));
 });
 
-// --- relink (the postinstall hook) -----------------------------------------
+test('delocalize --purge refuses on unpushed commits, and --force deletes', (t) => {
+  const appRoot = consumer(t);
+  const dir = seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.0.0'});
+  const unpushed = (inv) =>
+    inv.cmd === 'git' && inv.args[0] === 'log' ? ok('abc123 wip\n') : undefined;
 
-test('relink never runs npm when the checkout is intact', (t) => {
-  const appRoot = consumer(t, {dependencies: {widget: '^3.0.0'}});
-  const checkout = seedCheckout(appRoot, 'widget', {version: '2.0.99'});
-  writeManifest(appRoot, {
-    dir: 'packages-local',
-    packages: {
-      widget: {repo: 'r', path: 'packages-local/widget', branch: 'main'},
-    },
+  const deps = stubbed(appRoot, unpushed);
+  assert.equal(delocalize(['@x/a'], {purge: true}, deps), 5);
+  assert.match(deps.output(), /1 unpushed commit/);
+  assert.ok(fs.existsSync(dir), 'kept');
+  assert.equal(deps.npmCalls().length, 0, 'nothing changed, nothing installed');
+
+  const forced = stubbed(appRoot, unpushed);
+  assert.equal(delocalize(['@x/a'], {purge: true, force: true}, forced), 0);
+  assert.equal(fs.existsSync(dir), false);
+  assert.equal(fs.existsSync(path.join(appRoot, '.packages-local.parked')), false);
+});
+
+test('delocalize of something not localized warns (exit 5) and installs nothing', (t) => {
+  const appRoot = consumer(t);
+  seedCheckout(appRoot, '.packages-local.parked/x-a', {name: '@x/a', version: '1.0.0'});
+  const deps = stubbed(appRoot);
+  assert.equal(delocalize(['@x/a', '@x/zzz'], {}, deps), 5);
+  assert.match(deps.output(), /already parked/);
+  assert.match(deps.output(), /@x\/zzz is not localized/);
+  assert.equal(deps.npmCalls().length, 0);
+});
+
+test('a monorepo package is a link into packages-local/.repos, and parks and comes back as one', (t) => {
+  const appRoot = consumer(t);
+  const deps = stubbed(appRoot, (inv) => {
+    if (inv.cmd === 'git' && inv.args[0] === 'clone') {
+      const clone = inv.args[2];
+      seedCheckout(appRoot, path.relative(appRoot, clone), {name: 'root'});
+      fs.mkdirSync(path.join(clone, 'packages/a'), {recursive: true});
+      fs.writeFileSync(
+        path.join(clone, 'packages/a/package.json'),
+        JSON.stringify({name: '@x/a', version: '1.0.0'}),
+      );
+      return ok();
+    }
   });
 
-  const deps = stubbed(appRoot);
-  assert.equal(relink(deps), 0);
+  const code = localize(
+    ['@x/a'],
+    {repo: 'https://example.invalid/mono.git', subdir: 'packages/a'},
+    deps,
+  );
+  assert.equal(code, 0, deps.output());
+  const member = path.join(appRoot, 'packages-local/x-a');
+  assert.ok(fs.lstatSync(member).isSymbolicLink());
   assert.equal(
-    deps.npmCalls().length,
-    0,
-    'an ordinary install stays silent and fast',
+    fs.realpathSync(member),
+    fs.realpathSync(path.join(appRoot, 'packages-local/.repos/x-a/packages/a')),
   );
-  assert.ok(
-    fs.lstatSync(path.join(appRoot, 'node_modules', 'widget')).isSymbolicLink(),
+  assert.ok(trace(deps, appRoot).includes('linked build @ packages-local/x-a'));
+
+  assert.equal(delocalize(['@x/a'], {}, stubbed(appRoot)), 0);
+  const parked = path.join(appRoot, '.packages-local.parked/x-a');
+  assert.equal(
+    fs.realpathSync(parked),
+    fs.realpathSync(path.join(appRoot, 'packages-local/.repos/x-a/packages/a')),
+    'the parked link still reaches the package',
   );
 
-  // npm matches a link by NAME and never checks the range: 2.0.99 satisfies
-  // ^3.0.0 as far as npm is concerned. Warn, never fail.
-  assert.match(
-    deps.output(),
-    /checkout is 2\.0\.99, package\.json asks \^3\.0\.0/,
+  assert.equal(localize(['@x/a'], {}, stubbed(appRoot)), 0);
+  assert.equal(
+    fs.realpathSync(member),
+    fs.realpathSync(path.join(appRoot, 'packages-local/.repos/x-a/packages/a')),
+    'taken back, still the package inside the clone',
   );
-  assert.match(deps.output(), /the symlink wins; npm does NOT check the range/);
 });
 
-test('relink reinstalls a checkout a root install pruned — inside the checkout, never at the root', (t) => {
-  const appRoot = consumer(t);
-  const checkout = path.join(appRoot, 'packages-local', 'widget');
-  fs.mkdirSync(path.join(checkout, '.git'), {recursive: true});
+// --- --list ----------------------------------------------------------------
+
+test('--list shows members, parked and a range-miss line; --list --check exits 1 then', (t) => {
+  const appRoot = consumer(t, {dependencies: {'@x/a': '^2.0.0'}});
+  seedCheckout(appRoot, 'packages-local/x-a', {name: '@x/a', version: '1.4.0'});
+  seedCheckout(appRoot, '.packages-local.parked/x-b', {name: '@x/b', version: '3.0.0'});
   fs.writeFileSync(
-    path.join(checkout, 'package.json'),
+    path.join(appRoot, 'node_modules/.package-lock.json'),
     JSON.stringify({
-      name: 'widget',
-      version: '1.0.0',
-      dependencies: {kept: '1'},
-      devDependencies: {pruned: '1'},
+      packages: {
+        'node_modules/@x/a': {resolved: 'packages-local/x-a', link: true},
+        'packages-local/x-a': {version: '1.4.0'},
+      },
     }),
   );
-  fs.mkdirSync(path.join(checkout, 'node_modules', 'kept'), {recursive: true});
-  writeManifest(appRoot, {
-    dir: 'packages-local',
-    packages: {widget: {path: 'packages-local/widget', branch: 'main'}},
-  });
+  const branch = (inv) =>
+    inv.cmd === 'git' && inv.args[0] === 'symbolic-ref' ? ok('feat/x\n') : undefined;
 
-  const deps = stubbed(appRoot);
-  assert.equal(relink(deps), 0);
-  const installs = deps.npmCalls();
-  assert.equal(installs.length, 1, deps.output());
-  assert.equal(installs[0].cwd, checkout);
-  assert.notEqual(
-    installs[0].cwd,
-    appRoot,
-    'a postinstall that installs the root, recurses',
-  );
-  assert.match(deps.output(), /1 of its dependencies are gone/);
+  const deps = stubbed(appRoot, branch);
+  assert.equal(list({}, deps), 0);
+  const out = deps.output();
+  assert.match(out, /@x\/a\s+packages-local\/x-a\s+feat\/x\s+1\.4\.0/);
+  assert.match(out, /@x\/b\s+\.packages-local\.parked\/x-b\s+feat\/x\s+3\.0\.0\s+\(parked\)/);
+  assert.match(out, /drift: @x\/a@1\.4\.0 \(packages-local\/x-a\) does not satisfy dependencies "\^2\.0\.0" of <root>/);
+  assert.match(out, /1 localized · 1 parked · 1 drift/);
 
-  // A failed reinstall warns; the hook never fails an install.
-  const failing = stubbed(appRoot, () => fail('ENETUNREACH'));
-  assert.equal(relink(failing), 0);
-  assert.match(
-    failing.output(),
-    /npm install failed in packages-local\/widget[\s\S]*linked localize --reinstall widget/,
-  );
+  const check = stubbed(appRoot, branch);
+  assert.equal(list({check: true}, check), 1);
+  assert.deepEqual(check.logs, [], '--check prints only the drift');
+  assert.equal(check.warns.length, 1);
 });
 
-test('relink with no manifest produces no output at all — the CI case', (t) => {
-  const deps = stubbed(consumer(t));
-  assert.equal(relink(deps), 0);
-  assert.equal(
-    deps.output(),
-    '',
-    'any output here and people learn to ignore this hook',
-  );
-  assert.equal(deps.calls.length, 0);
-});
-
-test('relink never fails an install, not even on an unusable manifest', (t) => {
+test('--list says nothing when nothing is localized, and --check exits 0', (t) => {
   const appRoot = consumer(t);
-  fs.writeFileSync(path.join(appRoot, 'local-packages.json'), '{ not json');
   const deps = stubbed(appRoot);
-  assert.equal(relink(deps), 0);
-  assert.match(deps.output(), /not valid JSON/);
+  assert.equal(list({}, deps), 0);
+  assert.equal(list({check: true}, deps), 0);
+  assert.equal(deps.output(), '');
 });
 
-test('relink warns and skips a missing checkout rather than erroring', (t) => {
+test('a leftover local-packages.json gets one migration hint and is otherwise ignored', (t) => {
   const appRoot = consumer(t);
-  writeManifest(appRoot, {
-    dir: 'packages-local',
-    packages: {
-      widget: {repo: 'r', path: 'packages-local/widget', branch: 'main'},
-    },
-  });
+  fs.writeFileSync(path.join(appRoot, 'local-packages.json'), '{"packages": {"@x/a": {}}}');
   const deps = stubbed(appRoot);
-  assert.equal(relink(deps), 0);
-  assert.match(
-    deps.output(),
-    /is recorded as local but packages-local\/widget is gone/,
-  );
-  assert.equal(
-    fs.existsSync(path.join(appRoot, 'node_modules', 'widget')),
-    false,
-  );
-});
-
-test("relink finds a monorepo package's dependencies where the workspace hoisted them", (t) => {
-  const appRoot = consumer(t);
-  const clone = path.join(appRoot, 'packages-local', 'mono');
-  const pkgDir = path.join(clone, 'packages', 'a');
-  fs.mkdirSync(path.join(clone, 'node_modules', 'hoisted'), {recursive: true});
-  fs.mkdirSync(pkgDir, {recursive: true});
-  fs.writeFileSync(
-    path.join(pkgDir, 'package.json'),
-    JSON.stringify({name: 'a', version: '1.0.0', dependencies: {hoisted: '1'}}),
-  );
-  writeManifest(appRoot, {
-    dir: 'packages-local',
-    packages: {
-      a: {
-        repo: 'r',
-        path: 'packages-local/mono/packages/a',
-        branch: 'main',
-        subdir: 'packages/a',
-      },
-    },
-  });
-
-  const deps = stubbed(appRoot);
-  assert.equal(relink(deps), 0);
-  assert.equal(deps.npmCalls().length, 0, deps.output());
-});
-
-test('delocalize of a never-published package does not print a restore that would 404', (t) => {
-  const appRoot = consumer(t);
-  seedCheckout(appRoot, 'fresh');
-  writeManifest(appRoot, {
-    dir: 'packages-local',
-    packages: {fresh: {path: 'packages-local/fresh', branch: 'main'}},
-  });
-
-  const deps = stubbed(appRoot);
-  assert.equal(delocalize(['fresh'], {}, deps), 0, deps.output());
-  assert.doesNotMatch(deps.output(), /npm install --no-save fresh@latest/);
-  assert.match(deps.output(), /no registry copy to restore/);
+  assert.equal(list({}, deps), 0);
+  assert.equal(deps.warns.length, 1);
+  assert.match(deps.warns[0], /local-packages\.json is no longer read/);
 });

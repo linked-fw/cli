@@ -23,10 +23,8 @@ import {
   bareName,
   CreatePackageError,
   decideCreatePackageTarget,
-  ensureRelinkPostinstall,
   ensureWorkspaceGlob,
   findLinkedAppRoot,
-  RELINK_COMMAND,
   repositoryUrlFor,
 } from './utils/createPackageLocation.js';
 import type {
@@ -2554,6 +2552,8 @@ export const createPackage = async (
       // The app's package.json is wired either way: that is files, not install.
       await installWorkspacePackage(packageName, targetFolder, appRoot, options.skipInstall);
     } else if (options.skipInstall) {
+      // Files, not install: the app is set up for checkouts either way.
+      await setUpAppForCheckouts(appRoot);
       skipped();
     } else {
       await installOwnRepoPackage(packageName, targetFolder, appRoot, decision);
@@ -2616,8 +2616,8 @@ async function packageTargetFolder(
   }
   // localize's own naming, so `linked localize` and this command can never
   // disagree about where a package lives.
-  const {checkoutNameFor, DEFAULT_DIR} = await import('./localize/index.js');
-  return path.join(appRoot, DEFAULT_DIR, checkoutNameFor(name));
+  const {checkoutNameFor, LOCAL_DIR} = await import('./localize/index.js');
+  return path.join(appRoot, LOCAL_DIR, checkoutNameFor(name));
 }
 
 /**
@@ -2876,7 +2876,8 @@ async function installWorkspacePackage(
 
 /**
  * packages-local/: a repository of its own. Its git history starts here, and
- * localize's `adopt` installs, builds, links and records it. The app's
+ * localize's `adopt` sets the app up for checkouts, installs at the app root
+ * (npm links it as a workspace member) and builds it. The app's
  * dependencies are NOT touched: until the package is published a version range
  * fails `npm install` (E404 once a lockfile exists), and a `file:` path would
  * install cleanly for a teammate without the checkout and fail at runtime.
@@ -2907,17 +2908,8 @@ async function installOwnRepoPackage(
     fs.writeJsonSync(pkgPath, pkg, {spaces: 2});
   }
 
-  // Before adopt, never during it: adopt asserts the app's package.json did not
-  // change while it ran.
-  const appPkgPath = path.join(appRoot, 'package.json');
-  const appPkg = fs.readJsonSync(appPkgPath);
-  if (ensureRelinkPostinstall(appPkg)) {
-    fs.writeJsonSync(appPkgPath, appPkg, {spaces: 2});
-    log(
-      `Added \`${RELINK_COMMAND}\` to the app's postinstall, so npm install keeps the link`,
-    );
-  }
-
+  // adopt sets the app up for checkouts (workspaces glob, lock-at-rest hook,
+  // .gitignore) and says what it changed, then installs at the app root.
   const {adoptPackage} = await import('./commands/localize.js');
   const {EXIT_WARNED} = await import('./localize/index.js');
   // Only the build command matters here: adopt always installs with npm, so
@@ -2929,12 +2921,11 @@ async function installOwnRepoPackage(
   );
   const code = await adoptPackage(name, {appRoot, build: buildCommand});
   if (code === EXIT_WARNED) {
-    fail('The package is linked, but its initial build failed');
+    fail('The package is installed, but its initial build failed');
   } else if (code !== 0) {
     return fail(
-      `Linking ${name} failed (localize exit ${code}). ${rel} is scaffolded with an uncommitted ` +
-        `git init, and the app's postinstall relinks localized packages. Fix the cause and retry ` +
-        `with: linked localize ${name} --adopt`,
+      `Installing ${name} failed (localize exit ${code}). ${rel} is scaffolded with an uncommitted ` +
+        `git init. Fix the cause and retry with: linked localize ${name} --adopt`,
     );
   }
 
@@ -2957,15 +2948,32 @@ async function installOwnRepoPackage(
   log(
     `Prepared ${name} in ${chalk.magenta(rel)}, in its own git repository` +
       (remote ? ` (origin ${remote}${pushed ? ', pushed' : ''})` : ' (no remote yet)'),
-    `It is linked into node_modules and recorded in local-packages.json.`,
+    `It is a workspace member through the app's packages-local/* glob, so npm links it.`,
     `It is not in the app's dependencies: until it is published a version range would fail npm install.`,
     `  After publishing: ${chalk.blueBright(`npm install ${name}@^${version}`)}`,
   );
   if (!remote) {
     log(
-      `To add a remote later: ${chalk.blueBright('git remote add origin <url>')} in ${rel}, ` +
-        `then ${chalk.blueBright(`linked localize ${name} --adopt`)} to record it.`,
+      `To add a remote later: ${chalk.blueBright('git remote add origin <url>')} in ${rel}.`,
     );
+  }
+}
+
+/** localize's one-time app setup, reported the way localize reports it. */
+async function setUpAppForCheckouts(appRoot: string) {
+  const {ensureAppSetup, LocalizeError} = await import('./localize/index.js');
+  try {
+    const changes = ensureAppSetup(appRoot);
+    if (changes.length) {
+      log(
+        `Set up this app for checkouts in packages-local/ (commit these):`,
+        ...changes.map((c) => `  ${c.file}: ${c.what}`),
+      );
+    }
+  } catch (e) {
+    if (!(e instanceof LocalizeError)) throw e;
+    console.warn(chalk.yellow(e.message));
+    process.exitCode = 1;
   }
 }
 

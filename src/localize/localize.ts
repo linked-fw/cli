@@ -1,500 +1,351 @@
 /**
- * `localize` -- turn an npm-installed dependency into an editable git checkout.
+ * `localize` -- turn an npm-installed dependency into an editable git checkout
+ * that npm itself links.
  *
- * The loop, in five steps, none of which involve npm learning anything:
+ * A checkout in `packages-local/` is a workspace member: the app's
+ * `workspaces` holds `"packages-local/*"`, so `npm install` links
+ * `node_modules/<name>` to it and dedupes everything below it like any other
+ * member. The committed `package-lock.json` is put back after every install by
+ * `hooks/lock-at-rest.cjs`, so the working tree stays clean.
  *
- *   1. npm name -> registry `repository` (see resolve.ts)
- *   2. `git clone` into `<dir>/<name>`
- *   3. **`npm install` INSIDE the checkout**, then prune it (`ensure`)
- *   4. `fs.symlink` node_modules/<name> -> the checkout
- *   5. record it in a gitignored manifest
+ * One run, for every name at once:
  *
- * `adopt` (adopt.ts) enters at step 3 with a checkout that is already there,
- * and shares everything from there on: `forEachName` and `installLinkAndRecord`
- * below.
+ *   1. refuse an `overrides` key naming a package being localized (npm fails
+ *      with `EOVERRIDE` on a member's name); nothing is changed then;
+ *   2. the one-time app setup (app-setup.ts), reported line by line so the
+ *      developer commits it;
+ *   3. per name: a parked checkout (`linked delocalize`) moves back; an
+ *      existing directory is refused with an `--adopt` hint; anything else is
+ *      resolved through the registry's `repository` (or `--repo`) and cloned;
+ *   4. the git hooks (git-hooks.ts);
+ *   5. ONE `npm install` at the app root -- a checkout's dependencies arrive
+ *      with it, so it comes before any build;
+ *   6. build each new checkout: `--build`, else `linked build`, else for the
+ *      cli its own `npm run build` (the cli is what `linked build` runs, and a
+ *      fresh cli checkout has no `lib/` yet). A failing build warns: a package
+ *      whose build is broken is usually what you localized it to fix.
  *
- * Step 3 is the one that is easy to "simplify" and must not be. Installing
- * from the parent instead -- `npm install <path> --no-save` -- hard-failed an
- * app's boot on a missing peer dependency, because module resolution happens
- * from the symlink's REAL path, whose ancestors have no `node_modules`. The
- * checkout needs its own installed tree. `tests/unit/localize/real-localize.test.ts` runs a
- * real clone and a real install and asserts the dependency landed inside the
- * checkout, so a reimplementation that moves the install back out fails there.
+ * `adopt` (adopt.ts) replaces step 3 with "the checkout is already there", and
+ * `--parked` with "every parked checkout". Steps 1, 2 and 4-6 are `runLocalize`.
  *
- * A clone, not a copy: a published tarball has no `src/`, so copying the
- * installed package cannot give you something to edit.
- *
- * What localize NEVER does: run an install at the consumer root, or edit
- * `package-lock.json`, `.gitignore`, `workspaces`, dependencies or any
- * bundler config. It asserts the work did not touch `package.json` or
- * `package-lock.json` before exiting 0.
- *
- * The one deliberate edit, made after that assertion: when a run records a
- * package, the app's `postinstall` and `dependencies` scripts get
- * `linked localize --relink` if they lack it (`../utils/relinkHooks.ts`
- * explains why npm needs both). Without them the next npm command silently
- * undoes the link this run just made.
+ * A package inside a monorepo (`--subdir`, or a registry `repository.directory`)
+ * is cloned whole into `packages-local/.repos/<checkout>` -- a dot directory,
+ * which the `packages-local/*` glob skips -- and `packages-local/<checkout>` is
+ * a link to the package inside it. npm follows the link like a directory.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {conflictingOverrides, ensureAppSetup} from './app-setup.js';
+import type {SetupChange} from './app-setup.js';
+import {describeDrift, driftProblems} from './drift.js';
 import {
   EXIT_INSTALL_FAILED,
-  EXIT_NOT_FOUND,
-  EXIT_MANIFEST_DIRTY,
   EXIT_REFUSED,
+  EXIT_USAGE,
   EXIT_WARNED,
   LocalizeError,
 } from './errors.js';
-import {
-  DEFAULT_DIR,
-  SCHEMA_VERSION,
-  readManifest,
-  writeManifest,
-} from './manifest.js';
-import type {ManifestEntry} from './manifest.js';
-import type {Deps} from './run.js';
+import {existsOrLink, moveEntry, readJson} from './fsops.js';
+import {installGitHooks} from './git-hooks.js';
+import {LOCAL_DIR, localMembers, parkedMembers, PARKED_DIR} from './members.js';
+import type {Member} from './members.js';
 import {checkoutNameFor, resolvePackage} from './resolve.js';
-import {pruneProvided, shouldPrune} from './prune.js';
-import {ensure} from './ensure.js';
-import type {PruneOptions} from './prune.js';
-import {ensureRelinkHooksInFile, RELINK_COMMAND} from '../utils/relinkHooks.js';
-import {
-  diffManifests,
-  isGitCheckout,
-  isInside,
-  isSymlink,
-  readJson,
-  snapshotManifests,
-  writeLink,
-} from './fsops.js';
+import type {Deps} from './run.js';
 
-/**
- * @param {string[]} names  full npm package names
- * @param {object} opts  `{force, dir, repo, subdir, build, prune}` -- `prune`
- *   defaults to true; see prune.ts
- * @param {object} deps  `{appRoot, run, log, warn, error}`
- * @returns {number} the process exit code: the HIGHEST of the per-name codes,
- *   since each name is atomic and a failure on name 2 does not undo name 1.
- */
-export interface LocalizeOptions extends PruneOptions {
-  force?: boolean;
-  /** Where checkouts live, relative to the app root (default `packages-local`). */
+/** What a new checkout is built with when `--build` does not say. */
+export const DEFAULT_BUILD_COMMAND = 'linked build';
+/** The cli builds itself: `linked build` IS the cli, and a fresh checkout of it has no `lib/`. */
+export const CLI_PACKAGE = '@_linked/cli';
+export const CLI_BUILD_COMMAND = 'npm run build';
+/** The one install a run makes, at the app root. */
+export const INSTALL_ARGS = ['install', '--no-audit', '--no-fund'];
+/** Where a cloned monorepo lives, inside `packages-local/` but outside its glob. */
+export const REPOS_DIR = `${LOCAL_DIR}/.repos`;
+/** What an app recorded checkouts in before they were workspace members. */
+export const LEGACY_MANIFEST = 'local-packages.json';
+
+export interface LocalizeOptions {
+  /** Where checkouts live. Only `packages-local` is accepted: the workspace glob names it. */
   dir?: string;
   repo?: string;
   subdir?: string;
-  /** Run in the checkout after installing; absent or empty runs nothing. */
+  /** Run in each new checkout after the install. Absent: the default; empty: no build. */
   build?: string;
 }
 
-/** What one name's work returns to the shared loop. */
-export interface OneResult {
-  code: number;
-  entry?: {name: string; value: ManifestEntry};
+/** A checkout ready for the install. */
+export interface Prepared {
+  name: string;
+  /** App-relative, `/`-separated: `packages-local/_linked-core`. */
+  dir: string;
+  /** Build it after the install: a new clone or an adopted checkout, not a returning parked one. */
+  build: boolean;
 }
 
-export type OneName = (
+/** How one name becomes a checkout in `packages-local/`; null when there is nothing to do. */
+export type Prepare = (
   name: string,
-  dir: string,
-  recorded: ManifestEntry | undefined,
   opts: LocalizeOptions,
   deps: Deps,
-) => OneResult;
+) => Prepared | null;
 
+/**
+ * @param names  full npm package names
+ * @returns the process exit code: the highest of the per-name codes and the
+ *   install's, since a failure on name 2 does not undo name 1.
+ */
 export function localize(
   names: string[],
   opts: LocalizeOptions,
   deps: Deps,
 ): number {
-  return forEachName(names, opts, deps, localizeOne);
+  return runLocalize(names, opts, deps, prepareClone);
 }
 
 /**
- * The loop `localize` and `adopt` share: read the manifest once, run `one` per
- * name, write the manifest after each, then assert the links and the
- * consumer's untouched manifests.
- *
- * @param {(name: string, dir: string, recorded: object|undefined, opts: object, deps: object)
- *   => {code: number, entry?: {name: string, value: object}}} one
+ * The run `localize`, `adopt` and `--parked` share: everything except how a
+ * name becomes a checkout. See the module header for the steps.
  */
-export function forEachName(
+export function runLocalize(
   names: string[],
   opts: LocalizeOptions,
   deps: Deps,
-  one: OneName,
+  prepare: Prepare,
 ): number {
-  // Taken BEFORE anything runs: the post-condition is about what THIS run
-  // changed, not about what the tree looked like at HEAD.
-  const before = snapshotManifests(deps.appRoot);
-
-  let manifest;
+  legacyManifestHint(deps);
   try {
-    manifest = readManifest(deps.appRoot, deps);
+    checkDir(opts.dir);
+    const conflicts = conflictingOverrides(deps.appRoot, names);
+    if (conflicts.length) {
+      throw new LocalizeError(
+        `package.json "overrides" names a package being localized: ${conflicts
+          .map((k) => `"${k}"`)
+          .join(', ')}.\n` +
+          `npm refuses an override on a workspace member's name (EOVERRIDE), and a nested one ` +
+          `would replace the checkout. Remove ${conflicts.length === 1 ? 'that key' : 'those keys'} ` +
+          `from "overrides", then run this again. Nothing was changed.`,
+        EXIT_REFUSED,
+      );
+    }
+    reportSetup(ensureAppSetup(deps.appRoot), deps);
   } catch (e) {
     return reportError(e, deps);
   }
 
-  const dir = opts.dir ?? manifest.dir ?? DEFAULT_DIR;
-  const entries = {...manifest.entries};
   let code = 0;
-  let recorded = false;
-
+  const prepared: Prepared[] = [];
   for (const name of names) {
     try {
-      const result = one(name, dir, entries[name], opts, deps);
-      if (result.entry) {
-        entries[result.entry.name] = result.entry.value;
-        recorded = true;
-      }
-      code = Math.max(code, result.code);
-      // Written after EACH name, so an interruption keeps what already worked.
-      writeManifest(deps.appRoot, {
-        version: SCHEMA_VERSION,
-        dir,
-        packages: entries,
-      });
+      const p = prepare(name, opts, deps);
+      if (p) prepared.push(p);
     } catch (e) {
       code = Math.max(code, reportError(e, deps));
     }
   }
+  if (!prepared.length) return code;
+  return Math.max(code, installAndBuild(prepared, opts, deps));
+}
 
-  // Over EVERY localized checkout, not just the ones named: localizing `B`
-  // is what makes `A`'s registry copy of `B` redundant.
-  if (shouldPrune(opts)) {
-    try {
-      pruneProvided(entries, opts, deps);
-    } catch (e) {
-      deps.warn(
-        `[localize] pruning failed, the checkouts' node_modules are as npm left them: ${e.message}`,
-      );
-      code = Math.max(code, EXIT_WARNED);
-    }
+/** Steps 4-6: git hooks, one root install, then the builds. */
+export function installAndBuild(
+  prepared: Prepared[],
+  opts: Pick<LocalizeOptions, 'build'>,
+  deps: Deps,
+): number {
+  const hooks = installGitHooks(deps.appRoot);
+  for (const file of hooks.skipped) {
+    deps.warn(
+      `[localize] ${path.relative(deps.appRoot, file)} is not ours, so it was left alone. Without ` +
+        `the localize hook there, run \`npm install\` yourself after a pull or branch switch that ` +
+        `changes dependencies.`,
+    );
   }
 
-  code = Math.max(code, assertLinked(entries, deps));
-  code = Math.max(code, assertManifestsUntouched(before, deps));
-  // After the assertion, so it still covers everything the work itself did.
-  if (recorded) ensureRelinkHooksIn(deps);
+  deps.log(`[localize] npm ${INSTALL_ARGS.join(' ')} (app root)`);
+  const install = deps.run('npm', INSTALL_ARGS, {cwd: deps.appRoot});
+  if (install.status !== 0) {
+    deps.error(
+      `[localize] npm install failed at the app root. The checkout${prepared.length === 1 ? ' stays' : 's stay'} ` +
+        `in ${LOCAL_DIR}/; fix the cause and run \`npm install\`.\n` +
+        tail(install.stderr || install.stdout),
+    );
+    return EXIT_INSTALL_FAILED;
+  }
+
+  let code = 0;
+  for (const p of prepared) {
+    const pkgDir = path.join(deps.appRoot, p.dir);
+    if (p.build && runBuild(p, pkgDir, opts, deps) === 'failed')
+      code = EXIT_WARNED;
+    deps.log(
+      `[localize] ${p.name} -> ${p.dir} (branch ${currentBranch(pkgDir, deps)})`,
+    );
+  }
+  for (const d of driftProblems(deps.appRoot))
+    deps.warn(`[localize] drift: ${describeDrift(d)}`);
   return code;
 }
 
-/** Add the relink hooks to the app's package.json when it lacks them. See relinkHooks.ts. */
-function ensureRelinkHooksIn(deps: Deps): void {
-  const added = ensureRelinkHooksInFile(
-    path.join(deps.appRoot, 'package.json'),
-  );
-  if (!added.length) return;
-  deps.log(
-    `[localize] Added \`${RELINK_COMMAND}\` to the app's ${added.join(' and ')} ` +
-      `script${added.length > 1 ? 's' : ''} so npm keeps the links`,
-  );
-}
-
-function localizeOne(
+/** Step 3 for `localize`: take back a parked checkout, else clone. */
+function prepareClone(
   name: string,
-  dir: string,
-  recorded: ManifestEntry | undefined,
   opts: LocalizeOptions,
   deps: Deps,
-): OneResult {
-  // An override recorded by an earlier run is reused, so `--repo` is a
-  // one-time cost rather than something to remember on every invocation.
-  const override = opts.repo
-    ? {repo: opts.repo, subdir: opts.subdir}
-    : recorded?.repo && !looksLikeOrgSlug(recorded.repo)
-      ? {repo: recorded.repo, subdir: recorded.subdir}
-      : undefined;
+): Prepared | null {
+  const parked = parkedMembers(deps.appRoot).find((m) => m.name === name);
+  if (parked) return unpark(parked, deps);
 
-  const resolved = resolveOrSuggestAdopt(name, dir, override, deps);
-  let code = 0;
-
-  const relClone = path.join(dir, resolved.checkoutName);
-  const clone = path.join(deps.appRoot, relClone);
-  // When the repository holds more than this package, the CHECKOUT is the
-  // clone but the PACKAGE is a directory inside it: that is where the install
-  // runs and that is what the symlink points at.
-  const relPkg = resolved.subdir
-    ? path.join(relClone, resolved.subdir)
-    : relClone;
-  const pkgDir = path.join(deps.appRoot, relPkg);
-
-  guardForeignLink(resolved.npmName, dir, opts, deps);
-
-  if (isGitCheckout(clone)) {
-    code = Math.max(code, refresh(relClone, clone, deps));
-    if (code === EXIT_WARNED) return {code}; // a non-fast-forward is reported, never forced
-  } else {
-    fs.mkdirSync(path.dirname(clone), {recursive: true});
-    deps.log(`[localize] cloning ${resolved.repo} -> ${relClone}`);
-    const r = deps.run('git', ['clone', resolved.repo, clone]);
-    if (r.status !== 0) {
-      throw new LocalizeError(
-        `git clone ${resolved.repo} failed:\n${(r.stderr || r.stdout).trim()}`,
-        EXIT_REFUSED,
-      );
-    }
-  }
-
-  if (!fs.existsSync(path.join(pkgDir, 'package.json'))) {
+  const member = localMembers(deps.appRoot).find((m) => m.name === name);
+  if (member) {
     throw new LocalizeError(
-      `${relPkg} has no package.json, so it is not the package "${name}".\n` +
-        (resolved.subdir
-          ? `The registry says "${name}" lives in "${resolved.subdir}" of ${resolved.repo}, and it does not.`
-          : `${resolved.repo} looks like a monorepo root. Say where the package lives:\n` +
-            `  linked localize ${name} --repo ${resolved.repo} --subdir <path-inside-the-repo>`),
+      `${name} is already in ${member.dir}. To install and build it as it is:\n` +
+        `  linked localize ${name} --adopt`,
       EXIT_REFUSED,
     );
   }
 
-  // The checkout's own package.json is authoritative about the name: a
-  // mismatch means the symlink would be written under a name nothing imports.
-  const declared = readJson(path.join(pkgDir, 'package.json'))?.name;
-  if (declared && declared !== resolved.npmName) {
+  const relDir = `${LOCAL_DIR}/${checkoutNameFor(name)}`;
+  const target = path.join(deps.appRoot, relDir);
+  if (existsOrLink(target)) {
     throw new LocalizeError(
-      `${relPkg} declares itself as "${declared}", not "${name}".\n` +
-        (resolved.subdir
-          ? `The registry's repository.directory for "${name}" points at the wrong package.`
-          : `${resolved.repo} is probably a monorepo. Point at the right directory:\n` +
-            `  linked localize ${name} --repo ${resolved.repo} --subdir <path-inside-the-repo>`),
+      `${relDir} already exists. localize never clones over a directory. If it is ${name}'s ` +
+        `checkout, install and build it as it is:\n  linked localize ${name} --adopt`,
       EXIT_REFUSED,
     );
   }
 
-  return installLinkAndRecord(
-    {
-      npmName: resolved.npmName,
-      clone,
-      relPkg,
-      pkgDir,
-      repo: resolved.repo,
-      subdir: resolved.subdir,
-    },
-    opts,
+  const resolved = resolvePackage(
+    name,
     deps,
-    code,
+    opts.repo ? {repo: opts.repo, subdir: opts.subdir} : undefined,
+  );
+
+  // A monorepo is cloned whole outside the glob; the member is a link to the package.
+  const relClone = resolved.subdir
+    ? `${REPOS_DIR}/${checkoutNameFor(name)}`
+    : relDir;
+  const clone = path.join(deps.appRoot, relClone);
+  if (existsOrLink(clone)) {
+    throw new LocalizeError(
+      `${relClone} already exists. Remove it, or move it out of the way, and run this again.`,
+      EXIT_REFUSED,
+    );
+  }
+  fs.mkdirSync(path.dirname(clone), {recursive: true});
+  deps.log(`[localize] cloning ${resolved.repo} -> ${relClone}`);
+  const r = deps.run('git', ['clone', resolved.repo, clone]);
+  if (r.status !== 0) {
+    throw new LocalizeError(
+      `git clone ${resolved.repo} failed:\n${(r.stderr || r.stdout).trim()}`,
+      EXIT_REFUSED,
+    );
+  }
+
+  const pkgDir = resolved.subdir ? path.join(clone, resolved.subdir) : clone;
+  const relPkg = resolved.subdir ? `${relClone}/${resolved.subdir}` : relClone;
+  // A clone that is not the package must not stay: in packages-local/ it
+  // would be a workspace member under the wrong name.
+  const declared = readJson(path.join(pkgDir, 'package.json'))?.name;
+  if (declared !== name) {
+    fs.rmSync(clone, {recursive: true, force: true});
+    const where = resolved.subdir
+      ? `The registry's repository.directory for "${name}" points at the wrong place.`
+      : `${resolved.repo} looks like a monorepo. Say where the package lives:\n` +
+        `  linked localize ${name} --repo ${resolved.repo} --subdir <path-inside-the-repo>`;
+    throw new LocalizeError(
+      (declared
+        ? `${relPkg} declares itself as "${declared}", not "${name}".\n`
+        : `${relPkg} has no package.json naming it, so it is not the package "${name}".\n`) +
+        `${where}\nThe clone was removed.`,
+      EXIT_REFUSED,
+    );
+  }
+
+  if (resolved.subdir) {
+    fs.symlinkSync(path.relative(path.dirname(target), pkgDir), target, 'dir');
+    deps.log(`[localize] ${relDir} -> ${relPkg}`);
+  }
+  return {name, dir: relDir, build: true};
+}
+
+/** Move a parked checkout back into `packages-local/`. No clone, no build: it is as it was. */
+export function unpark(member: Member, deps: Deps): Prepared {
+  const entry = path.basename(member.dir);
+  const relDir = `${LOCAL_DIR}/${entry}`;
+  const to = path.join(deps.appRoot, relDir);
+  if (existsOrLink(to)) {
+    throw new LocalizeError(
+      `${member.name} is parked in ${member.dir}, but ${relDir} already exists. Move one of ` +
+        `them out of the way and run this again.`,
+      EXIT_REFUSED,
+    );
+  }
+  moveEntry(path.join(deps.appRoot, member.dir), to);
+  deps.log(`[localize] ${member.dir} -> ${relDir}`);
+  return {name: member.name, dir: relDir, build: false};
+}
+
+/** `--dir` is kept for scripts that pass the default; anything else is not a workspace member. */
+function checkDir(dir: string | undefined): void {
+  if (dir === undefined || dir.replace(/\/+$/, '') === LOCAL_DIR) return;
+  throw new LocalizeError(
+    `--dir ${dir}: checkouts live in ${LOCAL_DIR}/, the directory the app's ` +
+      `"workspaces" glob and the lock-at-rest hook name. Move them there.`,
+    EXIT_USAGE,
+  );
+}
+
+function reportSetup(changes: SetupChange[], deps: Deps): void {
+  if (!changes.length) return;
+  deps.log(`[localize] set up this app for checkouts (commit these):`);
+  for (const c of changes) deps.log(`  ${c.file}: ${c.what}`);
+}
+
+/**
+ * One line when an app still has the retired record. It is ignored: the
+ * record now is the directories in `packages-local/`.
+ */
+export function legacyManifestHint(deps: Pick<Deps, 'appRoot' | 'warn'>): void {
+  if (!fs.existsSync(path.join(deps.appRoot, LEGACY_MANIFEST))) return;
+  deps.warn(
+    `[localize] ${LEGACY_MANIFEST} is no longer read: every directory in ${LOCAL_DIR}/ is ` +
+      `localized, ${PARKED_DIR}/ holds parked ones. Delete the file.`,
   );
 }
 
 /**
- * Everything after the checkout exists, shared by `localize` and `adopt`:
- * install inside it, run the configured build, link it, and describe the
- * manifest entry. Nothing here knows how the checkout got there.
- *
- * `repo` may be absent -- an adopted checkout with no remote is recorded
- * without one.
+ * Run the build for one new checkout. `opts.build` wins, including `''` for
+ * no build; otherwise the cli builds itself and everything else gets
+ * `linked build`.
  */
-export function installLinkAndRecord(
-  {
-    npmName,
-    clone,
-    relPkg,
-    pkgDir,
-    repo,
-    subdir,
-  }: {
-    npmName: string;
-    clone: string;
-    relPkg: string;
-    pkgDir: string;
-    repo?: string;
-    subdir?: string;
-  },
-  opts: LocalizeOptions,
+function runBuild(
+  p: Prepared,
+  pkgDir: string,
+  opts: Pick<LocalizeOptions, 'build'>,
   deps: Deps,
-  code = 0,
-): {code: number; entry: {name: string; value: ManifestEntry}} {
-  // THE constraint. Read the module header before changing this. `ensure`
-  // installs inside the checkout and prunes it as one step (ensure.ts).
-  try {
-    code = Math.max(code, ensure({path: relPkg, subdir}, deps, opts));
-  } catch (e) {
-    if (e instanceof LocalizeError && e.code === EXIT_INSTALL_FAILED)
-      e.message += `\nThe checkout is left on disk. Nothing was linked and nothing was recorded.`;
-    throw e;
-  }
-
-  // The build is the one thing localize does not know how to do, so it is
-  // configuration rather than behaviour. A failure is a WARNING: a package
-  // whose build is broken is exactly what you are about to fix, and refusing
-  // to link it would be perverse.
-  if (runBuild(relPkg, pkgDir, opts, deps) === 'failed')
-    code = Math.max(code, EXIT_WARNED);
-
-  writeLink(deps.appRoot, npmName, pkgDir);
-  const branch = currentBranch(clone, deps);
-  deps.log(`[localize] linked ${npmName} -> ${relPkg} (branch ${branch})`);
-
-  const range = declaredRange(npmName, deps);
-  return {
-    code,
-    entry: {
-      name: npmName,
-      value: {
-        ...(repo ? {repo} : {}),
-        path: relPkg,
-        branch,
-        ...(subdir ? {subdir} : {}),
-        ...(range ? {range} : {}),
-        // `--no-prune` is remembered, so the run-time check and `--relink` honour it too.
-        ...(shouldPrune(opts) ? {} : {prune: false as const}),
-      },
-    },
-  };
-}
-
-/**
- * A registry lookup that fails while a git checkout already sits where the
- * clone would go is almost always a package that was never published -- one
- * made locally. Say how to link it as it is rather than leave the developer
- * guessing at a `--repo`.
- */
-function resolveOrSuggestAdopt(name, dir, override, deps) {
-  try {
-    return resolvePackage(name, deps, override);
-  } catch (e) {
-    const relClone = path.join(dir, checkoutNameFor(name));
-    if (
-      e instanceof LocalizeError &&
-      e.code === EXIT_NOT_FOUND &&
-      isGitCheckout(path.join(deps.appRoot, relClone))
-    ) {
-      e.message +=
-        `\n${relClone} is already a git checkout. To link it as it is, with no registry lookup:\n` +
-        `  linked localize ${name} --adopt`;
-    }
-    throw e;
-  }
-}
-
-/** Older manifests recorded `owner/repo`; those are re-resolved rather than cloned blind. */
-function looksLikeOrgSlug(repo) {
-  return /^[\w.-]+\/[\w.-]+$/.test(repo);
-}
-
-/**
- * Reuse an existing clone. A dirty tree is reused WITHOUT pulling and said so;
- * a clean one is fast-forwarded; a non-fast-forward is reported and skipped
- * rather than forced, because the developer's commits are the entire point.
- */
-function refresh(relPath, clone, deps) {
-  const status = deps.run('git', ['status', '--porcelain'], {cwd: clone});
-  const modified = status.stdout.split('\n').filter((l) => l.trim()).length;
-  if (modified > 0) {
-    deps.log(
-      `[localize] ${relPath}: ${modified} modified file${modified === 1 ? '' : 's'} — not pulling`,
-    );
-    return 0;
-  }
-  const pull = deps.run('git', ['pull', '--ff-only'], {cwd: clone});
-  if (pull.status !== 0) {
-    deps.warn(
-      `[localize] ${relPath}: \`git pull --ff-only\` failed (not a fast-forward) — skipped, not ` +
-        `forced. Reconcile it by hand:\n${(pull.stderr || pull.stdout).trim()}`,
-    );
-    return EXIT_WARNED;
-  }
-  return 0;
-}
-
-/**
- * Run the configured build command, if there is one.
- *
- * localize has no opinion about how a checkout is built, and does not look for
- * a builder. `--build "<cmd>"`, or a `build` field in the manifest, or
- * `{build}` in the programmatic options. Absent -- the common case, and the
- * case for anything whose dev loop reads source directly -- nothing runs and
- * nothing is said.
- */
-function runBuild(relPath, pkgDir, opts, deps) {
-  const cmd = opts.build;
+): 'skipped' | 'ok' | 'failed' {
+  const cmd = buildCommandFor(p.name, opts);
   if (!cmd) return 'skipped';
-  deps.log(`[localize] ${relPath}: ${cmd}`);
+  deps.log(`[localize] ${p.dir}: ${cmd}`);
   const r = deps.run(cmd, [], {cwd: pkgDir, shell: true});
   if (r.status !== 0) {
     deps.warn(
-      `[localize] ${relPath}: \`${cmd}\` failed. The package is linked and recorded anyway — ` +
-        `a package whose build is broken is exactly what you are about to fix.\n` +
-        `${(r.stderr || r.stdout).trim()}`,
+      `[localize] ${p.dir}: \`${cmd}\` failed. It is installed and linked anyway -- a package ` +
+        `whose build is broken is usually what you localized it to fix.\n` +
+        tail(r.stderr || r.stdout),
     );
     return 'failed';
   }
   return 'ok';
 }
 
-/** Refuse when `node_modules/<name>` is already a symlink pointing outside `<dir>`. */
-export function guardForeignLink(
-  npmName: string,
-  dir: string,
-  opts: {force?: boolean},
-  deps: Deps,
-): void {
-  const link = path.join(deps.appRoot, 'node_modules', npmName);
-  if (!isSymlink(link)) return;
-  let target;
-  try {
-    target = fs.realpathSync(link);
-  } catch {
-    return; // a dangling link is ours to replace
-  }
-  if (isInside(target, path.join(deps.appRoot, dir))) return;
-  if (opts.force) {
-    deps.warn(
-      `[localize] --force: overwriting the existing link ${npmName} -> ${target}`,
-    );
-    return;
-  }
-  throw new LocalizeError(
-    `node_modules/${npmName} is already a symlink to ${target}, which is outside ${dir}.\n` +
-      `Refusing to overwrite someone else's link. Pass --force to replace it.`,
-    EXIT_REFUSED,
-  );
-}
-
-/** Every recorded package is actually linked where the manifest says it is. */
-function assertLinked(entries: Record<string, ManifestEntry>, deps: Deps) {
-  let code = 0;
-  for (const [name, entry] of Object.entries(entries)) {
-    const link = path.join(deps.appRoot, 'node_modules', name);
-    const expected = path.join(deps.appRoot, entry.path);
-    if (!isSymlink(link)) {
-      deps.warn(
-        `[localize] ${name} is recorded but node_modules/${name} is not a symlink.`,
-      );
-      code = Math.max(code, EXIT_WARNED);
-      continue;
-    }
-    if (!fs.existsSync(expected)) continue; // "checkout missing" is a --list state, not a failure
-    if (fs.realpathSync(link) !== fs.realpathSync(expected)) {
-      deps.warn(
-        `[localize] ${name} links to ${fs.realpathSync(link)} but the manifest records ${entry.path}.`,
-      );
-      code = Math.max(code, EXIT_WARNED);
-    }
-  }
-  return code;
-}
-
-/**
- * The property the whole design rests on: this run changed neither manifest.
- *
- * Content hashes, not `git status`. `git status` compares against HEAD, so in
- * any tree with an uncommitted `package.json` it reports a modification the
- * command did not make -- an earlier tool shipped exactly that and reported
- * correct runs as failures.
- */
-export function assertManifestsUntouched(
-  before: Record<string, string | null>,
-  deps: Deps,
-): number {
-  const changed = diffManifests(before, snapshotManifests(deps.appRoot));
-  if (!changed.length) return 0;
-  deps.error(
-    `[localize] the consumer's manifests changed while this command ran:\n` +
-      changed.map((c) => `  ${c}`).join('\n') +
-      `\nThis is the exact failure localize exists to prevent. Revert those files; nothing in ` +
-      `localize is supposed to touch them.`,
-  );
-  return EXIT_MANIFEST_DIRTY;
+export function buildCommandFor(
+  name: string,
+  opts: Pick<LocalizeOptions, 'build'>,
+): string {
+  if (opts.build !== undefined) return opts.build;
+  return name === CLI_PACKAGE ? CLI_BUILD_COMMAND : DEFAULT_BUILD_COMMAND;
 }
 
 export function reportError(e: unknown, deps: Pick<Deps, 'error'>): number {
@@ -511,27 +362,19 @@ export function reportError(e: unknown, deps: Pick<Deps, 'error'>): number {
  * `rev-parse --abbrev-ref` fails there, and `create-package` adopts a fresh
  * `git init` before its first commit.
  */
-export function currentBranch(clone: string, deps: Deps): string {
+export function currentBranch(checkout: string, deps: Pick<Deps, 'run'>): string {
   const sym = deps.run('git', ['symbolic-ref', '--short', '-q', 'HEAD'], {
-    cwd: clone,
+    cwd: checkout,
   });
   if (sym.status === 0 && sym.stdout.trim()) return sym.stdout.trim();
   const r = deps.run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-    cwd: clone,
+    cwd: checkout,
   });
   const b = r.stdout.trim();
   return r.status === 0 && b ? b : 'HEAD';
 }
 
-export function declaredRange(
-  name: string,
-  deps: Pick<Deps, 'appRoot'>,
-): string | undefined {
-  const pkg = readJson(path.join(deps.appRoot, 'package.json'));
-  if (!pkg) return undefined;
-  return (
-    pkg.dependencies?.[name] ??
-    pkg.devDependencies?.[name] ??
-    pkg.optionalDependencies?.[name]
-  );
+/** The last lines of a subprocess's output: enough to see the error, not the whole log. */
+export function tail(output: string, lines = 20): string {
+  return output.trim().split('\n').slice(-lines).join('\n');
 }

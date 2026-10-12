@@ -4,13 +4,10 @@ import path from 'path';
 import {
   bareName,
   decideCreatePackageTarget,
-  ensureRelinkHooks,
-  ensureRelinkPostinstall,
   ensureWorkspaceGlob,
   findLinkedAppRoot,
   repositoryUrlFor,
 } from '../../src/utils/createPackageLocation';
-import {ensureRelinkHooksInFile} from '../../src/utils/relinkHooks';
 
 // `create-package` chooses between packages/ (the app's own repository) and
 // packages-local/ (a repository of its own, handed to localize). These pin the
@@ -125,85 +122,15 @@ describe('ensureWorkspaceGlob', () => {
     expect(r.changed).toBe(false);
     expect(r.warning).toMatch(/packages\/\*/);
   });
-});
 
-describe('ensureRelinkHooks', () => {
-  it('sets both hooks on an app that has neither', () => {
+  it('adds packages-local/* for that location, next to packages/*', () => {
+    const pkg: any = {workspaces: ['packages/*']};
+    expect(ensureWorkspaceGlob(pkg, 'packages-local')).toEqual({changed: true});
+    expect(pkg.workspaces).toEqual(['packages/*', 'packages-local/*']);
+    expect(ensureWorkspaceGlob(pkg, 'packages-local').changed).toBe(false);
     const none: any = {};
-    expect(ensureRelinkHooks(none)).toEqual(['postinstall', 'dependencies']);
-    expect(none.scripts).toEqual({
-      postinstall: 'linked localize --relink',
-      dependencies: 'linked localize --relink',
-    });
-  });
-
-  it('appends with && to a script that does something else', () => {
-    const other: any = {
-      scripts: {postinstall: 'patch-package', dependencies: 'echo deps'},
-    };
-    expect(ensureRelinkHooks(other)).toEqual(['postinstall', 'dependencies']);
-    expect(other.scripts.postinstall).toBe(
-      'patch-package && linked localize --relink',
-    );
-    expect(other.scripts.dependencies).toBe(
-      'echo deps && linked localize --relink',
-    );
-  });
-
-  it('does not duplicate, and recognises the retired linked-localize spelling', () => {
-    const both: any = {
-      scripts: {
-        postinstall: 'linked-localize --relink',
-        dependencies: 'x && linked localize --relink',
-      },
-    };
-    const before = JSON.stringify(both);
-    expect(ensureRelinkHooks(both)).toEqual([]);
-    expect(JSON.stringify(both)).toBe(before);
-
-    // the app from before the dependencies hook existed gets only that one
-    const old: any = {scripts: {postinstall: 'linked localize --relink'}};
-    expect(ensureRelinkHooks(old)).toEqual(['dependencies']);
-    expect(old.scripts.postinstall).toBe('linked localize --relink');
-    expect(old.scripts.dependencies).toBe('linked localize --relink');
-  });
-
-  it('ensureRelinkPostinstall, the older name, sets both and says whether it changed anything', () => {
-    const none: any = {};
-    expect(ensureRelinkPostinstall(none)).toBe(true);
-    expect(none.scripts.dependencies).toBe('linked localize --relink');
-    expect(ensureRelinkPostinstall(none)).toBe(false);
-  });
-});
-
-describe('ensureRelinkHooksInFile', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relink-hooks-'));
-  });
-  afterEach(() => fs.rmSync(dir, {recursive: true, force: true}));
-
-  it('writes the hooks keeping indentation and the trailing newline', () => {
-    const file = path.join(dir, 'package.json');
-    fs.writeFileSync(file, JSON.stringify({name: 'app'}, null, 4) + '\n');
-    expect(ensureRelinkHooksInFile(file)).toEqual([
-      'postinstall',
-      'dependencies',
-    ]);
-    const text = fs.readFileSync(file, 'utf8');
-    expect(text).toMatch(/^ {4}"scripts"/m);
-    expect(text.endsWith('}\n')).toBe(true);
-    expect(JSON.parse(text).scripts.dependencies).toBe(
-      'linked localize --relink',
-    );
-  });
-
-  it('leaves a missing or unparseable file alone', () => {
-    expect(ensureRelinkHooksInFile(path.join(dir, 'nope.json'))).toEqual([]);
-    const bad = path.join(dir, 'package.json');
-    fs.writeFileSync(bad, '{not json');
-    expect(ensureRelinkHooksInFile(bad)).toEqual([]);
-    expect(fs.readFileSync(bad, 'utf8')).toBe('{not json');
+    ensureWorkspaceGlob(none, 'packages-local');
+    expect(none.workspaces).toEqual(['packages-local/*']);
   });
 });
 

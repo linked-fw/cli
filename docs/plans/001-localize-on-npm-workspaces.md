@@ -508,6 +508,46 @@ Tests (named cases, fake `run` via `Deps`):
 passes; `grep -rn "local-packages\|providedPackages\|pruneProvided\|relinkHooks" src` returns
 only the migration hint.
 
+**Result:** Done as listed. `localize.ts` is one run shared by `localize`, `adopt` and `--parked`
+(`runLocalize(names, opts, deps, prepare)`): override check (exit 6, keys named, nothing changed)
+→ `ensureAppSetup`, reported as "set up this app for checkouts (commit these):" plus one line per
+change → per name (parked → moved back; an existing directory or a member of that name → exit 6
+with the `--adopt` hint; else resolve + clone) → `installGitHooks` (a foreign hook is warned about)
+→ one `npm install --no-audit --no-fund` at the root (exit 7) → builds (`--build`, else `linked
+build`, else `npm run build` for `@_linked/cli`; a failure is exit 5) → one line per checkout
+(`<name> -> <dir> (branch <b>)`) and any drift as warnings. `delocalize` parks (`npm ci` when none
+remain, else `npm install` + `npm rebuild <names>`), `--purge` checks uncommitted work and unpushed
+commits (`@{u}..HEAD`, or `--branches --not --remotes` without an upstream). `--list` prints
+`name dir branch version [(parked)]`, `drift: …` lines and `N localized · N parked · N drift`;
+`--list --check` prints only the drift lines (stderr) and exits 1 on any, so the lock-at-rest hook
+stays quiet on a clean install. `--relink` exits 0 silently, `--ensure` prints one stderr line and
+exits 0. `drift-hook.ts` (`installDriftHook`, `reportDrift`, `DRIFT_COMMANDS`) replaces the
+one-copy hook. create-package `--location packages-local` runs `ensureAppSetup` (also with
+`--skip-install`) and adopt; `ensureWorkspaceGlob(pkg, location)` takes the location. Deleted
+`prune`, `ensure`, `relink`, `provided`, `manifest`, `utils/relinkHooks` and their tests,
+`readInstalledPkgSync`/`isWorkspaceRootSync`, and the link/snapshot parts of `fsops`; `errors.ts`
+drops 3 and 8 and adds `EXIT_DRIFT` (1) and `EXIT_USAGE` (2); `LOCAL_PACKAGES_DIR` aliases
+`LOCAL_DIR`. `src/localize` is 1727 lines, was 3721. Also fixed a P2 regression: `resolve.dedupe`
+is again `react`/`react-dom` in every mode when the app has them installed (main's rule), after
+the standalone pair (`dedupeFor`). Deviations: **`--subdir`** clones the repository whole into
+`packages-local/.repos/<checkout>` (a dot directory the glob skips) and makes
+`packages-local/<checkout>` a relative link to the package; npm 11/12 links a symlinked member
+(measured, and in `real-localize`), parking rewrites the link, `--purge` removes the clone when no
+other checkout links into it. A clone whose `package.json` is not the package is removed again
+(it would otherwise become a member). **`--dir`** is kept but accepts only `packages-local` (exit 2
+otherwise): the glob, the hooks and drift all name it. **`--force` on `localize`** is removed (it
+guarded hand-written links); it stays on `delocalize --purge`. **`--adopt --repo`** is refused
+(exit 2): there is no record to write it to. A member already present under that name refuses
+rather than re-running the install. The lifecycle discovery source value `'local-packages-dir'`
+is kept (public `LocalPackage['source']` type), so the validation grep also lists it.
+Validation: `tsc -p tsconfig-esm.json --noEmit` exit 0; the quick gate (`tests/unit/localize`,
+`localizeCommand`, `createPackage*`, `viteDedupe`, `buildAll*`) 18 suites / 196 tests passed in
+7.8 s; `npm run test:unit` 62 suites / 689 tests passed in 9.8 s; `npm run build` exit 0 and
+`node lib/esm/launch.js localize --help` lists `--parked`, no `--reinstall`/`--no-prune`/`--force`.
+Note for P4/P6: committing the first setup — `package.json` then differs from HEAD, so lock-at-rest
+leaves a lockfile that lists the checkout; the setup commit needs the lockfile from an install with
+no checkout present (P5 does this for CN).
+
 ### P4 — CLI docs and changeset
 
 Tasks: rewrite `docs/localize.md` (problem, how it works, set-up, commands, drift, parking,
