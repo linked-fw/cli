@@ -5,7 +5,7 @@ summary: >
   the working tree stays clean, and localize shrinks to clone/adopt/park/list plus a drift check.
   Pruning, relink, ensure, the provided rule and the localize Vite dedupe are removed. Spans this
   repo and Create Now.
-status: Plan
+status: Tasks
 source: docs/backlog/009-localize-on-npm-workspaces.md
 ---
 
@@ -314,3 +314,202 @@ Deferred and why: CN Playwright integration/e2e (needs a backend + Fuseki on the
 spec touching this area is being deleted); cli `test:e2e` and `test:template` (Docker, minutes,
 create-app does not change). Both worktrees need their own `npm ci` first (cli) / the integration
 setup (CN).
+
+## Phases
+
+Paths: `CLI` = the cli worktree (`.../scratchpad/wt-cli`), `CN` = the CN worktree
+(`.../scratchpad/wt-cn`). Neither is the developer's live checkout; never run anything in
+`/Users/rene/web/create_now` or its `packages-local/`. One commit per phase, code and this plan
+together, no `Claude` in messages.
+
+### Dependency graph
+
+```
+P0 (CLI install) ─► P1 (contracts, hooks/*.cjs) ─┬─► P2 (Vite dedupe + build-all order)
+                                                  └─► P3 (commands rewrite + removals) ─► P4 (cli docs, changeset)
+P4 ─► P5 (CN changes) ─► P6 (integration: CN + cli checkout)
+```
+
+P2 and P3 touch disjoint files except `src/localize/provided.ts` (P2 stops importing it, P3 deletes
+it) and could run in parallel; they run in sequence here because they share one worktree. P5 needs
+P1's hook path and P3's command surface fixed, not their code. P6 is the integration phase.
+
+### P0 — CLI dependencies
+
+- `cd CLI && npm ci` (its own lockfile; standalone repo).
+- **Validation:** `npx tsc -p tsconfig-esm.json --noEmit` exits 0 and
+  `npx jest --config jest.config.cjs tests/unit/localize/resolve.test.ts` passes on the untouched
+  tree (baseline). Record the quick-gate runtime. No commit.
+
+### P1 — Contracts and the dependency-free hooks (CLI)
+
+Tasks:
+1. `src/localize/semver.ts`: move `satisfies` out of `prune.ts` unchanged; `prune.ts` re-imports
+   it (deleted in P3).
+2. `src/localize/members.ts`: `LOCAL_DIR`, `PARKED_DIR`, `Member`, `localMembers`,
+   `parkedMembers` (contracts above). A directory counts when it has a readable `package.json`
+   with a `name`; sorted by name.
+3. `src/localize/drift.ts`: `SINGLETONS`, `Drift`, `driftProblems`, `describeDrift`. Port
+   `docs/backlog/009-assets/check-local.cjs`: read `node_modules/.package-lock.json` `packages`;
+   members from `localMembers`; importers = `.`, `packages/*`, `packages-local/*` with live
+   manifests; `missing-dir` for a lock entry `packages-local/<x>` without a directory. No hidden
+   lockfile → `[]` (nothing installed yet is not drift).
+4. `src/localize/app-setup.ts`: `ensureAppSetup`, `conflictingOverrides`. Preserve the
+   `package.json` indentation and key order; replace a script that is exactly
+   `linked localize --relink`, append with `&&` to any other existing script, leave one that
+   already runs the hook. `.gitignore`: append missing lines under a `# linked localize` comment.
+5. `src/localize/git-hooks.ts`: `HOOK_MARKER`, `installGitHooks`. Hooks dir from
+   `git rev-parse --git-path hooks` (works in worktrees); write `post-merge`, `post-checkout`,
+   `pre-commit` (mode 0755) as `#!/bin/sh\n<marker>\nexec node "<app>/node_modules/@_linked/cli/hooks/git-hook.cjs" <hook> "$@"`
+   — the path resolved relative to `git rev-parse --show-toplevel` at run time, not baked in.
+   Existing file with the marker → rewrite; without → skip and report.
+6. `hooks/lock-at-rest.cjs` and `hooks/git-hook.cjs` from the prototypes in
+   `docs/backlog/009-assets/` with the contract changes above; CommonJS, Node built-ins only.
+   `package.json` `files` += `"hooks"`.
+7. Export the new modules from `src/localize/index.ts`.
+
+Tests (jest, `tests/unit/localize/`, temp dirs via the existing helpers):
+- `members.test.ts`: dirs with/without `package.json`; parked dir; sorted; missing `packages-local/` → `[]`.
+- `drift.test.ts` with hand-written hidden lockfiles: clean → `[]`; nested
+  `packages-local/b/node_modules/@x/a` where `@x/a` is a member → `second-copy`; nested
+  `node_modules/foo/node_modules/@_linked/core` (not a member) → `singleton-copy`; root range
+  `^2.28.4` vs member 2.28.3 → `range-miss` with `importer: '<root>'`; lock entry without dir →
+  `missing-dir`; no hidden lockfile → `[]`.
+- `app-setup.test.ts`: adds the glob once (idempotent: second call returns `[]`); replaces
+  `linked localize --relink`; appends to `"postinstall": "foo"` as `foo && node …`; gitignore lines
+  added once; `conflictingOverrides` finds `@_linked/core` in `{"@_linked/core": "$@_linked/core"}`
+  and in a nested scoped override; keeps 2-space indentation and a trailing newline.
+- `git-hooks.test.ts` (real `git init` in a temp dir): writes three executable hooks with the
+  marker; a foreign `pre-commit` is skipped and reported; second run rewrites ours.
+- `hooks.test.ts` (spawns `node hooks/*.cjs` in a temp git repo):
+  `lock-at-rest`: no members → exit 0 nothing changed; members + dirty lockfile + clean
+  `package.json` → lockfile restored (`git status --porcelain` empty); `package.json` changed →
+  lockfile left dirty, stderr contains `delocalize`; not a git repo → exit 0.
+  `git-hook pre-commit`: staged lockfile with `"packages-local/a"` → exit 1; with only
+  `"packages-local/*"` → exit 0. `post-checkout` with `$3=0` → does nothing (no npm spawned: run
+  with `PATH` lacking npm and assert exit 0 and no error output).
+
+**Validation — quick gate:** `npx tsc -p tsconfig-esm.json --noEmit` exits 0; the new test files
+plus `tests/unit/localize` all pass; `node -e "require('./hooks/lock-at-rest.cjs')"` is not run
+(side effects) — instead `node --check hooks/*.cjs` exits 0. `grep -E "require\\(['\"][^.]" hooks/*.cjs`
+lists only Node built-ins.
+
+### P2 — Vite dedupe and build-all order (CLI)
+
+Tasks:
+1. `src/vite-config.ts`: `resolve.dedupe` = the standalone pair only; remove the
+   `localizedDedupe` import, re-export and `describeSkipped` warning. Delete `src/localized-dedupe.ts`.
+   Remove `readInstalledPkgSync`/`isWorkspaceRootSync` from `src/installed-packages.ts` if nothing
+   else uses them (`provided.ts` stays until P3 — keep them until P3 if it still imports them).
+2. `src/lifecycle.ts`: `localizedPackageNames()` → names from `localMembers(appRoot)`; refresh the
+   `LOCAL_PACKAGES_DIR` / discovery comments (the directory is now a glob).
+3. Build order: `orderBuildToolFirst` returns `{pre, tool, rest}` where `pre` is the tool's
+   transitive in-plan `dependencies` closure in dependency order; `buildAll` builds `pre`
+   (dependency order), then the tool alone, then `rest`. `--from` resumes across the three groups
+   in that order.
+4. Tests: `viteDedupe.test.ts` keeps only the standalone cases; `buildAllBuildToolFirst.test.ts`:
+   plan with cli → core: `pre = [core]`, tool = cli, `rest` excludes core; plan without core in it
+   → `pre = []`; `--from` inside `pre`, at the tool, inside `rest`. `buildAllDiscovery.test.ts`:
+   a `packages-local/*` glob plus a checkout is discovered once (source `workspace`).
+
+**Validation — quick gate:** tsc exits 0; `npx jest --config jest.config.cjs tests/unit/viteDedupe.test.ts tests/unit/buildAll tests/unit/discoverWorkspaces tests/unit/localize`
+passes.
+
+### P3 — Commands rewrite and removals (CLI)
+
+Tasks:
+1. Rewrite `src/localize/localize.ts` (`localize(names, opts, deps)`) per the command table:
+   app setup + `conflictingOverrides` (exit 6, message names the key) → for each name: parked →
+   move back; else existing dir → refuse with an `--adopt` hint; else resolve + clone (`--repo`,
+   `--subdir` as today) → `installGitHooks` → one `npm install --no-audit --no-fund` at the app
+   root (exit 7 on failure, nothing else attempted) → build each new checkout (`--build`; for
+   `@_linked/cli` its own `npm run build`) — a failing build warns (exit 5).
+2. `adopt.ts`: same pipeline without clone; `--parked`: every parked member.
+3. `delocalize.ts` per D7, incl. `--purge` guard (uncommitted or unpushed work refuses unless
+   `--force`).
+4. `list.ts`: rows for members (name, dir, branch, version) and parked; drift lines from
+   `driftProblems`; `--check` exits 1 on drift; an old `local-packages.json` → one migration hint.
+5. `src/commands/localize.ts` and `src/cli.ts`: options per the table; `--relink` → exit 0 silent;
+   `--ensure` → one stderr hint, exit 0; remove `--reinstall`, `--no-prune`, `--dir` stays.
+6. `one-copy-hook.ts` → `drift-hook.ts`: before `start`/`script`/`call`/`build-all`, print
+   `describeDrift` lines on stderr; never throw.
+7. `createPackageLocation.ts` / `cli-methods.ts` create-package: `--location packages-local`
+   calls `ensureAppSetup` + adopt; `ensureWorkspaceGlob` adds `packages-local/*` for that location;
+   messages drop `local-packages.json`.
+8. Delete `prune.ts`, `ensure.ts`, `relink.ts`, `provided.ts`, `manifest.ts`, `utils/relinkHooks.ts`,
+   unused `fsops.ts` parts, and their tests (`prune`, `ensure`, `one-copy`, `promises`,
+   `manifest`); update `commands`, `adopt`, `localizeCommand`, `createPackageLocation`,
+   `createPackageScaffold`, `real-localize` tests to the new behaviour.
+9. `errors.ts`: drop codes 3 and 8.
+
+Tests (named cases, fake `run` via `Deps`):
+- `localize clones, sets up, installs once at the root, then builds` — assert call order
+  `git clone`, `npm install` (cwd = app root), `linked build` (cwd = checkout).
+- `localize refuses a conflicting override` — `overrides: {"@_linked/core": "$@_linked/core"}` →
+  exit 6, nothing cloned.
+- `localize takes a parked checkout back` — dir moves from `.packages-local.parked/` to
+  `packages-local/`, no clone.
+- `localize builds the cli with npm run build`.
+- `delocalize the last checkout runs npm ci`; `delocalize one of two runs npm install then npm rebuild <name>`;
+  `delocalize --purge refuses on unpushed commits`.
+- `--list` shows members, parked and a `range-miss` line; `--list --check` exits 1 then.
+- `--relink` exits 0 with no output; `--ensure` exits 0 with one hint line.
+- `drift hook prints on stderr and never throws` (drift present; command still runs).
+- `real-localize.test.ts` (slow): clone a fixture repo into an app with the glob, real
+  `npm install`, assert `node_modules/<name>` is a symlink into `packages-local/` and
+  `git status --porcelain` of the fixture app is empty after the hook.
+
+**Validation — quick gate:** tsc exits 0; `npx jest --config jest.config.cjs tests/unit/localize tests/unit/localizeCommand.test.ts tests/unit/createPackage`
+passes; `grep -rn "local-packages\|providedPackages\|pruneProvided\|relinkHooks" src` returns
+only the migration hint.
+
+### P4 — CLI docs and changeset
+
+Tasks: rewrite `docs/localize.md` (problem, how it works, set-up, commands, drift, parking,
+Docker/CI notes, what it never does, exit codes); update `README.md` localize section and
+create-package `--location` text; add a changeset (`minor`) summarising the new model and the
+deprecated flags.
+**Validation:** `grep -n "prune\|relink\|local-packages\|--ensure" docs/localize.md README.md`
+mentions only the deprecation notes; every command and flag in `src/cli.ts`'s localize/delocalize
+options appears in `docs/localize.md`; `npx changeset status` lists `@_linked/cli` minor.
+
+### P5 — CN changes
+
+Tasks (in `CN`): everything under "Files expected to change → CN" except the `@_linked/cli` range
+bump (wrapup, after the cli release). The lockfile change is produced by `npm install` in a
+checkout with no `packages-local/` and must be exactly the root `workspaces` hunk.
+**Validation — quick gate:**
+- `git diff origin/main -- package-lock.json` shows only the `workspaces` hunk.
+- `grep -nE '"packages-local/[^*]' package.json package-lock.json` finds nothing.
+- `docker compose config -q` exits 0; the four services list the `/workspace/packages-local` volume.
+- `grep -rn "localize --relink\|localize --ensure\|local-packages.json" CLAUDE.md agents.md readme.md docs/how-to docs/architecture scripts .github package.json`
+  finds only historical notes explicitly marked as such.
+- `npx vitest run` passes (after P6's install; recorded there if not runnable before).
+
+### P6 — Integration (CN + cli checkout)
+
+Setup: `CN/packages-local/` = clones of core, auth, shape-ui (from the developer's checkouts,
+read-only `git clone`, `main`) and of `CLI` at this branch (so CN runs the new cli as a checkout).
+Bootstrap the cli/core pair with the documented recipe if needed and record it.
+Scenarios (quote output):
+1. `npm install`: links all four, lockfile restored, `git status` clean; drift report clean.
+2. `npx linked localize --list` and `--list --check` (exit 0).
+3. `npx linked build-all` builds core before cli; `npm run typecheck:gate`; `npx vitest run`;
+   `NODE_ENV=production npx linked build-app --env production --allow-dirty` with core only from
+   the checkout; the backend starts on a non-default port and logs no `getLincdPackages` error
+   (PID-scoped start/stop; never ports 4040/3030).
+4. Git: a commit on a side branch bumping an in-range dependency, then merge it → hooks run
+   `npm install`, clean status; branch switch and back → clean; staging a lockfile with a
+   checkout entry → pre-commit refuses.
+5. `npx linked delocalize @_linked/shape-ui` → parked, `npm install` + `npm rebuild`, `linked` bin
+   executable; `npx linked localize --parked` → back, clean.
+6. Drift: shape-ui requiring a core version above the checkout → `--list --check` exits 1 with a
+   `range-miss`/`second-copy` line.
+7. A conflicting override added locally → `linked localize` exits 6 with the key named.
+**Validation:** every scenario passes as stated, or the failure is recorded here with its output
+and fixed in this phase. Commit the CN worktree's phase result separately from the CLI plan update.
+
+### Deferred to review
+
+cli `npm run test:unit` (full, including `real-localize`) and `npm run build`; CN Playwright
+suites (need the real ports); the one-week trial with all checkouts and both developers.
