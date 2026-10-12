@@ -71,8 +71,9 @@ app/.packages-local.parked/        parked checkouts (delocalize)        gitignor
   another member's range that misses it installs a registry copy below that member, silently.
   `linked localize --list` reports them (see [drift](#drift)); the lock-at-rest hook runs the same
   check in-process after an install, and prints it only when the installed tree changed since its
-  last report (npm's `node_modules/.package-lock.json`; a stamp in `node_modules/.cache/`), so the
-  second of `postinstall` and `dependencies` stays quiet; `linked start`, `script`, `call` and
+  last report (a hash of npm's `node_modules/.package-lock.json`, stamped in
+  `node_modules/.cache/`), so the second of `postinstall` and `dependencies`, and an install that
+  changed nothing, stay quiet; `linked start`, `script`, `call` and
   `build-all` print them on stderr before they run. Drift is reported, never acted on, and never
   fails a command.
 

@@ -240,6 +240,13 @@ test('lock-at-rest: drift is reported once per change of the installed tree', (t
   r = node(LOCK_AT_REST, [], root); // `dependencies` after `postinstall`: same tree
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '');
+  // The next `npm install` that changes nothing still rewrites the file: same content, new mtime.
+  fs.writeFileSync(hidden, tree('0.9.0'));
+  const later = new Date(Date.now() + 60_000);
+  fs.utimesSync(hidden, later, later);
+  r = node(LOCK_AT_REST, [], root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '', 'an unchanged tree is not reported again');
 
   fs.writeFileSync(hidden, tree('0.10.0'));
   r = node(LOCK_AT_REST, [], root);

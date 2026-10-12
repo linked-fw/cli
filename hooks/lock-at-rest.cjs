@@ -11,6 +11,7 @@
 // HEAD yet -- all leave the lockfile as npm wrote it.
 'use strict';
 const {execFileSync} = require('child_process');
+const {createHash} = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -109,17 +110,19 @@ function run() {
     }
   }
 
-  // The drift report, from the hidden lockfile npm just wrote; only when it changed since the last
-  // report, so the second of `postinstall` and `dependencies` stays quiet. Report only.
+  // The drift report, from the hidden lockfile npm just wrote; only when its content changed since
+  // the last report, so the second of `postinstall` and `dependencies`, and an install that changed
+  // nothing, stay quiet. npm rewrites the file on every install, so its mtime says nothing: the
+  // stamp is a hash of the content. Report only.
   function reportDrift() {
     const nodeModules = path.join(root, 'node_modules');
-    let stat;
+    let content;
     try {
-      stat = fs.statSync(path.join(nodeModules, '.package-lock.json'));
+      content = fs.readFileSync(path.join(nodeModules, '.package-lock.json'));
     } catch {
       return; // nothing installed
     }
-    const stamp = `${stat.mtimeMs} ${stat.size}\n`;
+    const stamp = `${createHash('sha1').update(content).digest('hex')}\n`;
     const stampFile = path.join(nodeModules, '.cache', 'linked-localize', 'drift-stamp');
     try {
       if (fs.readFileSync(stampFile, 'utf8') === stamp) return;
