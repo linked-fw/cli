@@ -17,6 +17,7 @@ const path = require('path');
 
 const {LEAK, LOCAL_DIR, localMembers, manifestPathspecs} = require('./manifests.cjs');
 const {hookLine, runsOurHook} = require('./hook-shim.cjs');
+const {terminalDevice} = require('./platform.cjs');
 
 // An app's lockfile is often over a megabyte, execFileSync's default buffer.
 const MAX_BUFFER = 256 * 1024 * 1024;
@@ -37,8 +38,10 @@ function run() {
     process.stderr.write(text);
     if (process.env.npm_lifecycle_event !== 'dependencies') return;
     if (tty === undefined) {
+      const device = terminalDevice();
       try {
-        tty = fs.openSync('/dev/tty', 'w');
+        // Windows has no such device: there, only stderr (hidden by npm for this script).
+        tty = device ? fs.openSync(device, 'w') : null;
       } catch {
         tty = null;
       }

@@ -484,6 +484,20 @@ holding its own pruned `node_modules` must not sit next to members.
    moved into `packages-local/.setup-aside/` for one `npm install --package-lock-only` (see
    [Set-up](#set-up)); if that fails, use the manual steps printed there.
 
+## Windows
+
+Written for Windows but not run there. npm and `npx` start as `node npm-cli.js` (or `npm.cmd`
+through `cmd.exe`, every argument quoted); a `--subdir` checkout is a junction, which needs no
+administrator rights; a CRLF `package.json` or `.gitignore` stays CRLF. Known limits:
+
+- the git hooks are `sh`, run by Git for Windows' bundled `sh`; they rely on it handing `$PWD`
+  to `node` as a Windows path (MSYS does this for environment variables);
+- the lock-at-rest notices for the `dependencies` script are not shown: npm hides that script's
+  output and there is no `/dev/tty` to write past it (`postinstall`'s output is shown);
+- `--build` is one command line for `cmd.exe`: no `rm -rf`, `$VAR` or single quotes;
+- a `--subdir` junction holds an absolute path, so moving the app breaks it; make it again with
+  `mklink /J packages-local\<name> packages-local\.repos\<repo>\<subdir>`.
+
 ## What it never does
 
 - run `npm install` inside a checkout, or `npm ci` while checkouts remain

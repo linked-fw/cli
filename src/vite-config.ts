@@ -754,9 +754,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
                 // Workspace-internal `./Sibling.js` → `.tsx` / `.ts` rewrite.
                 if (
                   importer &&
-                  importer.includes(`${path.sep}packages${path.sep}`) &&
+                  // Vite's ids use `/`, on Windows too.
+                  /[\\/]packages[\\/]/.test(importer) &&
                   /\.(jsx?)$/.test(id) &&
-                  (id.startsWith('.') || id.startsWith('/'))
+                  (id.startsWith('.') || path.isAbsolute(id))
                 ) {
                   const importerDir = path.dirname(importer);
                   const base = path.resolve(importerDir, id);
@@ -769,7 +770,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
                 // Bare workspace specifier — resolve directly to src/.
                 if (
                   !id.startsWith('.') &&
-                  !id.startsWith('/') &&
+                  !path.isAbsolute(id) &&
                   workspaces.length > 0
                 ) {
                   const resolved = await resolveWorkspaceSpecifier(id, workspaces);

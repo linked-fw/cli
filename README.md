@@ -363,6 +363,17 @@ npm run build
 
 Dual ESM + CJS build via `tsconfig-to-dual-package`. Sources in `src/`, output in `lib/esm/` and `lib/cjs/`.
 
+### Windows
+
+The cli is written to run on Windows but nobody runs it there yet, so treat it as untested. It
+starts `npm`, `npx` and `node_modules/.bin` shims through one helper (`src/utils/spawn.ts`: npm's
+own `npm-cli.js` when npm started the cli, else the `.cmd` through `cmd.exe` with quoted
+arguments), links directories with junctions, imports files by `file:` URL and keeps CRLF in the
+files it edits. Known limits: commands given as one string (`linked all <cmd>`, a `--build`) run
+in `cmd.exe` as written, so they must not use POSIX shell syntax; and this package's own
+`test:template` script sets an environment variable the POSIX way.
+For `linked localize`, see [docs/localize.md](docs/localize.md#windows).
+
 ### Templates
 
 Templates live in `defaults/`:

@@ -45,6 +45,13 @@ before `start`/`script`/`call`/`build-all`.
   Delete it, and each checkout's own `node_modules`, when migrating.
 - **`build-all`** builds the cli's own dependencies (a localized `@_linked/core`) before the cli,
   then the cli alone, then the rest; a localized cli builds with its own `npm run build`.
+- **Windows (untested there).** Every command starts `npm`, `npx` and `.bin` shims through one
+  helper (`node npm-cli.js` when npm started the cli, else the `.cmd` through `cmd.exe` with quoted
+  arguments; Node refuses a `.cmd` without a shell), as does the `post-merge`/`post-checkout` hook.
+  `--subdir` links are junctions; files are imported by `file:` URL; `cd <dir> &&` chains, the
+  `start` browser opener, `/dev/tty`, the template directory (`file:/` cut off a URL), single-quoted
+  shell strings and the cli's own `chmod` build step are gone; edited `package.json`,
+  `.gitignore`, `.npmrc` and source files keep CRLF. See README "Windows" for what is left.
 - **Removed deep imports** (reachable before through the `@_linked/cli/*` subpath exports; no
   known consumer):
   - `vite-config`: `localizedDedupe`;

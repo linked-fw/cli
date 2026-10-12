@@ -8,8 +8,8 @@
  * - `.gitignore` keeps checkouts and parked checkouts out of git.
  *
  * Idempotent: a second run changes nothing and returns `[]`. `package.json` is
- * rewritten only when something changed, with its own indentation, key order
- * and trailing newline, so the diff is the setup and nothing else.
+ * rewritten only when something changed, with its own indentation, key order,
+ * line endings and trailing newline, so the diff is the setup and nothing else.
  *
  * It never edits `overrides`. npm refuses (`EOVERRIDE`) a root override on a
  * workspace member's name, and what to do about it -- drop the override or
@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {withEolOf} from '../utils/platform.js';
 import {LocalizeError, EXIT_REFUSED} from './errors.js';
 import {LOCAL_DIR, PARKED_DIR} from './members.js';
 
@@ -100,7 +101,7 @@ function setupPackageJson(appRoot: string): SetupChange[] {
   if (changes.length) {
     const indent = text.match(/^([ \t]+)"/m)?.[1] ?? '  ';
     const eol = text.endsWith('\n') ? '\n' : '';
-    fs.writeFileSync(file, JSON.stringify(pkg, null, indent) + eol);
+    fs.writeFileSync(file, withEolOf(JSON.stringify(pkg, null, indent) + eol, text));
   }
   return changes;
 }
@@ -141,10 +142,8 @@ function setupGitignore(appRoot: string): SetupChange[] {
   const missing = IGNORED.filter((line) => !have.has(line.replace(/\/$/, '')));
   if (!missing.length) return [];
   const sep = text === '' ? '' : text.endsWith('\n') ? '\n' : '\n\n';
-  fs.writeFileSync(
-    file,
-    `${text}${sep}# linked localize\n${missing.join('\n')}\n`,
-  );
+  const added = `${sep}# linked localize\n${missing.join('\n')}\n`;
+  fs.writeFileSync(file, text + withEolOf(added, text));
   return missing.map((line) => ({file: '.gitignore', what: `ignore ${line}`}));
 }
 

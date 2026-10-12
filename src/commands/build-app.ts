@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import {importFile} from '../utils/platform.js';
 import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
 import {resolveAppAssetsStore} from '../app-release/app-assets-store.js';
 import {
@@ -83,7 +84,7 @@ const loadDefaultPublishConfig = async (
     .find((candidate) => fs.existsSync(candidate));
   if (!configPath) return {};
 
-  const loaded = await import(/* @vite-ignore */ configPath);
+  const loaded = await importFile(configPath);
   return loaded.default?.publish || {};
 };
 

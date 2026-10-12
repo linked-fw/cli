@@ -2,6 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {linkDirectory, samePath} from '../utils/platform.js';
+
 export function isSymlink(p: string): boolean {
   try {
     return fs.lstatSync(p).isSymbolicLink();
@@ -44,14 +46,15 @@ export function linkTargetOf(p: string): string {
 
 /**
  * Move a checkout directory, or the link standing for one (a package inside a
- * cloned monorepo, see localize.ts). A link is written again, relative from
- * its new place, so it still reaches the same target.
+ * cloned monorepo, see localize.ts). A link is written again from its new
+ * place (relative, or a junction on Windows), so it still reaches the same
+ * target.
  */
 export function moveEntry(from: string, to: string): void {
   fs.mkdirSync(path.dirname(to), {recursive: true});
   if (isSymlink(from)) {
     const target = linkTargetOf(from);
-    fs.symlinkSync(path.relative(path.dirname(to), target), to, 'dir');
+    linkDirectory(target, to);
     fs.unlinkSync(from);
     return;
   }
@@ -75,7 +78,7 @@ export function checkoutRepoRoot(
   } catch {
     return null;
   }
-  while (dir !== app && isInside(dir, app)) {
+  while (!samePath(dir, app) && isInside(dir, app)) {
     if (isGitCheckout(dir)) return dir;
     dir = path.dirname(dir);
   }

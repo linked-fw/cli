@@ -60,6 +60,7 @@ import {setupLockfileByEdit} from './setup-lockfile.js';
 import type {Member} from './members.js';
 import {checkoutNameFor, resolvePackage} from './resolve.js';
 import type {Deps, RunResult} from './run.js';
+import {linkDirectory} from '../utils/platform.js';
 
 /** What a new checkout is built with when `--build` does not say. */
 export const DEFAULT_BUILD_COMMAND = 'linked build';
@@ -322,7 +323,7 @@ function prepareClone(
   }
 
   if (resolved.subdir) {
-    fs.symlinkSync(path.relative(path.dirname(target), pkgDir), target, 'dir');
+    linkDirectory(pkgDir, target);
     deps.log(`[localize] ${relDir} -> ${relPkg}`);
   }
   return {name, dir: relDir, build: true};

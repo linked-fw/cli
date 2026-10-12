@@ -37,6 +37,7 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {samePath} from '../utils/platform.js';
 import {requireHook} from './hook-module.js';
 
 // The same text as in hooks/hook-shim.cjs; loading that module checks it.
@@ -138,8 +139,10 @@ export function installGitHooks(appRoot: string): HookInstall {
   result.sharedWithWorktrees =
     gitDir !== null &&
     commonDir !== null &&
-    realpath(path.resolve(appRoot, gitDir)) !==
-      realpath(path.resolve(appRoot, commonDir));
+    !samePath(
+      realpath(path.resolve(appRoot, gitDir)),
+      realpath(path.resolve(appRoot, commonDir)),
+    );
 
   const hooksPath = git(appRoot, 'config', 'core.hooksPath');
   if (hooksPath) {
@@ -166,8 +169,10 @@ export function installGitHooks(appRoot: string): HookInstall {
       result.skipped.push(file);
       continue;
     }
+    // LF even on Windows: Git for Windows runs hooks with its own sh.
     fs.writeFileSync(file, hookScript(hook, prefix));
-    // writeFileSync's `mode` applies only to a new file.
+    // writeFileSync's `mode` applies only to a new file. (A no-op on Windows,
+    // where git runs a hook file whatever its mode.)
     fs.chmodSync(file, 0o755);
     result.written.push(file);
   }

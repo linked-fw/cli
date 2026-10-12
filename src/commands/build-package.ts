@@ -52,13 +52,16 @@ export async function buildPackageByPath(filePath: string): Promise<void> {
           const releases = fs.readdirSync(yarnReleasesDir);
           if (releases.length > 0) {
             yarnBin = path.join(yarnReleasesDir, releases[0]);
+            // Windows runs no `.cjs` by its shebang: node runs it there.
+            if (process.platform === 'win32') yarnBin = `"${process.execPath}" "${yarnBin}"`;
           }
         }
         runner = `${yarnBin} exec`;
       }
 
-      const command = `cd ${currentPath} && ${runner} linked build`;
-      await execp(command, true, false);
+      // The package as cwd, not `cd <dir> &&`: cmd.exe's `cd` does not change
+      // drives, and the path may hold a space.
+      await execp(`${runner} linked build`, true, false, {cwd: currentPath});
       return;
     }
     currentPath = path.dirname(currentPath);

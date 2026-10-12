@@ -1207,3 +1207,64 @@ helper where several exist. Tests use platform stubs (`process.platform` injecti
 take a platform argument); no real Windows run. Record anything left as a known limitation.
 **Quick gate:** tsc; `npm run test:unit`; `npm run build`; `npm run test:template` (it scaffolds and
 builds packages, exercising the spawn paths on macOS).
+
+**Result:** Inventory (every command in `src/cli.ts`; hazard → what was done; "ok" = runs on
+Windows as it is):
+
+| Command | Windows hazards on its path | Done |
+|---|---|---|
+| `create-app` | template dir from `import.meta.url` with `file:/` cut off (`//C:/…`); `cd <dir> && npm install` (cmd's `cd` keeps the drive, no quoting); `git clone … "<dir>"` via `exec` | `fileURLToPath`; install with `cwd`; clone ok |
+| `create-app --template react-native` | `npm install` via `exec` with `cwd` | ok |
+| `start` | `spawn('start')` (cmd built-in → ENOENT, unhandled `error`); `import(<abs path>)` of `linked.config.js`; watcher path vs `srcDir + path.sep` (case, `/`); Vite plugin `importer.includes(path.sep+'packages'+path.sep)` and `id.startsWith('/')` | `explorer.exe <url>` + `error` handler; `importFile` (file URL on win32); `isPathInside`; `/[\\/]packages[\\/]/`, `path.isAbsolute` |
+| `call`, `script`, `serve-app` (`startServer`) | `import(path.join(cwd, …))` ×8 | `importFile` |
+| `create-package`, `create-ont-package`, `create-asset-package` | template dir; build command `JSON.stringify(path)` (doubled `\\` for cmd); `npm install` via `exec` (ok); `git` spawn (ok); in an app: `localize --adopt` (below); app `package.json` rewrite (CRLF) | `fileURLToPath`; `"…"` quoting on win32 (`planPackageSetup(…, platform)`); CRLF kept |
+| `create-shape`, `create-component`, `create-set-component`, `create-ontology` | template dir; `src/index.ts`, `shapes/index.ts`, `backend.ts` edits mix LF into CRLF | `fileURLToPath`; `withEolOf` |
+| `build` (default), `compile-only`, `check-imports` | `npx tsc`, `npx tsconfig-to-dual-package` via `exec` (cmd resolves `.cmd`: ok); shape probe `'file://' + path` | `pathToFileURL` |
+| `build-app` | `import(configPath)`; release build `specifier.slice('file://'.length)`; `git` via `execFileSync` (ok) | `importFile`; `fileURLToPath` |
+| `publish-app` | `loadBackendStorageConfig` `import(candidate)` | `importFile` |
+| `publish`, `publish-updated`, `status`, `build-updated[-since]` | `cd <path> && git log --format="%h %ci"` (`%` for cmd, drive); `cd <path> && [env-cmd -f <path>] npm version … && npm publish` | `git` by `execFile` with `cwd`; publish with `cwd`, env file quoted |
+| `build-all`, `build-workspace` | `npm run build` via `exec` with `cwd` | ok |
+| `build-package` | `cd <dir> && npx linked build`; a yarn `.cjs` release run by shebang | `cwd`; `node <release>` on win32 |
+| `localize`, `delocalize`, `--list` (and `create-package` in an app) | `spawnSync('npm', …, {shell:false})` → EINVAL; `symlinkSync(…, 'dir')` (admin/Developer Mode); `realpath` equality (case); `package.json`/`.gitignore` rewrite (CRLF); `--build`/`npm run build` via shell (ok); the cli's own `build` script (`chmod +x`, single-quoted glob) when the cli is localized | `run.ts` → `spawnCommandSync`; `linkDirectory` (junction, absolute); `samePath`; `withEolOf`; `chmod-bin`/`copy-to-lib` rewritten with `node -e` and double quotes |
+| npm hook `lock-at-rest.cjs` (`postinstall`/`dependencies`) | guard `node -e "…"` under cmd.exe; `/dev/tty` | guard verified (outer `"`, only `'` inside, no `%^!$\``); no tty on win32 (`hooks/platform.cjs`) |
+| git hooks (`hook-shim.cjs` → `git-hook.cjs`) | `npm.cmd` spawned without a shell (EINVAL); `GIT_DIR=C:/…` read as relative by `case "$p" in /*` and prefixed with `$PWD`; hook files LF, chmod | `npmCommand` (`shell: true`, fixed flags); `[A-Za-z]:*` absolute; LF kept on purpose, chmod is a no-op there |
+| `setup-publish` | template root (`file:/`); `--cache <tmpdir>` unquoted (space in a Windows user name); `echo '<json>' \| gh api …` (no single quotes in cmd); `.gitignore`/`.npmrc`/`package.json` rewrite (CRLF) | `fileURLToPath`; `runCommand('npm', [...])`; `runCommand('gh', [...], {input})`; `withEolOf` |
+| `all` | `cd <path> && <cmd>` | `cwd` |
+| `package` (`p`) | `spawn('npx.cmd', …)` without a shell (EINVAL); `null` argument; the command passed as one argument | `spawnCommand('npx', [...split args])` |
+| `enable-capacitor`, `dev`, `depcheck*`, `info`, `register*`, `upgrade-packages`, `build-metadata`, `app-doctor`, `serve-app` | `npm install` via `exec`, `grunt` via `exec`, http only, or nothing spawned | ok |
+
+Also `getModulePackageJSON` stopped climbing at `'/'` only (`C:\` recursed forever): now at the
+filesystem root.
+
+One helper, `src/utils/spawn.ts`: `planCommand(cmd, args, {platform, env, execPath, exists})` —
+posix: as named, no shell (unchanged); win32: `npm`/`npx` → `process.execPath` + npm's
+`npm-cli.js`/`npx-cli.js` when `npm_execpath` names npm's (not yarn's); other shims (`npm`,
+`npx`, `yarn`, `pnpm`, `linked`, `tsc`, `vite`, `*.cmd`, `node_modules/.bin/*`) → `<name>.cmd` and
+`quoteCmdArg` args (cross-spawn's scheme, metacharacters escaped twice for `.bin` shims) as one
+`cmd.exe` line; executables (`git`, `gh`, `node`) as they are. `spawnCommandSync`,
+`spawnCommand`, `runCommand` (collects output, `input` on stdin). Path rules in
+`src/utils/platform.ts`: `samePath`, `isPathInside`, `linkDirectory`, `importSpecifier`/`importFile`
+(file URL on win32 only, so posix and Jest keep plain paths), `withEolOf`. Hooks: `hooks/platform.cjs`
+(`npmCommand`, `terminalDevice`). Shell strings that stay shell strings (`exec` of `npm install`,
+`npx tsc`, `npm run build`, `--build`) use nothing cmd.exe reads differently.
+
+Known limitations (README "Windows", `docs/localize.md` "Windows"): nothing ran on Windows; the
+git hooks rely on Git for Windows' sh converting `$PWD` for `node`; lock-at-rest's notices in the
+`dependencies` script are hidden there (no `/dev/tty`); a `--subdir` junction is absolute, so
+moving the app breaks it (`mklink /J` to remake); user-supplied command strings (`--build`,
+`linked all <cmd>`) run in cmd.exe as written; `installCommandFor('yarn')` uses `export` (no
+caller: `create-app` installs with npm); the cli's own `test:template` script sets an env var the
+POSIX way. Also fixed the RN template test, failing before this phase: it overlaid `lib/` only,
+and `lib/` now requires `hooks/drift.cjs`, which the pinned release lacks — it overlays `hooks/`
+too.
+
+Tests: `tests/unit/windows.test.ts` (23): `planCommand` posix/win32 (npm-cli.js, npx-cli.js,
+yarn's execpath → `npm.cmd`, quoting with a space, `.bin` double escape, git unchanged, a real
+posix spawn with spaces), `quoteCmdArg`, `samePath`/`isPathInside`, junction vs relative symlink
+(real link on posix), `importSpecifier`, `withEolOf` + `ensureAppSetup` on CRLF files, the guard
+command's cmd-safety, win32 build command quoting, `browserCommand`, `hooks/platform.cjs`, the hook
+sh with `GIT_DIR=C:/…`/`C:\…`/relative (run through `sh`), LF hook files. Gate:
+`npx tsc -p tsconfig-esm.json --noEmit` exit 0; `npm run test:unit` → `Test Suites: 68 passed, 68
+total`, `Tests: 776 passed, 776 total`; `npm run build` exit 0; `npm run test:template` → `Test
+Suites: 2 passed, 2 total`, `Tests: 22 passed, 22 total` (before the overlay fix: 1 failed, 21
+passed); `node lib/esm/launch.js --help` exit 0.

@@ -21,13 +21,17 @@ export type PackageSetupPlan = {
  *   package is pinned to the node-modules linker. Yarn 1 ignores .yarnrc.yml.
  * - The build runs through the CLI that is currently executing (node + its own
  *   launch script) instead of `npm exec linked`, which cannot resolve a bin
- *   that a different package manager installed.
+ *   that a different package manager installed. Both paths are quoted for the
+ *   shell that runs the command: `cmd.exe` on Windows, where a path cannot
+ *   hold a `"` and a JSON string's doubled backslashes would be taken as
+ *   they are.
  */
 export function planPackageSetup(
   yarnVersionOutput: string,
   launchScript: string,
   nodeBinary: string = process.execPath,
   insideYarnProject: boolean = false,
+  platform: NodeJS.Platform = process.platform,
 ): PackageSetupPlan {
   const match = (yarnVersionOutput || '').trim().match(/^(\d+)\./);
   const yarnMajor = !insideYarnProject
@@ -43,6 +47,13 @@ export function planPackageSetup(
         ? 'nodeLinker: node-modules\n'
         : null,
     installCommand: packageManager === 'yarn' ? 'yarn install' : 'npm install',
-    buildCommand: `${JSON.stringify(nodeBinary)} ${JSON.stringify(path.resolve(launchScript))} build`,
+    buildCommand: `${quotePath(nodeBinary, platform)} ${quotePath(
+      (platform === 'win32' ? path.win32 : path).resolve(launchScript),
+      platform,
+    )} build`,
   };
+}
+
+function quotePath(p: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? `"${p}"` : JSON.stringify(p);
 }

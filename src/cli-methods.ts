@@ -3,7 +3,8 @@ import {exec} from 'child_process';
 import depcheck from 'depcheck';
 import {getEnvFile} from 'env-cmd/dist/get-env-vars.js';
 import fs from 'fs-extra';
-import path, {dirname} from 'path';
+import path from 'path';
+import {fileURLToPath} from 'url';
 import {createInterface} from 'readline';
 import {
   debugInfo,
@@ -46,7 +47,9 @@ import {
 } from './utils/shapeReferences.js';
 import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
 
-import {spawn as spawnChild, spawnSync} from 'child_process';
+import {spawnSync} from 'child_process';
+import {spawnCommand} from './utils/spawn.js';
+import {importFile, withEolOf} from './utils/platform.js';
 import {findNearestPackageJson} from 'find-nearest-package-json';
 import {statSync} from 'fs';
 import {LinkedFileStorage} from '@_linked/core/utils/LinkedFileStorage';
@@ -71,11 +74,9 @@ import type {PackageKind, ScaffoldKind} from './utils/packageKind.js';
 import {resolvePackageBaseUri, withBaseUri} from './utils/packageBaseUri.js';
 import type {ResolvedBaseUri} from './utils/packageBaseUri.js';
 
-let dirname__ =
-  typeof __dirname !== 'undefined'
-    ? __dirname
-    : //@ts-ignore
-      dirname(import.meta.url).replace('file:/', '');
+// This module's directory. fileURLToPath, not the URL with `file:/` cut off,
+// which on Windows leaves `//C:/...`.
+let dirname__ = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * A folder under this package's `defaults/`. The built module sits in `lib/esm/`
@@ -308,13 +309,14 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
       stderr: string;
       failed: boolean;
     }>((resolve) => {
+      // The folder as cwd, not `cd <dir> &&`: cmd.exe's `cd` does not change drives.
       exec(
-        `cd ${hyphenName} && ${installCommand}`,
-        {maxBuffer: 50 * 1024 * 1024} as any,
+        installCommand,
+        {cwd: targetFolder, maxBuffer: 50 * 1024 * 1024},
         (error, out, err) => {
           resolve({
-            stdout: typeof out === 'string' ? out : out?.toString() ?? '',
-            stderr: typeof err === 'string' ? err : err?.toString() ?? '',
+            stdout: out ?? '',
+            stderr: err ?? '',
             failed: !!error,
           });
         },
@@ -1506,7 +1508,7 @@ const ensureBackendImportsShapes = function (root: string = process.cwd()) {
   if (!fs.existsSync(backendPath)) return;
   let contents = fs.readFileSync(backendPath, 'utf-8');
   if (contents.includes('./shapes/index')) return;
-  fs.writeFileSync(backendPath, `import './shapes/index.js';\n` + contents);
+  fs.writeFileSync(backendPath, withEolOf(`import './shapes/index.js';\n`, contents) + contents);
 };
 
 // Register a shape in the shapes barrel (src/shapes/index.ts), creating it if needed, and
@@ -1523,7 +1525,7 @@ export const addShapeToBarrel = function (shapeHyphenName: string, root: string 
     contents = contents.includes('//SHAPES')
       ? contents.replace('//SHAPES', `//SHAPES\n${line}`)
       : contents.replace(/\n*$/, '') + `\n${line}\n`;
-    fs.writeFileSync(barrelPath, contents);
+    fs.writeFileSync(barrelPath, withEolOf(contents, contents));
   }
   // Both boot paths must load the barrel (idempotent).
   addLineToIndex(`import './shapes/index.js';`, 'shapes', root);
@@ -1572,7 +1574,7 @@ export const addLineToIndex = function (
       }
       // log("Added at end",newContents);
     }
-    fs.writeFileSync(indexPath, newContents);
+    fs.writeFileSync(indexPath, withEolOf(newContents, indexContents));
   }
   return indexPath;
 };
@@ -2002,7 +2004,7 @@ export const runScript = async (
 
   log('Running script ' + scriptName);
   const scriptPath = path.join(process.cwd(), 'scripts', scriptName);
-  const script = await import(scriptPath);
+  const script = await importFile(scriptPath);
   await script.default().catch((error) => {
     log('Script ' + scriptName + ' finished with errors');
     logError(error);
@@ -2021,7 +2023,7 @@ export const runMethod = async (
 
   if (options.spawn) {
     let linkedConfig = (
-      await import(path.join(process.cwd(), 'linked.config.js'))
+      await importFile(path.join(process.cwd(), 'linked.config.js'))
     ).default;
 
     // Set default loadAppComponent if not provided
@@ -2030,12 +2032,12 @@ export const runMethod = async (
     }
     if (!linkedConfig.server.loadAppComponent) {
       linkedConfig.server.loadAppComponent = async () =>
-        (await import(path.join(process.cwd(), 'src', 'App'))).default;
+        (await importFile(path.join(process.cwd(), 'src', 'App'))).default;
     }
     // Set default loadRoutes if not provided
     if (!linkedConfig.server.loadRoutes) {
       linkedConfig.server.loadRoutes = async () =>
-        await import(path.join(process.cwd(), 'src', 'routes.tsx'));
+        await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
     }
 
     const ServerClass = await loadServerClass();
@@ -2133,7 +2135,7 @@ export const startServer = async (
 ) => {
   await ensureEnvironmentLoaded();
 
-  let linkedConfig = (await import(path.join(process.cwd(), 'linked.config.js')))
+  let linkedConfig = (await importFile(path.join(process.cwd(), 'linked.config.js')))
     .default;
 
   // function scssLoadcall(source, filename) {
@@ -2159,10 +2161,10 @@ export const startServer = async (
   if (!linkedConfig.server.loadAppComponent) {
     let appPromise;
     if (process.env.NODE_ENV !== 'development') {
-      appPromise = (await import(path.join(process.cwd(), 'lib', 'App.js')))
+      appPromise = (await importFile(path.join(process.cwd(), 'lib', 'App.js')))
         .default;
     } else {
-      appPromise = (await import(path.join(process.cwd(), 'src', 'App.tsx')))
+      appPromise = (await importFile(path.join(process.cwd(), 'src', 'App.tsx')))
         .default;
     }
     linkedConfig.server.loadAppComponent = async () => {
@@ -2174,9 +2176,9 @@ export const startServer = async (
   if (!linkedConfig.server.loadRoutes) {
     linkedConfig.server.loadRoutes = async () => {
       if (process.env.NODE_ENV !== 'development') {
-        return await import(path.join(process.cwd(), 'lib', 'routes.js'));
+        return await importFile(path.join(process.cwd(), 'lib', 'routes.js'));
       } else {
-        return await import(path.join(process.cwd(), 'src', 'routes.tsx'));
+        return await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
       }
     };
   }
@@ -2787,12 +2789,13 @@ async function installWorkspacePackage(
   skipInstall = false,
 ) {
   const appPkgPath = path.join(appRoot, 'package.json');
-  const appPkg = fs.readJsonSync(appPkgPath);
+  const appPkgText = fs.readFileSync(appPkgPath, 'utf8');
+  const appPkg = JSON.parse(appPkgText);
   const workspaces = ensureWorkspaceGlob(appPkg);
   if (workspaces.warning) console.warn(chalk.yellow(workspaces.warning));
   const version = fs.readJsonSync(path.join(targetFolder, 'package.json')).version;
   appPkg.dependencies = {...appPkg.dependencies, [name]: `^${version}`};
-  fs.writeJsonSync(appPkgPath, appPkg, {spaces: 2});
+  fs.writeFileSync(appPkgPath, withEolOf(JSON.stringify(appPkg, null, 2) + '\n', appPkgText));
   log(
     `Added ${name}@^${version} to ${path.relative(process.cwd(), appPkgPath) || 'package.json'}` +
       (workspaces.changed ? ' and packages/* to its workspaces' : ''),
@@ -3682,13 +3685,14 @@ export var publishPackage = async function (
       ? `yarn version ${publishVersion} && yarn npm publish`
       : `npm version ${publishVersion} --no-git-tag-version && npm publish`;
 
+  // The package as cwd, not `cd <dir> &&`: cmd.exe's `cd` does not change drives.
   return execPromise(
-    `cd ${pkg.path} && ${
-      envJsonPath ? `env-cmd -f ${envJsonPath} --use-shell "` : ''
+    `${
+      envJsonPath ? `env-cmd -f "${envJsonPath}" --use-shell "` : ''
     }${versionAndPublish}${envJsonPath ? `"` : ''}`,
     true,
     false,
-    {},
+    {cwd: pkg.path},
     true,
   )
     .then((res) => {
@@ -3896,7 +3900,7 @@ export var executeCommandForEachPackage = function (
   packages.forEach((pkg) => {
     p = p.then(() => {
       log('# Package ' + chalk.magenta(pkg.packageName));
-      return execp('cd ' + pkg.path + ' && ' + command);
+      return execp(command, false, false, {cwd: pkg.path});
     });
   });
   return p;
@@ -4020,28 +4024,22 @@ export var executeCommandForPackage = function (packageName, command) {
     // npm is the default; only a package inside a yarn project is driven with
     // yarn (`yarn linked <cmd>` resolves the bin from the yarn workspace).
     const pm = detectPackageManager(packageDetails.path);
-    // Windows quirk: the shim is `yarn.cmd` / `npx.cmd`.
-    const isWin = process.platform === 'win32';
-    const runner =
-      pm === 'yarn' ? (isWin ? 'yarn.cmd' : 'yarn') : isWin ? 'npx.cmd' : 'npx';
+    const runner = pm === 'yarn' ? 'yarn' : 'npx';
     const runnerArgs = pm === 'yarn' ? ['linked'] : ['--no-install', 'linked'];
+    const commandArgs = command ? String(command).split(/\s+/).filter(Boolean) : [];
 
     log(
-      "Executing 'cd " +
-        packageDetails.path +
-        ` && ${runner} linked` +
-        (command ? ' ' + command : '') +
-        "'",
+      "Executing '" +
+        [runner, ...runnerArgs, ...commandArgs].join(' ') +
+        "' in " +
+        packageDetails.path,
     );
 
-    spawnChild(
-      runner,
-      [...runnerArgs, command || null],
-      {
-        cwd: packageDetails.path,
-        stdio: 'inherit',
-      },
-    );
+    // spawnCommand starts the `.cmd` shim on Windows.
+    spawnCommand(runner, [...runnerArgs, ...commandArgs], {
+      cwd: packageDetails.path,
+      stdio: 'inherit',
+    });
   } else {
     warn(
       "Could not find a pkg who's name (partially) matched " +

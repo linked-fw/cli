@@ -32,7 +32,8 @@ function hookCommands(hook, prefix) {
     // current directory for the top level unless GIT_WORK_TREE says otherwise,
     // and a relative path is relative to here: both stop holding after the cd.
     '[ -z "${GIT_DIR-}" ] || [ -n "${GIT_WORK_TREE-}" ] || export GIT_WORK_TREE="$PWD"',
-    'for v in GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE; do eval "p=\\${$v-}"; case "$p" in ""|/*) ;; *) export "$v=$PWD/$p" ;; esac; done',
+    // Git for Windows' sh: an absolute path may also be `C:/...` or `C:\...`.
+    'for v in GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE; do eval "p=\\${$v-}"; case "$p" in ""|/*|[A-Za-z]:*) ;; *) export "$v=$PWD/$p" ;; esac; done',
     'cd "$dir" || exit 0',
     `exec node "$script" ${hook} "$@"`,
   ];

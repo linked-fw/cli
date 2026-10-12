@@ -13,6 +13,7 @@
 const {execFileSync, spawnSync} = require('child_process');
 
 const {LEAK, localMembers, manifestPathspecs} = require('./manifests.cjs');
+const {npmCommand} = require('./platform.cjs');
 
 const MANIFESTS = ['package.json', 'package-lock.json'];
 const NO_COMMIT = /^0+$/;
@@ -82,8 +83,8 @@ function installIfChanged(oldRev, newRev) {
 
   process.stderr.write(`[git hook] dependency manifests changed (${oldRev.slice(0, 9)}..${newRev.slice(0, 9)}): npm install\n`);
   const start = Date.now();
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const r = spawnSync(npm, ['install', '--no-audit', '--no-fund'], {cwd: root, stdio: 'inherit', env: npmEnv()});
+  const npm = npmCommand(['install', '--no-audit', '--no-fund']);
+  const r = spawnSync(npm.command, npm.args, {cwd: root, stdio: 'inherit', env: npmEnv(), shell: npm.shell});
   if (r.status !== 0) {
     process.stderr.write('[git hook] npm install FAILED - run it by hand\n');
     return 0;

@@ -16,6 +16,7 @@ import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.
 // Shared with the CSS loader's mode resolution, which must pick the same profiles.
 import {readEnvNamesFromArgv} from './loader-mode.js';
 import type {PackageDetails} from './interfaces.js';
+import {importFile} from './utils/platform.js';
 
 /**
  * Load the app's environment into `process.env`, then re-apply the original
@@ -167,7 +168,7 @@ export async function loadBackendStorageConfig(): Promise<any> {
       // Variable specifier is intentional — we discover the path at
       // runtime by probing the candidate list, so static analysis is
       // impossible.
-      return import(/* @vite-ignore */ candidate);
+      return importFile(candidate);
     }
   }
   console.warn(
