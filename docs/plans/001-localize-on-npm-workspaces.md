@@ -885,6 +885,18 @@ lines printed; purge refuses on git failure / no `.git` / stash / unpushed branc
 Findings 2, 6 (scripts), 12, 13, 14, 15. **Quick gate:** package.json parses; manifests grep; YAML
 parses; stale-reference grep; `bash -n scripts/ci-local.sh`.
 
+**Result:** One CN commit (`cb7638a2`, 12 files). `postinstall`/`dependencies` run the guarded
+command (JSON equality checked; a directory without the cli exits 0); the lockfile is unchanged.
+`pr-checks.yml` typecheck job runs `npx linked localize --list --check` after `npm ci` (needs the
+cli release). arch-03 and `.npmrc` state the range rule precisely; arch-03's Docker line says
+`node:24-bookworm` / npm 11.19.0 (measured) and notes the dev container's empty `packages-local/`;
+`docs/releasing-linked-packages.md` points at the drift check; the how-to adds host-only
+localizing, the Linux root-owned mountpoint, the CI drift step, a monorepo migration step;
+`agents.md` adds the worktree-hooks bullet; backlog 105/097/076 and `create-now.code-workspace`
+updated; `ci-local.sh --install` refuses (exit 1, lists the checkouts) before `npm ci` when
+checkouts exist. Validation: leak grep empty, YAML parses, `bash -n`, `docker compose --profile
+setup config -q` exit 0.
+
 ### P10 — Integration re-run
 In a fresh standalone clone of the CN branch with the four checkouts: one-step set-up from an
 un-set-up app (capture), install, drift printed once, husky-style `core.hooksPath` (nothing
