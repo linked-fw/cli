@@ -5,7 +5,7 @@ summary: >
   the working tree stays clean, and localize shrinks to clone/adopt/park/list plus a drift check.
   Pruning, relink, ensure, the provided rule and the localize Vite dedupe are removed. Spans this
   repo and Create Now.
-status: Implementation
+status: Review
 source: docs/backlog/009-localize-on-npm-workspaces.md
 ---
 
