@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.46.1
+
+### Patch Changes
+
+- [#260](https://github.com/linked-fw/cli/pull/260) [`011395a`](https://github.com/linked-fw/cli/commit/011395a668641ea9fa41d80802eca1b156fe114f) Thanks [@flyon](https://github.com/flyon)! - `linked build-all` now builds `@_linked/cli` first and alone when it is one of the packages to build (a localized checkout). Every other package's build runs `linked build` from that checkout's `lib/`, so building it in parallel with them pulled `lib/` out from under their builds (`ENOENT …/lib/esm/installed-packages.js`) and left their dependents unbuilt, and anything built before it used a stale cli. If the cli fails to build, `build-all` now stops with a clear message instead of building the rest with a broken cli. `--from` a later package skips the cli as before; `--from @_linked/cli` builds it and then everything; `--sync` is unaffected.
+
+- [#260](https://github.com/linked-fw/cli/pull/260) [`8e2e54a`](https://github.com/linked-fw/cli/commit/8e2e54ab03319c74d4382944eeeca048c272d242) Thanks [@flyon](https://github.com/flyon)! - `linked build-all`'s end-of-run summary now shows, under each package that failed to build, a short excerpt of why: the lines of its output that look like errors (`error TS…` with file and line, `Error: …` with its first stack frame, `npm ERR!` lines that say something), without npm's lifecycle boilerplate, de-duplicated, truncated and capped at 8 lines, falling back to the last lines of output when nothing looks like an error. The full output is still printed inline when the failure happens; the excerpt makes the cause visible at the end without scrolling back through the interleaved parallel builds.
+
 ## 1.46.0
 
 ### Minor Changes
