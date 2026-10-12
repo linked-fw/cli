@@ -1,8 +1,0 @@
-#!/bin/sh
-# The committed lockfile is the registry lockfile. A lockfile written while packages-local/* is
-# linked lists those checkouts: refuse it.
-if git diff --cached --name-only | grep -qx package-lock.json && git show :package-lock.json | grep -q '"packages-local/[^*]'; then
-  echo "pre-commit: refusing package-lock.json: it references packages-local/ (written while packages were localized)." >&2
-  echo "  npm run delocalize && npm install <dep> && git commit && npm run relocalize" >&2
-  exit 1
-fi
