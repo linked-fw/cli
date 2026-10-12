@@ -1147,3 +1147,36 @@ install that changed node_modules". Gate: `npx tsc -p tsconfig-esm.json --noEmit
 jest --config jest.config.cjs tests/unit/localize` → `Test Suites: 16 passed, 16 total`, `Tests:
 188 passed, 188 total`; `npm run test:unit` → `Test Suites: 66 passed, 66 total`, `Tests: 745
 passed, 745 total`; `npm run build` exit 0.
+
+## Iteration 4 — chosen by the developer at the review pause
+
+Decisions (from the developer): fix the recommended small items; make the whole CLI Windows-proof
+now, untested on real Windows (no one on the team uses it), covering every command; slim the CN
+`agents.md` additions slightly (done in CN: net +355 characters instead of +567).
+
+### P14 — Small fixes (CLI)
+1. The hooks notice with a foreign `pre-commit`: name the hook and print the line to add by hand,
+   instead of suggesting `--adopt` (which skips foreign hooks).
+2. The notice names a checkout that has `.git`.
+3. lock-at-rest prints one line when `packages-local/.setup-aside/` exists (stranded checkouts).
+4. Unparking a name that is already a member (under another directory) refuses with exit 6.
+5. `delocalize` of the last checkout runs `npm ci` only when `package-lock.json` is tracked and the
+   manifests are clean; otherwise `npm install`.
+6. `git clone -- <url> <dir>`; `return buildAll(...)` in `cli.ts`; no double `[localize]` prefix.
+7. `docs/localize.md`: the glob matcher honours `!` and `**` but not npm's re-inclusion order or
+   braces.
+**Quick gate:** tsc; `tests/unit/localize tests/unit/localizeCommand.test.ts tests/unit/buildAll`;
+`npm run test:unit`; `npm run build`.
+
+### P15 — Windows-proof CLI (every command)
+Audit every command in `src/cli.ts` and every hook in `hooks/` for: spawning `npm`/`npx`/bins
+without a shell (Windows needs `npm.cmd` with `shell: true` since Node 18.20/20.12), POSIX-only
+shell syntax (`rm -rf`, `&&` chains run via `sh`, `chmod`, `$VAR`), hard-coded `/` in filesystem
+paths vs. glob/URL paths, symlinks (`junction` for directories), `/dev/tty`, `process.env.HOME`,
+path comparisons that assume case sensitivity or `/`, line endings when rewriting files (preserve
+CRLF), `file://` URLs from paths (`pathToFileURL`), and the git hook shims (sh scripts run by Git
+for Windows' bundled sh — keep POSIX sh, quote paths, avoid tools absent from it). One shared spawn
+helper where several exist. Tests use platform stubs (`process.platform` injection or helpers that
+take a platform argument); no real Windows run. Record anything left as a known limitation.
+**Quick gate:** tsc; `npm run test:unit`; `npm run build`; `npm run test:template` (it scaffolds and
+builds packages, exercising the spawn paths on macOS).
