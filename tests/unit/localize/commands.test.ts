@@ -120,6 +120,44 @@ test('localize builds the cli with npm run build, and --build overrides every de
   );
 });
 
+test('the cli builds before the others and then gets its bin linked', (t) => {
+  const appRoot = consumer(t);
+  let n = 0;
+  const deps = stubbed(appRoot, (inv) => {
+    if (inv.cmd === 'git' && inv.args[0] === 'clone') {
+      seedCheckout(appRoot, path.relative(appRoot, inv.args[2]), {
+        name: ['@x/a', '@_linked/cli'][n++],
+        version: '1.0.0',
+      });
+      return ok();
+    }
+  });
+
+  const code = localize(['@x/a', '@_linked/cli'], {repo: 'https://example.invalid/r.git'}, deps);
+
+  assert.equal(code, 0, deps.output());
+  assert.deepEqual(trace(deps, appRoot).slice(2), [
+    'npm install --no-audit --no-fund @ .',
+    'npm run build @ packages-local/_linked-cli',
+    'npm rebuild @_linked/cli --ignore-scripts @ .',
+    'linked build @ packages-local/x-a',
+  ]);
+});
+
+test('a failed cli build links no bin', (t) => {
+  const appRoot = consumer(t);
+  const deps = cloning(appRoot, {name: '@_linked/cli'}, (inv) =>
+    inv.cmd === 'npm run build' ? fail('core has no lib/') : undefined,
+  );
+
+  assert.equal(localize(['@_linked/cli'], {repo: 'https://example.invalid/cli.git'}, deps), 5);
+  assert.equal(
+    deps.calls.filter((c) => c.cmd === 'npm' && c.args[0] === 'rebuild').length,
+    0,
+    deps.output(),
+  );
+});
+
 test('localize refuses a conflicting override: exit 6, the key named, nothing cloned or changed', (t) => {
   const appRoot = consumer(t, {overrides: {'@_linked/core': '$@_linked/core'}});
   const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');

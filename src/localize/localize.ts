@@ -22,8 +22,10 @@
  *      with it, so it comes before any build;
  *   6. build each new checkout: `--build`, else `linked build`, else for the
  *      cli its own `npm run build` (the cli is what `linked build` runs, and a
- *      fresh cli checkout has no `lib/` yet). A failing build warns: a package
- *      whose build is broken is usually what you localized it to fix.
+ *      fresh cli checkout has no `lib/` yet). The cli builds first and then
+ *      gets its bin linked (`npm rebuild`), since the others' `linked build`
+ *      runs it. A failing build warns: a package whose build is broken is
+ *      usually what you localized it to fix.
  *
  * `adopt` (adopt.ts) replaces step 3 with "the checkout is already there", and
  * `--parked` with "every parked checkout". Steps 1, 2 and 4-6 are `runLocalize`.
@@ -174,10 +176,16 @@ export function installAndBuild(
   }
 
   let code = 0;
-  for (const p of prepared) {
+  // The cli first: the other builds run `linked build`, which is the cli.
+  const ordered = [
+    ...prepared.filter((p) => p.name === CLI_PACKAGE),
+    ...prepared.filter((p) => p.name !== CLI_PACKAGE),
+  ];
+  for (const p of ordered) {
     const pkgDir = path.join(deps.appRoot, p.dir);
-    if (p.build && runBuild(p, pkgDir, opts, deps) === 'failed')
-      code = EXIT_WARNED;
+    const built = p.build ? runBuild(p, pkgDir, opts, deps) : 'skipped';
+    if (built === 'failed') code = EXIT_WARNED;
+    if (built === 'ok' && p.name === CLI_PACKAGE) linkCliBin(deps);
     deps.log(
       `[localize] ${p.name} -> ${p.dir} (branch ${currentBranch(pkgDir, deps)})`,
     );
@@ -185,6 +193,25 @@ export function installAndBuild(
   for (const d of driftProblems(deps.appRoot))
     deps.warn(`[localize] drift: ${describeDrift(d)}`);
   return code;
+}
+
+/**
+ * npm links a package's bin only when its target exists, and a fresh cli
+ * checkout has no `lib/` at install time: without this, `node_modules/.bin/linked`
+ * is missing after the build, and `npx linked` would fetch the unrelated npm
+ * package named `linked`. `--ignore-scripts`: only the bin links are wanted.
+ */
+function linkCliBin(deps: Deps): void {
+  const r = deps.run('npm', ['rebuild', CLI_PACKAGE, '--ignore-scripts'], {
+    cwd: deps.appRoot,
+  });
+  if (r.status !== 0) {
+    deps.warn(
+      `[localize] npm rebuild ${CLI_PACKAGE} failed, so \`linked\` may not be on the app's ` +
+        `bin path. Run it yourself.\n` +
+        tail(r.stderr || r.stdout),
+    );
+  }
 }
 
 /** Step 3 for `localize`: take back a parked checkout, else clone. */

@@ -198,7 +198,10 @@ back from parking is not rebuilt. A failing build warns (exit 5) and the checkou
 a package whose build is broken is usually what you localized it to fix.
 
 **The cli builds itself with `npm run build`** (its own `tsc`), not `linked build`: `linked build`
-*is* the cli, and a fresh checkout of it has no `lib/` yet.
+*is* the cli, and a fresh checkout of it has no `lib/` yet. It builds before the other new
+checkouts, and then localize runs `npm rebuild @_linked/cli --ignore-scripts` at the app root: npm
+links a bin only when its file exists, so after an install with an unbuilt cli checkout there is no
+`node_modules/.bin/linked`, and `npx linked` would fetch the unrelated npm package named `linked`.
 
 **`linked build-all`** builds the cli's own dependencies among the packages it builds first (in
 dependency order), then the cli alone, then everything else. So a localized `@_linked/core` has its
@@ -219,8 +222,12 @@ without `linked`:
 ```sh
 (cd packages-local/_linked-core && npm run compile)   # core's plain tsc build
 (cd packages-local/_linked-cli && npm run build)
+npm rebuild @_linked/cli --ignore-scripts             # link node_modules/.bin/linked
 npx linked build-all                                  # everything, now with the built cli
 ```
+
+Check `ls -l node_modules/.bin/linked` before the last line: without the link, `npx linked`
+offers to install the npm package `linked`, which is something else.
 
 ## Drift
 
