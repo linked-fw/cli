@@ -48,6 +48,9 @@
  *   checkout keeps its own copies of whatever failed the guard, and removing
  *   the copy would mix the two -- measured as a checkout's `tsc` seeing two
  *   React type sets;
+ * - a copy that ships its own types while the checkout also holds an
+ *   `@types/` stub for it (`staleTypes` below): TypeScript would take the stub
+ *   once the copy is gone;
  * - anything in a checkout that is not under the app root, because then the
  *   upward search never reaches the app's `node_modules` and the removed
  *   package would simply be missing;
@@ -185,13 +188,17 @@ export interface PruneDecision {
   /**
    * Why a copy stays: `range` -- a range that loads it is one the app's
    * version misses (or one that cannot be read); `context` -- removing it
-   * would change what its own dependencies resolve to.
+   * would change what its own dependencies resolve to; `types` -- the copy
+   * ships its own types and removing it would hand TypeScript the checkout's
+   * `@types/` stub for it instead (`staleTypes`).
    */
-  reason?: 'range' | 'context';
+  reason?: 'range' | 'context' | 'types';
   /** The ranges the app's version does not satisfy (`range`), or a sibling's drift (`remove`). */
   unmet: Ask[];
   /** `context`: the dependency that would resolve elsewhere, and both versions. */
   context?: {dep: string; here: string; app: string | null};
+  /** `types`: the `@types/` stub TypeScript would take instead, and its version. */
+  types?: {name: string; version: string};
 }
 
 /** What a plan found, without touching anything. */
@@ -331,7 +338,9 @@ export function pruneProvided(
  * dependency gone missing? `--relink` asks this before reinstalling a
  * checkout, so a copy pruned on purpose does not trigger a reinstall on every
  * postinstall. `pkg` is the checkout's `package.json`: only what would be a
- * candidate in THAT checkout counts.
+ * candidate in THAT checkout counts. With `checkout`, a copy the prune would
+ * keep for a stub `@types/` package there (`staleTypes`) is not provided: its
+ * absence is a dependency gone missing, and the reinstall puts it back.
  */
 export function isProvidedByApp(
   dep: string,
@@ -340,6 +349,7 @@ export function isProvidedByApp(
   candidates: Candidates,
   deps: Pick<Deps, 'appRoot'>,
   pkg?: any,
+  checkout?: {dir: string},
 ): boolean {
   const app = appCopy(dep, deps);
   if (!app) return false;
@@ -351,7 +361,18 @@ export function isProvidedByApp(
     declared(pkg, REQUIRE_FIELDS, dep) === undefined
   )
     return false;
-  return range === undefined || satisfies(app.version, range) === true;
+  if (range !== undefined && satisfies(app.version, range) !== true)
+    return false;
+  // Pruned or not, a copy the prune would keep because of a stub `@types/`
+  // package is one the checkout needs: absent, it is missing. The app's copy
+  // stands in for the one that is gone.
+  if (
+    checkout &&
+    shipsOwnTypes(app.real, readJson(path.join(app.real, 'package.json'))) &&
+    staleTypes(path.join(checkout.dir, 'node_modules'), dep, null)
+  )
+    return false;
+  return true;
 }
 
 function decideIn(nm: string, ctx, cache: PruneCache): PruneDecision[] {
@@ -417,6 +438,11 @@ function decideIn(nm: string, ctx, cache: PruneCache): PruneDecision[] {
       out.push({...base, action: 'keep', reason: 'range', unmet});
       continue;
     }
+    const types = shipsOwnTypes(dir, nested) ? staleTypes(nm, dep, dir) : null;
+    if (types) {
+      out.push({...base, action: 'keep', reason: 'types', unmet: [], types});
+      continue;
+    }
     const context = contextChange(dir, app.real, nested);
     if (context) {
       out.push({
@@ -470,6 +496,65 @@ function contextChange(
       return {dep: d, here: here.version, app: there.version};
   }
   return undefined;
+}
+
+/**
+ * Would TypeScript, resolving `dep` from the checkout that owns `nm` once the
+ * copy at `<nm>/<dep>` (`removing`; `null` when it is already gone) is
+ * removed, land on an `@types/` stub before it reaches any other copy of
+ * `dep`? TypeScript looks, in each `node_modules` going up, for `<dep>` and
+ * then for `@types/<dep>`, and takes the first it finds. So with the copy gone
+ * a checkout that still holds `@types/<dep>` -- typically as some other
+ * package's dependency -- gets that stub, not the app's copy's own types.
+ * Measured: the app's `minimatch` moved to 9.0.9, satisfying cli's `^9.0.4`,
+ * the checkout's own `minimatch` 9 was removed, and cli's `tsc` resolved
+ * `minimatch` to the checkout's `@types/minimatch@3.0.5` (depcheck →
+ * multimatch → @types/minimatch): `TS2724 '"minimatch"' has no exported member
+ * named 'minimatch'`.
+ *
+ * Callers ask only when the copy ships its own types: one that does not had
+ * TypeScript take the same stub before the removal as after.
+ */
+function staleTypes(
+  nm: string,
+  dep: string,
+  removing: string | null,
+): {name: string; version: string} | null {
+  const typesName = typesPackageFor(dep);
+  if (typesName === dep) return null;
+  for (let dir = path.dirname(nm); ;) {
+    if (path.basename(dir) !== 'node_modules') {
+      const here = path.join(dir, 'node_modules');
+      const other = path.join(here, dep);
+      if (other !== removing && fs.existsSync(path.join(other, 'package.json')))
+        return null; // another copy of dep comes first
+      const stub = readJson(path.join(here, typesName, 'package.json'));
+      if (stub) return {name: typesName, version: String(stub.version)};
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Does the package at `dir` carry its own type declarations? `types` /
+ * `typings`, `typesVersions`, a `types` condition anywhere in `exports`, or an
+ * `index.d.ts` next to its `package.json` -- where TypeScript looks for them.
+ */
+export function shipsOwnTypes(dir: string, pkg: any): boolean {
+  if (!pkg) return false;
+  if (pkg.types || pkg.typings || pkg.typesVersions) return true;
+  if (hasTypesCondition(pkg.exports)) return true;
+  return fs.existsSync(path.join(dir, 'index.d.ts'));
+}
+
+function hasTypesCondition(exp: any): boolean {
+  if (!exp || typeof exp !== 'object') return false;
+  if (Array.isArray(exp)) return exp.some(hasTypesCondition);
+  return Object.entries(exp).some(
+    ([k, v]) => k === 'types' || hasTypesCondition(v),
+  );
 }
 
 /** `react` → `@types/react`; `@scope/name` → `@types/scope__name`; an `@types/` name is itself. */
@@ -667,6 +752,8 @@ export function summarizeKept(list: PruneDecision[]): string {
 }
 
 function keptShort(k: PruneDecision): string {
+  if (k.reason === 'types')
+    return `${k.dep}@${k.version} (TypeScript would take ${k.types!.name}@${k.types!.version})`;
   return k.reason === 'context'
     ? `${k.dep}@${k.version} (its ${k.context!.dep} would change)`
     : `${k.dep}@${k.version} (app ${k.app})`;
@@ -674,6 +761,13 @@ function keptShort(k: PruneDecision): string {
 
 /** The full reason a copy stays, for `--list`. */
 export function explainKept(k: PruneDecision): string {
+  if (k.reason === 'types') {
+    const t = k.types!;
+    return (
+      `${k.where}@${k.version}: it ships its own types and the checkout also has ${t.name}@${t.version} — ` +
+      `removing it would make TypeScript take that stub instead of the app's ${k.dep}@${k.app}`
+    );
+  }
   if (k.reason === 'context') {
     const c = k.context!;
     return (
