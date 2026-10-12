@@ -39,9 +39,14 @@ function hookCommands(hook, prefix) {
   ];
 }
 
-/** The same hand-over as one line, in a subshell, for a hook file another tool or person owns. */
+/**
+ * The same hand-over as one `sh` line, in a subshell, for a hook file another tool or person owns.
+ * A subshell's failure does not stop a plain `#!/bin/sh` script, so `|| exit $?` passes it on:
+ * a refusing pre-commit refuses wherever in the file the line sits. post-merge and post-checkout
+ * always exit 0, so the rest of their file still runs.
+ */
 function hookLine(hook, prefix) {
-  return `(${hookCommands(hook, prefix).join('; ')})`;
+  return `(${hookCommands(hook, prefix).join('; ')}) || exit $?`;
 }
 
 /** Does this hook file run ours: written by localize, or holding the line added by hand? */

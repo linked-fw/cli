@@ -325,6 +325,33 @@ test('lock-at-rest: a pre-commit that is not ours is named, with the line to add
   assert.equal(r.stderr, '');
 });
 
+test('a hand-added hook line refuses the commit even when it is not the last line', (t) => {
+  const root = app(t);
+  const stub = path.join(root, 'node_modules', '@_linked', 'cli', 'hooks', 'git-hook.cjs');
+  fs.mkdirSync(path.dirname(stub), {recursive: true});
+  const hook = path.join(root, 'hand-hook');
+  fs.writeFileSync(hook, `#!/bin/sh\n${hookLine('pre-commit')}\necho other\n`);
+  const run = () => spawnSync('sh', [hook], {cwd: root, encoding: 'utf8', env: baseEnv()});
+
+  fs.writeFileSync(stub, "process.stderr.write('refused\\n'); process.exit(1);\n");
+  let r = run();
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /refused/);
+  assert.equal(r.stdout, '');
+
+  // A hook that lets the commit through leaves the rest of the file to run.
+  fs.writeFileSync(stub, 'process.exit(0);\n');
+  r = run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'other\n');
+
+  // Without the cli installed the line is a no-op.
+  fs.rmSync(path.join(root, 'node_modules'), {recursive: true});
+  r = run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'other\n');
+});
+
 test('lock-at-rest: checkouts left in packages-local/.setup-aside are pointed out on every install', (t) => {
   const root = app(t);
   fs.mkdirSync(path.join(root, 'packages-local', '.setup-aside', 'a'), {recursive: true});

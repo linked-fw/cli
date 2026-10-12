@@ -375,15 +375,18 @@ tree without the cli installed skips it rather than blocking git.
   ```
   [localize] core.hooksPath is set (.husky/_), so no git hooks were written. Add each line below …
     .husky/post-merge:
-      (dir="$(git rev-parse --show-toplevel)"; script="$dir/node_modules/@_linked/cli/hooks/git-hook.cjs"; …; exec node "$script" post-merge "$@")
+      (dir="$(git rev-parse --show-toplevel)"; script="$dir/node_modules/@_linked/cli/hooks/git-hook.cjs"; …; exec node "$script" post-merge "$@") || exit $?
     .husky/post-checkout:
       …
     .husky/pre-commit:
       …
   ```
 
-  Each line runs in a subshell, so it leaves the rest of that hook file alone, and does nothing
-  where the cli is not installed, so it is safe to commit for everyone.
+  Each line is `sh` and belongs in an `sh` hook (husky's are): a hook in another language, such
+  as the Python one the pre-commit framework writes, needs it in an `sh` hook of its own. It runs
+  in a subshell, so it leaves the rest of that hook file alone, and its trailing `|| exit $?`
+  passes a refusing `pre-commit` on, so the commit is refused wherever in the file the line sits.
+  It does nothing where the cli is not installed, so it is safe to commit for everyone.
 - **A linked worktree** (`git worktree add`) has no hooks directory of its own: the hooks go into
   the main repository's, where every worktree runs them, each against its own `node_modules`.
   localize says so once. `post-merge` and `post-checkout` do nothing in a work tree with no
@@ -404,7 +407,7 @@ ours, lock-at-rest prints, once per install that changed the tree (with the drif
 That run (it names a checkout that has a `.git`, or says `<any checkout's name>` when none has;
 `--build ''` builds nothing) writes the hooks and runs one `npm install`. When the hooks directory
 has a `pre-commit` that is not ours, `--adopt` would leave it alone, so the notice names that file
-and prints the one line to add to it instead; once the file runs `hooks/git-hook.cjs`, the notice
+and prints the one line to add to it instead (an `sh` line, for an `sh` hook); once the file runs `hooks/git-hook.cjs`, the notice
 stops. Under `core.hooksPath` the notice stays quiet: add the lines localize prints there.
 
 ## `npm ci` with checkouts present fails

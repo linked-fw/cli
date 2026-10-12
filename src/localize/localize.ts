@@ -565,8 +565,8 @@ function reportHooks(hooks: HookInstall, deps: Deps): void {
   if (hooks.hooksPath !== null) {
     deps.warn(
       `[localize] core.hooksPath is set (${hooks.hooksPath}), so no git hooks were written. Add ` +
-        `each line below to the hook named before it (they do nothing where the cli is not ` +
-        `installed):`,
+        `each line below to the hook named before it, an \`sh\` script (not, say, a Python hook ` +
+        `the pre-commit framework writes); they do nothing where the cli is not installed:`,
     );
     for (const m of hooks.manual) deps.warn(`  ${m.file}:\n    ${m.line}`);
   }

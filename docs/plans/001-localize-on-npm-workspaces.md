@@ -1268,3 +1268,25 @@ sh with `GIT_DIR=C:/…`/`C:\…`/relative (run through `sh`), LF hook files. Ga
 total`, `Tests: 776 passed, 776 total`; `npm run build` exit 0; `npm run test:template` → `Test
 Suites: 2 passed, 2 total`, `Tests: 22 passed, 22 total` (before the overlay fix: 1 failed, 21
 passed); `node lib/esm/launch.js --help` exit 0.
+
+**Result:** P15 follow-up (review). (1) MEDIUM: `hookLine` in `hooks/hook-shim.cjs` ends in
+`|| exit $?`, so the line refuses a commit wherever it sits in a plain `#!/bin/sh` hook (before,
+a subshell's non-zero exit only counted as the last line); post-merge/post-checkout exit 0, so
+the rest of their file still runs. lock-at-rest's "not ours" notice and localize's `core.hooksPath`
+lines say the line is for an `sh` hook (not, say, the pre-commit framework's Python one);
+`docs/localize.md` shows the `|| exit $?` and says the same. (2) `isPathInside`: `rel === '' ||
+(rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel))` with the platform's path module,
+so a child named `..foo` is inside. (3) `planCommand` escapes twice for every `.cmd` shim that
+re-parses `%*` (`reparsesArgs`: `node_modules/.bin/*.cmd`, and the `.cmd` of a known shim name —
+the `npm.cmd`/`npx.cmd` fallback, `tsc` → `tsc.cmd`, …); any other `.cmd`/`.bat` once. (4)
+`npm_execpath` ending in `npx-cli.js` (npm sets it so under `npx`) also takes the fast path: the
+other entry is its sibling, used when it exists.
+
+Tests: `tests/unit/localize/hooks.test.ts` +1 (an `sh` hook with our line first, then `echo
+other`, and a `git-hook.cjs` stub: exit 1 → hook non-zero, `other` not printed — fails without the
+fix; exit 0 → `other`; no cli → `other`); `tests/unit/windows.test.ts` +3, 1 changed (npm.cmd
+fallback now escaped twice; `npx`/`tsc`/`linked`/`NPM.CMD`/`…\npx.cmd` twice, `build.cmd` and
+`npm.bat` once; `npm_execpath=npx-cli.js` → `npm-cli.js` beside it with a stubbed `exists`, and
+`npm.cmd` when absent; `..foo` inside on posix and win32, `..`, `../x` and another drive not).
+Gate: `npx tsc -p tsconfig-esm.json --noEmit` exit 0; `npm run test:unit` → `Test Suites: 68
+passed, 68 total`, `Tests: 780 passed, 780 total`; `npm run build` exit 0.

@@ -52,7 +52,7 @@ const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
 /**
  * `arg` as one argument on a `cmd.exe` command line: quoted the way the C
  * runtime splits arguments, then every `cmd.exe` metacharacter escaped with
- * `^` -- twice for a `node_modules/.bin` shim, whose `%*` is parsed again.
+ * `^` -- twice for a `.cmd` shim whose `%*` is parsed again (`reparsesArgs`).
  * The same scheme as cross-spawn.
  */
 export function quoteCmdArg(arg: string, doubleEscape = false): string {
@@ -73,9 +73,22 @@ function isWindowsShim(cmd: string): boolean {
 }
 
 /**
+ * Does the batch file `file` hand its `%*` to another command line, where
+ * `cmd.exe` parses the arguments again: a `node_modules/.bin` shim, or the
+ * `.cmd` shim of a known name (`npm.cmd`, `npx.cmd`, `tsc.cmd`, ...), which
+ * npm writes the same way. Their arguments are escaped twice.
+ */
+function reparsesArgs(file: string): boolean {
+  if (!/\.cmd$/i.test(file)) return false;
+  if (/(^|[\\/])node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i.test(file)) return true;
+  return WINDOWS_SHIMS.has(path.win32.basename(file).slice(0, -'.cmd'.length).toLowerCase());
+}
+
+/**
  * The JS entry of npm's `npm` or `npx`, from `npm_execpath` -- which npm sets
- * for every script and `npx` it runs. Only npm's own: under yarn or pnpm it
- * names their entry, which takes other arguments.
+ * for every script and `npx` it runs, to `npm-cli.js` or `npx-cli.js`. Only
+ * npm's own: under yarn or pnpm it names their entry, which takes other
+ * arguments.
  */
 function npmScript(
   cmd: 'npm' | 'npx',
@@ -83,9 +96,13 @@ function npmScript(
   exists: (p: string) => boolean,
 ): string | null {
   const execPath = env.npm_execpath;
-  if (!execPath || !/^npm-cli\.js$/i.test(path.win32.basename(execPath))) return null;
+  if (!execPath) return null;
+  // npm sets it to npm-cli.js, and npx to npx-cli.js; the other sits next to it.
+  const started = path.win32.basename(execPath).toLowerCase();
+  if (started !== 'npm-cli.js' && started !== 'npx-cli.js') return null;
+  const wanted = `${cmd}-cli.js`;
   const script =
-    cmd === 'npm' ? execPath : path.win32.join(path.win32.dirname(execPath), 'npx-cli.js');
+    started === wanted ? execPath : path.win32.join(path.win32.dirname(execPath), wanted);
   return exists(script) ? script : null;
 }
 
@@ -107,7 +124,7 @@ export function planCommand(
     }
   }
   const file = /\.(cmd|bat|exe)$/i.test(cmd) || !WINDOWS_SHIMS.has(name) ? cmd : `${cmd}.cmd`;
-  const doubleEscape = /(^|[\\/])node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i.test(file);
+  const doubleEscape = reparsesArgs(file);
   const line = [
     // A path with spaces is quoted; a bare name stays bare so cmd.exe searches PATH for it.
     /[\s"]/.test(file) ? quoteCmdArg(file) : file,

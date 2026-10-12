@@ -71,7 +71,8 @@ describe('planCommand', () => {
     expect(plan).toEqual({command: NODE, args: [NPX_CLI, '--no-install', 'linked'], shell: false});
   });
 
-  test('win32: without npm_execpath, npm.cmd through cmd.exe with every argument quoted', () => {
+  test('win32: without npm_execpath, npm.cmd through cmd.exe, every argument quoted and escaped twice', () => {
+    // npm.cmd hands `%*` to another command line, which cmd.exe parses again.
     const plan = planCommand('npm', ['install', '--cache', 'C:\\Users\\First Last\\Temp'], {
       platform: 'win32',
       env: {},
@@ -79,8 +80,49 @@ describe('planCommand', () => {
     expect(plan.shell).toBe(true);
     expect(plan.args).toEqual([]);
     expect(plan.command).toBe(
-      'npm.cmd ^"install^" ^"--cache^" ^"C:\\Users\\First^ Last\\Temp^"',
+      'npm.cmd ^^^"install^^^" ^^^"--cache^^^" ^^^"C:\\Users\\First^^^ Last\\Temp^^^"',
     );
+  });
+
+  test('win32: every .cmd shim that re-parses %* escapes twice; any other batch file once', () => {
+    const twice = '^^^"a^^^&b^^^"';
+    for (const cmd of ['npx', 'tsc', 'linked', 'NPM.CMD', 'C:\\Program Files\\nodejs\\npx.cmd']) {
+      const plan = planCommand(cmd, ['a&b'], {platform: 'win32', env: {}});
+      expect(plan.command.endsWith(` ${twice}`)).toBe(true);
+    }
+    expect(planCommand('tsc', ['a&b'], {platform: 'win32'}).command).toBe(`tsc.cmd ${twice}`);
+    expect(planCommand('C:\\tools\\build.cmd', ['a&b'], {platform: 'win32'}).command).toBe(
+      'C:\\tools\\build.cmd ^"a^&b^"',
+    );
+    expect(planCommand('C:\\tools\\npm.bat', ['a&b'], {platform: 'win32'}).command).toBe(
+      'C:\\tools\\npm.bat ^"a^&b^"',
+    );
+  });
+
+  test("win32: started by npx (npx-cli.js), npm runs as node + the npm-cli.js beside it", () => {
+    const plan = planCommand('npm', ['install'], {
+      platform: 'win32',
+      env: {npm_execpath: NPX_CLI},
+      execPath: NODE,
+      exists: (p) => p === NPM_CLI,
+    });
+    expect(plan).toEqual({command: NODE, args: [NPM_CLI, 'install'], shell: false});
+    expect(
+      planCommand('npx', ['linked'], {
+        platform: 'win32',
+        env: {npm_execpath: NPX_CLI},
+        execPath: NODE,
+        exists: (p) => p === NPX_CLI,
+      }),
+    ).toEqual({command: NODE, args: [NPX_CLI, 'linked'], shell: false});
+    // No npm-cli.js beside it: npm.cmd through cmd.exe.
+    const fallback = planCommand('npm', ['install'], {
+      platform: 'win32',
+      env: {npm_execpath: NPX_CLI},
+      exists: () => false,
+    });
+    expect(fallback.shell).toBe(true);
+    expect(fallback.command.startsWith('npm.cmd ')).toBe(true);
   });
 
   test("win32: yarn's npm_execpath is not npm's, so npm.cmd it is", () => {
@@ -138,6 +180,18 @@ describe('paths on win32', () => {
     expect(isPathInside('C:\\app\\srcx\\x.ts', 'C:\\app\\src', 'win32')).toBe(false);
     expect(isPathInside('/app/Src/x.ts', '/app/src', 'linux')).toBe(false);
     expect(isPathInside('/app/src', '/app/src', 'linux')).toBe(true);
+  });
+
+  test('isPathInside: a child named `..foo` is inside; `..` and `../x` are not', () => {
+    expect(isPathInside('/app/src/..foo', '/app/src', 'linux')).toBe(true);
+    expect(isPathInside('/app/src/..foo/x.ts', '/app/src', 'linux')).toBe(true);
+    expect(isPathInside('/app', '/app/src', 'linux')).toBe(false);
+    expect(isPathInside('/app/x', '/app/src', 'linux')).toBe(false);
+    expect(isPathInside('C:\\app\\src\\..foo', 'C:\\app\\src', 'win32')).toBe(true);
+    expect(isPathInside('c:/app/src/..foo/x.ts', 'C:\\app\\src', 'win32')).toBe(true);
+    expect(isPathInside('C:\\app', 'C:\\app\\src', 'win32')).toBe(false);
+    expect(isPathInside('C:\\app\\x', 'C:\\app\\src', 'win32')).toBe(false);
+    expect(isPathInside('D:\\app\\src', 'C:\\app\\src', 'win32')).toBe(false);
   });
 
   test('a directory link is a junction to the absolute target on win32', () => {

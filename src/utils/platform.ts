@@ -30,7 +30,8 @@ export function isPathInside(
 ): boolean {
   const p = pathFor(platform);
   const rel = p.relative(comparable(parent, platform), comparable(child, platform));
-  return rel === '' || (!rel.startsWith('..') && !p.isAbsolute(rel));
+  // `..foo` is a child named `..foo`; only `..` itself or a `../` prefix leaves `parent`.
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + p.sep) && !p.isAbsolute(rel));
 }
 
 /**

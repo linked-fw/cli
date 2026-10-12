@@ -155,7 +155,9 @@ function run() {
     // localize leaves a hook it did not write alone, so --adopt would not help: add ours by hand.
     return [
       `${path.relative(root, file)} is not ours, so nothing refuses a commit of a lockfile that ` +
-        'lists a checkout. Add this line to it (it does nothing where the cli is not installed):',
+        'lists a checkout. Add this line to it if it is an `sh` script (another kind, such as the ' +
+        'Python hook the pre-commit framework writes, needs it run from an `sh` hook of its own; ' +
+        'it does nothing where the cli is not installed):',
       `  ${hookLine('pre-commit', prefix)}`,
     ];
   }
