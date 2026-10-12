@@ -131,11 +131,20 @@ with exit 6, names the key, and changes nothing. Remove the key and run it again
 
 **The set-up's lockfile, in the same run.** The lockfile must change with `package.json` (the
 root entry's `workspaces`), and it must list no checkout — which the install that links them
-cannot give. So when the set-up changed `package.json`, localize first runs
-`npm install --package-lock-only --ignore-scripts --no-audit --no-fund` at the app root, before
-anything is cloned (checkouts already in `packages-local/`, an adopted one, are moved aside for
-that call), keeps that lockfile, and writes it back after the main install. Afterwards
-`git status` shows exactly the set-up, and localize prints what to commit:
+cannot give. So when the set-up changed `package.json`, localize makes that lockfile before
+anything is cloned, keeps it, and writes it back after the main install:
+
+- **An app with `workspaces` and an install script already** (the root entry of its lockfile has
+  both keys): the root entry's `workspaces` is set to `package.json`'s — an edit, offline and
+  exact. This is the usual case.
+- **Otherwise** npm decides where the new keys go:
+  `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` at the app root
+  (checkouts already in `packages-local/`, an adopted one, are moved aside for that call). A
+  lockfile-only resolve can record more than the set-up (on a large app, the bundled dependencies
+  of an optional package for another platform), and npm 12 can refuse it (`EALLOWREMOTE`); the
+  manual way below covers that.
+
+Afterwards `git status` shows exactly the set-up, and localize prints what to commit:
 
 ```sh
 git add package.json package-lock.json .gitignore && git commit -m "chore: set up linked localize"
@@ -147,7 +156,7 @@ installs exactly what they did before. During that first install lock-at-rest ma
 `package.json` differs from HEAD; the lockfile it is talking about is the one localize then
 replaces.
 
-**When that step fails** (npm cannot reach the registry, say), localize says so and prints the
+**When npm's step fails** (it cannot reach the registry, say), localize says so and prints the
 manual way instead, which still works:
 
 ```sh
@@ -429,9 +438,9 @@ holding its own pruned `node_modules` must not sit next to members.
 5. Take them all in at once: `npx linked localize <every checkout's name> --adopt`. That makes the
    set-up, runs one `npm install` and builds each checkout.
 6. Commit the set-up: `package.json`, `package-lock.json` and `.gitignore`, as printed. With
-   checkouts present, the set-up's lockfile is made with them moved aside for one
-   `npm install --package-lock-only` (see [Set-up](#set-up)); if that fails, use the manual steps
-   printed there.
+   checkouts present, the set-up's lockfile is an edit of its root entry, or made with them
+   moved aside for one `npm install --package-lock-only` (see [Set-up](#set-up)); if that fails,
+   use the manual steps printed there.
 
 ## What it never does
 

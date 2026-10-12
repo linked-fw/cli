@@ -140,6 +140,41 @@ test('first set-up: when npm cannot make the lockfile, the manual steps are prin
   assert.match(deps.output(), /npx linked localize --parked/);
 });
 
+test('first set-up: a root entry with workspaces and an install script is edited, without npm', (t) => {
+  const hook = 'linked localize --relink';
+  const appRoot = consumer(
+    t,
+    {workspaces: ['packages/*'], scripts: {postinstall: hook}},
+    {setUp: false},
+  );
+  const lockfile = path.join(appRoot, 'package-lock.json');
+  const lock = (workspaces) =>
+    JSON.stringify(
+      {
+        name: 'consumer',
+        version: '1.0.0',
+        lockfileVersion: 3,
+        requires: true,
+        packages: {'': {name: 'consumer', version: '1.0.0', hasInstallScript: true, workspaces}},
+      },
+      null,
+      2,
+    ) + '\n';
+  fs.writeFileSync(lockfile, lock(['packages/*']));
+  const deps = writingLockfile(appRoot, {
+    lockOnly: null,
+    installed: '{"packages": {"packages-local/x-a": {}}}\n',
+  });
+
+  assert.equal(localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps), 0, deps.output());
+
+  assert.equal(deps.calls.some((c) => c.args.includes('--package-lock-only')), false);
+  assert.equal(fs.readFileSync(lockfile, 'utf8'), lock(['packages/*', 'packages-local/*']));
+  assert.match(deps.output(), /root entry's "workspaces" now matches package\.json/);
+  assert.match(deps.output(), /put back the set-up's lockfile/);
+  assert.doesNotMatch(deps.output(), /npx linked delocalize/);
+});
+
 test('an app already set up makes no set-up lockfile', (t) => {
   const appRoot = consumer(t);
   const deps = cloning(appRoot, {name: '@x/a'});

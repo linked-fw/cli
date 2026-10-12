@@ -18,7 +18,8 @@ before `start`/`script`/`call`/`build-all`.
 
 - **Required app set-up.** The first `linked localize` adds the glob, the two hook scripts and
   `packages-local/`, `.packages-local.parked/` to `.gitignore`, makes the matching lockfile
-  (`npm install --package-lock-only` before anything is cloned, written back after the install) and
+  (an edit of the root entry's `workspaces` when it has one, else `npm install --package-lock-only`;
+  before anything is cloned, written back after the install) and
   prints what to commit: `git status` shows exactly `package.json`, `package-lock.json` and
   `.gitignore`. An app set up with the earlier unguarded hook command is upgraded. An `overrides`
   key naming a localized package is refused (exit 6). See `docs/localize.md`.

@@ -259,3 +259,53 @@ test(
   },
   SLOW,
 );
+
+test(
+  'slow: an app with workspaces and an install script gets its set-up lockfile by an edit that npm ci accepts',
+  (t) => {
+    const scratch = tmpdir('localize-fixture-');
+    const {repoUrl, depName, depTarball, name} = buildFixtureRepo(scratch);
+    const appRoot = makeConsumer({
+      pkg: {
+        workspaces: ['packages/*'],
+        scripts: {postinstall: 'node -e 0'},
+        dependencies: {[depName]: `file:${depTarball}`},
+      },
+    });
+    t.after(() => {
+      rm(scratch);
+      rm(appRoot);
+    });
+    fs.mkdirSync(path.join(appRoot, 'packages'));
+    fs.writeFileSync(path.join(appRoot, '.gitignore'), 'node_modules/\n');
+    execFileSync('npm', ['install', '--no-audit', '--no-fund'], {
+      cwd: appRoot,
+      env: scrubbedNpmEnv(),
+      stdio: 'pipe',
+    });
+    git(appRoot, 'init', '-q', '-b', 'main');
+    git(appRoot, 'add', '-A');
+    git(appRoot, 'commit', '-q', '-m', 'app');
+
+    const deps = realDeps(appRoot);
+    const code = localize([name], {repo: repoUrl, build: ''}, deps);
+    assert.equal(code, 0, deps.output());
+    assert.match(deps.output(), /root entry's "workspaces" now matches package\.json/);
+    assert.doesNotMatch(deps.output(), /package-lock-only/);
+
+    const changed = git(appRoot, 'diff', '-U0', '--', 'package-lock.json')
+      .split('\n')
+      .filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l))
+      .map((l) => l.replace(/\s+/g, ''));
+    assert.deepEqual(changed, ['-"packages/*"', '+"packages/*",', '+"packages-local/*"']);
+
+    // What CI sees: the committed set-up, no checkout.
+    fs.renameSync(path.join(appRoot, 'packages-local'), path.join(scratch, 'parked'));
+    execFileSync('npm', ['ci', '--no-audit', '--no-fund'], {
+      cwd: appRoot,
+      env: scrubbedNpmEnv(),
+      stdio: 'pipe',
+    });
+  },
+  SLOW,
+);

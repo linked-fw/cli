@@ -56,6 +56,7 @@ import {existsOrLink, moveEntry, readJson} from './fsops.js';
 import {installGitHooks} from './git-hooks.js';
 import type {HookInstall} from './git-hooks.js';
 import {LOCAL_DIR, localMembers, parkedMembers, PARKED_DIR} from './members.js';
+import {setupLockfileByEdit} from './setup-lockfile.js';
 import type {Member} from './members.js';
 import {checkoutNameFor, resolvePackage} from './resolve.js';
 import type {Deps, RunResult} from './run.js';
@@ -362,9 +363,11 @@ export const SETUP_LOCK_ARGS = [
  * (the root entry's `workspaces`) -- and it must be a lockfile with no
  * checkout in it, which the install below cannot give: it lists them, and
  * lock-at-rest leaves it so while `package.json` differs from HEAD. So,
- * before anything is cloned, ask npm for the lockfile alone, keep it, and
- * write it back after the install. Checkouts already in `packages-local/` (an
- * adopted one) are moved aside for that one call.
+ * before anything is cloned, make that lockfile, keep it, and write it back
+ * after the install. When the root entry already has `workspaces` and
+ * `hasInstallScript`, it is an edit of that entry (setup-lockfile.ts: exact,
+ * offline); otherwise npm makes the lockfile alone, with checkouts already in
+ * `packages-local/` (an adopted one) moved aside for that one call.
  *
  * @returns the lockfile to write back, or null when it could not be made (the
  *   manual steps are printed instead).
@@ -376,6 +379,8 @@ function captureSetupLockfile(
   const local = path.join(deps.appRoot, LOCAL_DIR);
   const aside = path.join(deps.appRoot, `.${LOCAL_DIR}.setup`);
   const lockfile = path.join(deps.appRoot, LOCKFILE);
+  const edited = editedSetupLockfile(lockfile, deps);
+  if (edited !== null) return edited;
   const moveAside = localMembers(deps.appRoot).length > 0;
   if (moveAside && existsOrLink(aside)) {
     manualSetupSteps(changes, `${path.basename(aside)}/ is in the way`, deps);
@@ -405,6 +410,26 @@ function captureSetupLockfile(
     );
     return null;
   }
+  return text;
+}
+
+/** The set-up's lockfile as an edit of the root entry, written now; null when npm must make it. */
+function editedSetupLockfile(lockfile: string, deps: Deps): string | null {
+  let current: string;
+  try {
+    current = fs.readFileSync(lockfile, 'utf8');
+  } catch {
+    return null;
+  }
+  const text = setupLockfileByEdit(
+    current,
+    readJson(path.join(deps.appRoot, 'package.json')),
+  );
+  if (text === null) return null;
+  fs.writeFileSync(lockfile, text);
+  deps.log(
+    `[localize] ${LOCKFILE}: the root entry's "workspaces" now matches package.json (the set-up's lockfile)`,
+  );
   return text;
 }
 
