@@ -25,6 +25,10 @@ jest.mock('../../src/localize/index', () => {
   };
 });
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import {
   adoptPackage,
   ENSURE_HINT,
@@ -168,5 +172,37 @@ describe('linked delocalize', () => {
   it('passes --purge and --force through', async () => {
     await runDelocalize(['@_linked/rdfs'], {purge: true, force: true});
     expect(calls[0].args[1]).toEqual({purge: true, force: true});
+  });
+});
+
+describe('the app root', () => {
+  let app: string;
+  let cwd: string;
+  beforeEach(() => {
+    cwd = process.cwd();
+    app = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'localize-app-root-')));
+    fs.writeFileSync(
+      path.join(app, 'package.json'),
+      JSON.stringify({name: 'app', workspaces: ['packages/*']}),
+    );
+    fs.mkdirSync(path.join(app, 'packages', 'foo'), {recursive: true});
+    fs.writeFileSync(path.join(app, 'packages', 'foo', 'package.json'), '{"name": "foo"}');
+    process.chdir(path.join(app, 'packages', 'foo'));
+  });
+  afterEach(() => {
+    process.chdir(cwd);
+    fs.rmSync(app, {recursive: true, force: true});
+  });
+
+  it('localize, --list and delocalize run inside packages/foo act on the app, not the member', async () => {
+    await runLocalize(['@_linked/rdfs'], {});
+    await runLocalize([], {list: true});
+    await runDelocalize([], {});
+    expect(calls.map((c) => c.fn)).toEqual(['localize', 'list', 'delocalize']);
+    expect(calls.map((c) => c.args[c.args.length - 1])).toEqual([
+      {appRoot: app},
+      {appRoot: app},
+      {appRoot: app},
+    ]);
   });
 });

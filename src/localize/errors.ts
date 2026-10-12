@@ -13,9 +13,13 @@ export const EXIT_DRIFT = 1;
 export const EXIT_USAGE = 2;
 /** No git repository could be resolved for the package name. */
 export const EXIT_NOT_FOUND = 4;
-/** Something was warned about and skipped; the command otherwise worked. */
+/** Something was warned about and skipped; the command otherwise worked (a failed build, a name not localized). */
 export const EXIT_WARNED = 5;
-/** A guard refused to act (an existing directory, a conflicting override, unpushed work). */
+/**
+ * A guard refused to act: an existing directory, a conflicting override, or a
+ * `--purge` of a checkout with unsaved work (uncommitted, on no remote,
+ * stashed) or one git cannot inspect.
+ */
 export const EXIT_REFUSED = 6;
 /** `npm install` (or `npm ci`) at the app root failed. */
 export const EXIT_INSTALL_FAILED = 7;

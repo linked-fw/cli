@@ -14,13 +14,15 @@
  *   link with the registry copy leaves that package's bin without its execute
  *   bit (measured), and a rebuild relinks it.
  *
- * `--purge` deletes the checkout instead of parking it, and refuses on
- * uncommitted changes or unpushed commits unless `--force`.
+ * `--purge` deletes the checkout instead of parking it. It fails closed:
+ * unless `--force`, it refuses (exit 6) when the checkout is not a git
+ * repository, when any git call fails, and on uncommitted changes, commits on
+ * any branch that no remote has, or a stash.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {EXIT_INSTALL_FAILED, EXIT_WARNED} from './errors.js';
+import {EXIT_INSTALL_FAILED, EXIT_REFUSED, EXIT_WARNED} from './errors.js';
 import {checkoutRepoRoot, existsOrLink, isInside, isSymlink, moveEntry} from './fsops.js';
 import {INSTALL_ARGS, legacyManifestHint, tail} from './localize.js';
 import {
@@ -58,10 +60,11 @@ export function delocalize(
 
   const done: string[] = [];
   for (const member of targets) {
-    const result = opts.purge
-      ? purge(member, opts, deps)
-      : park(member, deps);
-    if (result === 'done') done.push(member.name);
+    if (opts.purge) {
+      // A purge that is refused is a guard refusing: nothing is deleted.
+      if (purge(member, opts, deps) === 'done') done.push(member.name);
+      else code = Math.max(code, EXIT_REFUSED);
+    } else if (park(member, deps) === 'done') done.push(member.name);
     else code = Math.max(code, EXIT_WARNED);
   }
   if (!done.length) return code;
@@ -91,7 +94,9 @@ function purge(
 ): 'done' | 'refused' {
   const entry = path.join(deps.appRoot, member.dir);
   const repo = checkoutRepoRoot(entry, deps.appRoot);
-  const refusal = repo ? purgeRefusal(repo, deps) : null;
+  const refusal = repo
+    ? purgeRefusal(repo, deps)
+    : 'it is not a git checkout (no .git), so nothing says its work is saved elsewhere';
   if (refusal && !opts.force) {
     deps.warn(
       `[localize] ${member.dir}: not deleting -- ${refusal}. Pass --force to delete it anyway.`,
@@ -99,7 +104,7 @@ function purge(
     return 'refused';
   }
   if (refusal)
-    deps.warn(`[localize] --force: deleting ${member.dir} despite ${refusal}`);
+    deps.warn(`[localize] --force: deleting ${member.dir} although ${refusal}`);
 
   if (isSymlink(entry)) {
     // A package inside a cloned monorepo: the clone goes too, unless another
@@ -158,26 +163,35 @@ function reinstall(names: string[], deps: Deps): number {
   return 0;
 }
 
-/** @returns the reason a purge must be refused, or null. */
+/**
+ * @returns the reason a purge must be refused, or null. Fails closed: a git
+ *   call that fails is a reason, since a check that cannot look must not let
+ *   a delete through.
+ */
 function purgeRefusal(repo: string, deps: Deps): string | null {
-  const status = deps.run('git', ['status', '--porcelain'], {cwd: repo});
-  if (status.stdout.trim()) {
-    const n = status.stdout.split('\n').filter((l) => l.trim()).length;
-    return `it has ${n} uncommitted change${n === 1 ? '' : 's'}`;
-  }
-  // `@{u}` fails without an upstream; then every branch's commits not on any remote count.
-  const upstream = deps.run('git', ['log', '--oneline', '@{u}..HEAD'], {
-    cwd: repo,
-  });
-  const unpushed =
-    upstream.status === 0
-      ? upstream
-      : deps.run('git', ['log', '--oneline', '--branches', '--not', '--remotes'], {
-          cwd: repo,
-        });
-  if (unpushed.status === 0 && unpushed.stdout.trim()) {
-    const n = unpushed.stdout.split('\n').filter((l) => l.trim()).length;
-    return `it has ${n} unpushed commit${n === 1 ? '' : 's'}`;
+  const checks: {args: string[]; what: (n: number) => string}[] = [
+    {
+      args: ['status', '--porcelain'],
+      what: (n) => `${n} uncommitted change${n === 1 ? '' : 's'}`,
+    },
+    {
+      // Every local branch, not only the checked-out one, against every remote.
+      args: ['log', '--oneline', '--branches', '--not', '--remotes'],
+      what: (n) => `${n} commit${n === 1 ? '' : 's'} on a branch no remote has`,
+    },
+    {
+      args: ['stash', 'list'],
+      what: (n) => `${n} stash entr${n === 1 ? 'y' : 'ies'}`,
+    },
+  ];
+  for (const {args, what} of checks) {
+    const r = deps.run('git', args, {cwd: repo});
+    if (r.status !== 0) {
+      const why = (r.stderr || r.stdout).trim().split('\n')[0] || `exit ${r.status}`;
+      return `\`git ${args.join(' ')}\` failed (${why}), so its work cannot be checked`;
+    }
+    const n = r.stdout.split('\n').filter((l) => l.trim()).length;
+    if (n) return `it has ${what(n)}`;
   }
   return null;
 }

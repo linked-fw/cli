@@ -18,6 +18,7 @@ import {
   needsRebuilding,
 } from './utils.js';
 import {renameShippedDotfiles} from './utils/shippedDotfiles.js';
+import {findWorkspaceRoot} from './localize/app-root.js';
 import {planPackageSetup} from './utils/packageSetup.js';
 import {
   bareName,
@@ -942,64 +943,6 @@ function hasDependency(pkg, childPkg, dependencies, depth = 1) {
 }
 
 /**
- * Finds the topmost package.json that could be an APP_ROOT
- * Returns null if no app root is found (standalone repo case)
- */
-function findAppRoot(startPath = process.cwd()): string | null {
-  let currentPath = startPath;
-  let candidateRoots: Array<{
-    path: string;
-    hasWorkspaces: boolean;
-    isLinked: boolean;
-  }> = [];
-
-  // Walk up the directory tree
-  for (let i = 0; i < 10; i++) {
-    const packageJsonPath = path.join(currentPath, 'package.json');
-
-    if (fs.existsSync(packageJsonPath)) {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-
-      candidateRoots.push({
-        path: currentPath,
-        hasWorkspaces: !!packageJson.workspaces,
-        isLinked: packageJson.linkedPackage === true,
-      });
-    }
-
-    const parentPath = path.join(currentPath, '..');
-    // If we've reached the root or haven't moved up
-    if (parentPath === currentPath) {
-      break;
-    }
-    currentPath = parentPath;
-  }
-
-  // Find the topmost package.json that has workspaces
-  // Prefer non-linked packages (app roots) over linked packages
-  let appRoot = null;
-  for (let i = candidateRoots.length - 1; i >= 0; i--) {
-    const candidate = candidateRoots[i];
-    if (candidate.hasWorkspaces && !candidate.isLinked) {
-      appRoot = candidate.path;
-      break;
-    }
-  }
-
-  // If no non-linked workspace found, use the topmost workspace
-  if (!appRoot) {
-    for (let i = candidateRoots.length - 1; i >= 0; i--) {
-      if (candidateRoots[i].hasWorkspaces) {
-        appRoot = candidateRoots[i].path;
-        break;
-      }
-    }
-  }
-
-  return appRoot;
-}
-
-/**
  * Print the discovery result in full: what will be built, and every package
  * that was found and will not be. Nothing is discovered silently.
  */
@@ -1068,7 +1011,7 @@ export async function buildAll(options): Promise<void> {
     'Building all linked packages of this repository in order of dependencies',
   );
 
-  const plan = planBuildAll('./', findAppRoot() || undefined);
+  const plan = planBuildAll('./', findWorkspaceRoot(process.cwd()) ?? undefined);
   printBuildAllPlan(plan);
 
   if (plan.build.size === 0) {

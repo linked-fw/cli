@@ -18,6 +18,8 @@ export {
   INSTALL_ARGS,
   REPOS_DIR,
   LEGACY_MANIFEST,
+  LOCKFILE,
+  SETUP_LOCK_ARGS,
 } from './localize.js';
 export type {LocalizeOptions, Prepared, Prepare} from './localize.js';
 export {adopt, localizeParked} from './adopt.js';
@@ -39,7 +41,9 @@ export {
   WORKSPACE_GLOB,
 } from './app-setup.js';
 export type {SetupChange} from './app-setup.js';
-export {HOOK_MARKER, GIT_HOOKS, installGitHooks} from './git-hooks.js';
+export {HOOK_MARKER, GIT_HOOKS, installGitHooks, hookLine} from './git-hooks.js';
+export type {GitHook, HookInstall, ManualHook} from './git-hooks.js';
+export {findAppRoot, findWorkspaceRoot} from './app-root.js';
 export {resolvePackage, normalizeGitUrl, checkoutNameFor} from './resolve.js';
 export {defaultDeps, makeRun} from './run.js';
 export {

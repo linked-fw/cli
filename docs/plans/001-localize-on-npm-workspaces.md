@@ -881,6 +881,55 @@ lines printed; purge refuses on git failure / no `.git` / stash / unpushed branc
 **Quick gate:** tsc; `tests/unit/localize tests/unit/localizeCommand.test.ts tests/unit/createPackage`;
 `npm run build`.
 
+**Result:** `src/localize/app-root.ts` (new): `findWorkspaceRoot(start)` (topmost ancestor with
+`workspaces`, preferring a non-`linkedPackage` one; unreadable `package.json` skipped; no 10-level
+cap) and `findAppRoot(start)` (that, else `start`); `cli-methods.ts`'s private copy removed
+(`build-all` keeps its null case through `findWorkspaceRoot`); `commands/localize.ts` (localize,
+`--list`, delocalize) and the drift `preAction` use `findAppRoot(cwd)`. `git-hooks.ts`:
+`installGitHooks` returns `{written, skipped, manual, hooksPath, sharedWithWorktrees}`; with
+`core.hooksPath` set it writes nothing and returns per hook the file (`.husky/<hook>` for
+husky's `.husky/_`) and a one-line subshell (`hookLine`); `--git-dir` ≠ `--git-common-dir` sets
+`sharedWithWorktrees`. The shim records `--show-prefix` (single-quoted, survives spaces and
+quotes), exports `GIT_WORK_TREE=$PWD` when `GIT_DIR` is set without it (measured: with a relative
+`GIT_DIR` and no work tree, git took the app dir for the top level after the `cd`), makes
+`GIT_DIR`/`GIT_INDEX_FILE`/`GIT_WORK_TREE` absolute against the hook's start directory, then `cd`s
+to the app. `localize.ts`: `reportHooks` prints skipped hooks, the `core.hooksPath` header plus one
+`file:` / line pair per hook, and one worktree warning; set-up capture (`captureSetupLockfile`)
+runs `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` right after
+`ensureAppSetup` when it changed `package.json`, before any clone, moving an existing
+`packages-local/` aside to `.packages-local.setup` for that call (adopt / create-package), and
+`installAndBuild(…, setupLock)` writes it back after the install (also when the install failed)
+and prints the `git add package.json package-lock.json .gitignore && git commit` line; on failure
+the manual delocalize/install/commit/`--parked` steps are printed. `delocalize --purge` fails
+closed (exit 6, `EXIT_REFUSED`): no `.git`, any failing git call, `status --porcelain`,
+`log --branches --not --remotes`, `stash list`; `--force` overrides ("although …"); a refused park
+stays 5. `errors.ts` comments, `cli.ts` help (`--location`, localize, `--purge`, `--force`),
+changeset (guarded command, one-step set-up, app root, hooks, purge 5→6, removed deep imports —
+each checked against `origin/main`), `docs/localize.md` (guarded command, index-first restore,
+in-process drift on tree change, workspace manifests, app root, one-step set-up + manual fallback,
+new "Git hooks" and "Purge" sections, CI grep = CN's, exit codes) and README. Tests:
+`app-root.test.ts` (3), `purge.test.ts` (6, real git: pushed → deletes; no `.git`, failing git
+shim on PATH, dirty, commit on another branch, stash → 6; `--force`), `git-hooks.test.ts` +4 (app
+in `my apps/it's web`: shim run with relative `GIT_DIR`/`GIT_INDEX_FILE` and via a real
+`git checkout`; real commit refused by the real pre-commit from the subdirectory; husky
+`core.hooksPath` → nothing written, three lines printed, the line run under `sh -e`; worktree
+warning once), `commands.test.ts` +3 (capture written back, fallback on npm failure, no capture
+when set up), `adopt.test.ts` (capture with the checkout moved aside), `localizeCommand.test.ts`
++1 (from `packages/foo` all three commands get the app root), `real-localize` +1 (first localize
+in an un-set-up app: `git status --porcelain` is exactly ` M .gitignore`, ` M package-lock.json`,
+` M package.json`; the lockfile diff is one hunk: `hasInstallScript`, `workspaces`,
+`packages-local/*`). The stubbed suites now start from a set-up app unless a test is about
+set-up. Mutations (no env fix in the shim; no write-back) each caught. Validation:
+`npx tsc -p tsconfig-esm.json --noEmit` exit 0; `npx jest --config jest.config.cjs
+tests/unit/localize tests/unit/localizeCommand.test.ts tests/unit/createPackage tests/unit/buildAll`
+20 suites / 232 tests passed; `npm run test:unit` 65 suites / 729 tests passed (11.6 s);
+`npm run build` exit 0; `npx changeset status`: `@_linked/cli` minor. Notes for P10: the set-up
+capture needs registry access (a lockfile-only resolve); in CN the first install prints
+lock-at-rest's "package.json differs from HEAD" warning before localize writes the set-up
+lockfile back — expected, and said so; check the husky lines by pasting one into a real
+`.husky/post-merge`; a purge of a checkout created by `create-package` without a remote is now
+refused (its first commit is on no remote).
+
 ### P9 — CN follow-ups
 Findings 2, 6 (scripts), 12, 13, 14, 15. **Quick gate:** package.json parses; manifests grep; YAML
 parses; stale-reference grep; `bash -n scripts/ci-local.sh`.

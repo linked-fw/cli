@@ -79,7 +79,7 @@ linked create-package @_linked/foo --remote <git-url> [--push] # the same, with 
 - `packages-local/_linked-foo` — the name `linked localize` uses. `git init` and a first commit,
   `origin` and `repository.url` from `--remote`, pushed with `--push`; then handed to
   `linked localize --adopt`, which sets the app up for checkouts if needed (`packages-local/*` in
-  `workspaces`, the lock-at-rest hook, `.gitignore`; commit those), installs at the app root so npm
+  `workspaces`, the lock-at-rest hook, `.gitignore` and the matching lockfile; commit those), installs at the app root so npm
   links it as a workspace member, and builds it. It is not added to the app's `dependencies` until
   it is published. `--remote` or `--push` imply this location.
 
@@ -265,9 +265,9 @@ linked app-doctor                 # in an app: check optimizeDeps.include and Re
 
 `linked localize` clones an npm dependency into `packages-local/`, which the app lists in its
 `workspaces` (`"packages-local/*"`), so npm links and dedupes the checkout like any workspace
-member. A hook the app's `postinstall` and `dependencies` scripts run
-(`node node_modules/@_linked/cli/hooks/lock-at-rest.cjs`) puts the committed `package-lock.json`
-back after every install, so the working tree stays clean and CI, which has no checkouts,
+member. A hook the app's `postinstall` and `dependencies` scripts run (`hooks/lock-at-rest.cjs`
+in this package, called through a guard that does nothing where the cli is not installed) puts the
+committed `package-lock.json` back after every install, so the working tree stays clean and CI, which has no checkouts,
 installs from the registry as always. Full guide: [docs/localize.md](docs/localize.md).
 
 ```bash
@@ -277,17 +277,19 @@ linked localize                        # checkouts, parked checkouts and drift (
 linked localize --list --check         # print only the drift; exit 1 when there is any
 linked delocalize @_linked/rdfs        # park it in .packages-local.parked/, back to the registry copy
 linked localize --parked               # take every parked checkout back
-linked delocalize @_linked/rdfs --purge  # delete it instead (refuses on unsaved work)
+linked delocalize @_linked/rdfs --purge  # delete it instead (exit 6 on unsaved work on any branch, a stash, or git failing)
 ```
 
 The first `linked localize` in an app sets it up — `"packages-local/*"` in `workspaces`, the
 lock-at-rest hook in `postinstall` and `dependencies`, `packages-local/` and
-`.packages-local.parked/` in `.gitignore` — and prints what it changed. Commit that with a
-lockfile from an install with no checkout present (`linked delocalize`, `npm install`, commit,
-`linked localize --parked`; [details](docs/localize.md#set-up)). It also writes git hooks into the
-clone: `pre-commit` refuses a manifest that names a checkout, and `post-merge`/`post-checkout` run
-`npm install` when dependencies changed. Use `npm install`, not `npm ci`, while checkouts are
-present.
+`.packages-local.parked/` in `.gitignore`, and the matching lockfile (made before anything is
+cloned) — so `git status` then shows exactly `package.json`, `package-lock.json` and `.gitignore`
+to commit ([details](docs/localize.md#set-up)). Run it anywhere in the app: it acts on the topmost
+directory whose `package.json` has `workspaces`. It also writes git hooks into the clone:
+`pre-commit` refuses a manifest that names a checkout, and `post-merge`/`post-checkout` run
+`npm install` when dependencies changed. They work for an app below the git top level; under
+`core.hooksPath` (husky) localize writes nothing and prints the line to add to each hook. Use
+`npm install`, not `npm ci`, while checkouts are present.
 
 **Drift.** npm links a checkout whatever its version. `--list` and the check before `linked start`,
 `script`, `call` and `build-all` report a range a checkout misses, a second copy of a localized

@@ -14,11 +14,14 @@
  *      in `packages-local/` (npm fails with `EOVERRIDE` on a member's name);
  *      nothing is changed then;
  *   2. the one-time app setup (app-setup.ts), reported line by line so the
- *      developer commits it;
+ *      developer commits it; when it changed `package.json`, the lockfile
+ *      that goes with it is made now, before anything is cloned, and written
+ *      back after the install (`captureSetupLockfile`);
  *   3. per name: a parked checkout (`linked delocalize`) moves back; an
  *      existing directory is refused with an `--adopt` hint; anything else is
  *      resolved through the registry's `repository` (or `--repo`) and cloned;
- *   4. the git hooks (git-hooks.ts);
+ *   4. the git hooks (git-hooks.ts), or the lines to add under
+ *      `core.hooksPath`;
  *   5. ONE `npm install` at the app root -- a checkout's dependencies arrive
  *      with it, so it comes before any build;
  *   6. build each new checkout: `--build`, else `linked build`, else for the
@@ -51,10 +54,11 @@ import {
 } from './errors.js';
 import {existsOrLink, moveEntry, readJson} from './fsops.js';
 import {installGitHooks} from './git-hooks.js';
+import type {HookInstall} from './git-hooks.js';
 import {LOCAL_DIR, localMembers, parkedMembers, PARKED_DIR} from './members.js';
 import type {Member} from './members.js';
 import {checkoutNameFor, resolvePackage} from './resolve.js';
-import type {Deps} from './run.js';
+import type {Deps, RunResult} from './run.js';
 
 /** What a new checkout is built with when `--build` does not say. */
 export const DEFAULT_BUILD_COMMAND = 'linked build';
@@ -65,6 +69,8 @@ export const CLI_BUILD_COMMAND = 'npm run build';
 export const INSTALL_ARGS = ['install', '--no-audit', '--no-fund'];
 /** Where a cloned monorepo lives, inside `packages-local/` but outside its glob. */
 export const REPOS_DIR = `${LOCAL_DIR}/.repos`;
+/** The app's lockfile, kept clean of checkouts. */
+export const LOCKFILE = 'package-lock.json';
 /** What an app recorded checkouts in before they were workspace members. */
 export const LEGACY_MANIFEST = 'local-packages.json';
 
@@ -117,6 +123,7 @@ export function runLocalize(
   prepare: Prepare,
 ): number {
   legacyManifestHint(deps);
+  let setupLock: string | undefined;
   try {
     checkDir(opts.dir);
     // The checkouts already there count too: the one install below covers them all.
@@ -136,7 +143,10 @@ export function runLocalize(
         EXIT_REFUSED,
       );
     }
-    reportSetup(ensureAppSetup(deps.appRoot), deps);
+    const changes = ensureAppSetup(deps.appRoot);
+    reportSetup(changes, deps);
+    if (changes.some((c) => c.file === 'package.json'))
+      setupLock = captureSetupLockfile(changes, deps) ?? undefined;
   } catch (e) {
     return reportError(e, deps);
   }
@@ -151,27 +161,30 @@ export function runLocalize(
       code = Math.max(code, reportError(e, deps));
     }
   }
-  if (!prepared.length) return code;
-  return Math.max(code, installAndBuild(prepared, opts, deps));
+  if (!prepared.length) {
+    // Nothing was installed: the work tree holds the set-up's lockfile as captured.
+    if (setupLock !== undefined) commitHint(deps);
+    return code;
+  }
+  return Math.max(code, installAndBuild(prepared, opts, deps, setupLock));
 }
 
-/** Steps 4-6: git hooks, one root install, then the builds. */
+/**
+ * Steps 4-6: git hooks, one root install, then the builds. `setupLock` is the
+ * lockfile the set-up captured (see `captureSetupLockfile`), written back
+ * over what the install left.
+ */
 export function installAndBuild(
   prepared: Prepared[],
   opts: Pick<LocalizeOptions, 'build'>,
   deps: Deps,
+  setupLock?: string,
 ): number {
-  const hooks = installGitHooks(deps.appRoot);
-  for (const file of hooks.skipped) {
-    deps.warn(
-      `[localize] ${path.relative(deps.appRoot, file)} is not ours, so it was left alone. Without ` +
-        `the localize hook there, run \`npm install\` yourself after a pull or branch switch that ` +
-        `changes dependencies.`,
-    );
-  }
+  reportHooks(installGitHooks(deps.appRoot), deps);
 
   deps.log(`[localize] npm ${INSTALL_ARGS.join(' ')} (app root)`);
   const install = deps.run('npm', INSTALL_ARGS, {cwd: deps.appRoot});
+  if (setupLock !== undefined) restoreSetupLockfile(setupLock, deps);
   if (install.status !== 0) {
     deps.error(
       `[localize] npm install failed at the app root. The checkout${prepared.length === 1 ? ' stays' : 's stay'} ` +
@@ -333,6 +346,125 @@ function reportSetup(changes: SetupChange[], deps: Deps): void {
   if (!changes.length) return;
   deps.log(`[localize] set up this app for checkouts (commit these):`);
   for (const c of changes) deps.log(`  ${c.file}: ${c.what}`);
+}
+
+/** What `captureSetupLockfile` runs: the lockfile for the new `package.json`, nothing installed. */
+export const SETUP_LOCK_ARGS = [
+  'install',
+  '--package-lock-only',
+  '--ignore-scripts',
+  '--no-audit',
+  '--no-fund',
+];
+
+/**
+ * The set-up changed `package.json`, so the lockfile must change with it
+ * (the root entry's `workspaces`) -- and it must be a lockfile with no
+ * checkout in it, which the install below cannot give: it lists them, and
+ * lock-at-rest leaves it so while `package.json` differs from HEAD. So,
+ * before anything is cloned, ask npm for the lockfile alone, keep it, and
+ * write it back after the install. Checkouts already in `packages-local/` (an
+ * adopted one) are moved aside for that one call.
+ *
+ * @returns the lockfile to write back, or null when it could not be made (the
+ *   manual steps are printed instead).
+ */
+function captureSetupLockfile(
+  changes: SetupChange[],
+  deps: Deps,
+): string | null {
+  const local = path.join(deps.appRoot, LOCAL_DIR);
+  const aside = path.join(deps.appRoot, `.${LOCAL_DIR}.setup`);
+  const lockfile = path.join(deps.appRoot, LOCKFILE);
+  const moveAside = localMembers(deps.appRoot).length > 0;
+  if (moveAside && existsOrLink(aside)) {
+    manualSetupSteps(changes, `${path.basename(aside)}/ is in the way`, deps);
+    return null;
+  }
+  deps.log(`[localize] npm ${SETUP_LOCK_ARGS.join(' ')} (the set-up's lockfile)`);
+  if (moveAside) fs.renameSync(local, aside);
+  let r: RunResult;
+  try {
+    r = deps.run('npm', SETUP_LOCK_ARGS, {cwd: deps.appRoot});
+  } finally {
+    if (moveAside) fs.renameSync(aside, local);
+  }
+  let text: string | null = null;
+  try {
+    text = fs.readFileSync(lockfile, 'utf8');
+  } catch {
+    /* none written */
+  }
+  if (r.status !== 0 || text === null) {
+    manualSetupSteps(
+      changes,
+      r.status !== 0
+        ? `npm could not write it:\n${tail(r.stderr || r.stdout)}`
+        : `npm wrote no ${LOCKFILE}`,
+      deps,
+    );
+    return null;
+  }
+  return text;
+}
+
+/** Put the captured set-up lockfile back after the install rewrote it. */
+function restoreSetupLockfile(text: string, deps: Deps): void {
+  fs.writeFileSync(path.join(deps.appRoot, LOCKFILE), text);
+  deps.log(
+    `[localize] ${LOCKFILE}: put back the set-up's lockfile, which lists no checkout (any ` +
+      `lock-at-rest warning above was about the one the install wrote).`,
+  );
+  commitHint(deps);
+}
+
+function commitHint(deps: Deps): void {
+  deps.log(
+    `[localize] commit the set-up now -- package.json, ${LOCKFILE}, .gitignore:\n` +
+      `  git add package.json ${LOCKFILE} .gitignore && git commit -m "chore: set up linked localize"`,
+  );
+}
+
+/** The set-up's lockfile could not be made in one step: how to make it by hand. */
+function manualSetupSteps(
+  changes: SetupChange[],
+  why: string,
+  deps: Deps,
+): void {
+  const files = [...new Set([...changes.map((c) => c.file), LOCKFILE])];
+  deps.warn(
+    `[localize] could not make the set-up's ${LOCKFILE} in one step: ${why}\n` +
+      `Commit the set-up with a lockfile from an install with no checkout present:\n` +
+      `  npx linked delocalize\n` +
+      `  npm install\n` +
+      `  git add ${files.join(' ')} && git commit -m "chore: set up linked localize"\n` +
+      `  npx linked localize --parked`,
+  );
+}
+
+/** Tell the developer what `installGitHooks` did not do. */
+function reportHooks(hooks: HookInstall, deps: Deps): void {
+  for (const file of hooks.skipped) {
+    deps.warn(
+      `[localize] ${path.relative(deps.appRoot, file)} is not ours, so it was left alone. Without ` +
+        `the localize hook there, run \`npm install\` yourself after a pull or branch switch that ` +
+        `changes dependencies.`,
+    );
+  }
+  if (hooks.hooksPath !== null) {
+    deps.warn(
+      `[localize] core.hooksPath is set (${hooks.hooksPath}), so no git hooks were written. Add ` +
+        `each line below to the hook named before it (they do nothing where the cli is not ` +
+        `installed):`,
+    );
+    for (const m of hooks.manual) deps.warn(`  ${m.file}:\n    ${m.line}`);
+  }
+  if (hooks.sharedWithWorktrees) {
+    deps.warn(
+      `[localize] this is a linked worktree: git hooks are shared by every worktree of the ` +
+        `repository. They act only in a work tree whose ${LOCAL_DIR}/ has checkouts.`,
+    );
+  }
 }
 
 /**

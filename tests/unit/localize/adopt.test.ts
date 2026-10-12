@@ -12,11 +12,17 @@ import path from 'node:path';
 import {adopt, localizeParked} from '../../../src/localize/adopt.js';
 import {localize} from '../../../src/localize/localize.js';
 import {makeRun} from '../../../src/localize/run.js';
+import {ensureAppSetup} from '../../../src/localize/app-setup.js';
 import {makeConsumer, ok, rm, stubbed, test} from './helpers.js';
 
-const consumer = (t, pkg = {}) => {
+/**
+ * An app, already set up for checkouts unless `setUp: false` -- the set-up
+ * and the lockfile it captures have tests of their own.
+ */
+const consumer = (t, pkg = {}, {setUp = true} = {}) => {
   const root = makeConsumer({pkg});
   t.after(() => rm(root));
+  if (setUp) ensureAppSetup(root);
   return root;
 };
 
@@ -42,9 +48,14 @@ const branchMain = (inv) =>
   inv.cmd === 'git' && inv.args[0] === 'symbolic-ref' ? ok('main\n') : ok();
 
 test('adopt sets up, installs at the root and builds the checkout -- without cloning or pulling', (t) => {
-  const appRoot = consumer(t);
+  const appRoot = consumer(t, {}, {setUp: false});
   seed(appRoot, 'scope-thing', {name: '@scope/thing', version: '1.0.0'});
-  const deps = stubbed(appRoot, branchMain);
+  let seenByLockOnly: boolean | null = null;
+  const deps = stubbed(appRoot, (inv) => {
+    if (inv.args.includes('--package-lock-only'))
+      seenByLockOnly = fs.existsSync(path.join(appRoot, 'packages-local/scope-thing'));
+    return branchMain(inv);
+  });
 
   assert.equal(adopt(['@scope/thing'], {}, deps), 0, deps.output());
 
@@ -56,10 +67,15 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
       .filter((c) => c.cmd !== 'git')
       .map((c) => `${c.cmd} ${c.args.join(' ')}@${path.relative(appRoot, c.cwd)}`),
     [
+      // The set-up's lockfile, made with the checkout moved aside.
+      'npm install --package-lock-only --ignore-scripts --no-audit --no-fund@',
       'npm install --no-audit --no-fund@',
       'linked build @packages-local/scope-thing',
     ],
   );
+  assert.equal(seenByLockOnly, false, 'npm made the set-up lockfile without the checkout');
+  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/scope-thing/package.json')), 'moved back');
+  assert.equal(fs.existsSync(path.join(appRoot, '.packages-local.setup')), false);
   const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
   assert.deepEqual(pkg.workspaces, ['packages-local/*']);
   assert.match(deps.output(), /@scope\/thing -> packages-local\/scope-thing \(branch main\)/);

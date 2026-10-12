@@ -6,6 +6,7 @@
  */
 import type {Command} from 'commander';
 
+import {findAppRoot} from './app-root.js';
 import {describeDrift, driftProblems} from './drift.js';
 
 /** `linked start`, `script`, `call` and `build-all`, and nothing else. */
@@ -30,7 +31,8 @@ export function reportDrift(
 }
 
 /**
- * Before one of `DRIFT_COMMANDS`, report drift. Silent when there is none or
+ * Before one of `DRIFT_COMMANDS`, report drift for the app the command runs
+ * in (its workspace root, not the member it may run from). Silent when there is none or
  * nothing is installed; never fails the command.
  */
 export function installDriftHook(
@@ -40,7 +42,7 @@ export function installDriftHook(
   program.hook('preAction', (_program, actionCommand) => {
     if (!DRIFT_COMMANDS.has(actionCommand.name())) return;
     try {
-      report(process.cwd());
+      report(findAppRoot(process.cwd()));
     } catch {
       /* never fails the command */
     }

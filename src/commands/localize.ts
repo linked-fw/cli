@@ -9,6 +9,10 @@
  * `repository`, or `--repo`/`--subdir`), adopts (`--adopt`), parks
  * (`delocalize`), takes back (`--parked`) and reports (`--list`, drift).
  *
+ * Both commands act on the app root (app-root.ts): the topmost directory
+ * whose `package.json` has `workspaces`, so running them inside a workspace
+ * member still sets up and installs the app.
+ *
  * Packages are named exactly as npm names them (`@_linked/rdfs`, `lodash`).
  * There is no short-name expansion and no org probing: a name that npm cannot
  * resolve is an error rather than a guess.
@@ -18,6 +22,7 @@
  */
 import process from 'node:process';
 
+import {findAppRoot} from '../localize/app-root.js';
 import {
   adopt,
   defaultDeps,
@@ -69,7 +74,7 @@ export async function runLocalize(
     process.exitCode = 0;
     return;
   }
-  const deps = defaultDeps(process.cwd());
+  const deps = defaultDeps(findAppRoot(process.cwd()));
   const usage = (message: string) => {
     console.error(`[localize] ${message}`);
     process.exitCode = 2;
@@ -125,7 +130,7 @@ export async function runDelocalize(
   packages: string[] = [],
   options: Pick<LocalizeCommandOptions, 'purge' | 'force'> = {},
 ): Promise<void> {
-  const deps = defaultDeps(process.cwd());
+  const deps = defaultDeps(findAppRoot(process.cwd()));
   process.exitCode = delocalize(
     packages,
     {purge: options.purge, force: options.force},

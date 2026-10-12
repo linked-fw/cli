@@ -157,7 +157,7 @@ const reportRefusal = (e: unknown) => {
 };
 
 const LOCATION_HELP =
-  "packages: part of this app's repository, a workspace member added to its dependencies. packages-local: its own git repository (git init + a first commit), linked and recorded by `linked localize` and not added to the app's dependencies until it is published.";
+  "packages: part of this app's repository, a workspace member added to its dependencies. packages-local: its own git repository (git init + a first commit) in packages-local/, which the app gitignores; a workspace member through the app's \"packages-local/*\" glob, so npm links it (`linked localize --adopt` sets the app up and installs). Not added to the app's dependencies until it is published.";
 const REMOTE_HELP =
   "The new repository's origin; also written to repository.url. Implies --location packages-local.";
 const PUSH_HELP = 'Push the first commit to --remote.';
@@ -520,7 +520,7 @@ program
 program
   .command('localize [packages...]')
   .description(
-    'Develop an npm dependency from a git checkout in packages-local/, which the app lists in its workspaces so npm links it. Clones each package (the repository comes from its published `repository` field), sets the app up the first time (workspaces glob, lock-at-rest hook, .gitignore; commit those), installs git hooks, runs one npm install at the app root and builds the new checkouts. Name packages exactly as npm names them (@_linked/rdfs, lodash). With no names, reports what is localized.',
+    'Develop an npm dependency from a git checkout in packages-local/, which the app lists in its workspaces so npm links it. Clones each package (the repository comes from its published `repository` field), sets the app up the first time (workspaces glob, lock-at-rest hook, .gitignore and the matching lockfile; commit those), installs git hooks (or, under core.hooksPath, prints the line to add to each), runs one npm install at the app root and builds the new checkouts. The app root is the topmost directory whose package.json has workspaces, so it can run from inside a member. Name packages exactly as npm names them (@_linked/rdfs, lodash). With no names, reports what is localized.',
   )
   .option(
     '--list',
@@ -572,10 +572,13 @@ program
   .description(
     'Park checkouts: move them from packages-local/ to .packages-local.parked/, then reinstall the registry copies (npm ci when no checkout remains, else npm install and npm rebuild). `linked localize <name>` or `--parked` takes them back. With no names, parks every checkout.',
   )
-  .option('--purge', 'Delete the checkout instead of parking it.')
+  .option(
+    '--purge',
+    'Delete the checkout instead of parking it. Refuses (exit 6) on unsaved work, or when it is not a git repository or git fails.',
+  )
   .option(
     '--force',
-    'With --purge, delete even a checkout with uncommitted or unpushed work.',
+    'With --purge, delete even a checkout with unsaved work (uncommitted changes, commits on a branch no remote has, a stash) or one git cannot check.',
   )
   .action(async (packages: string[], options) => {
     const {runDelocalize} = await import('./commands/localize.js');

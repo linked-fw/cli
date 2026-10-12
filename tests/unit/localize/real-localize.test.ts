@@ -13,7 +13,9 @@
  *      lockfile back, so `git status --porcelain` is empty.
  *
  * Then the round trip: delocalize parks the checkout and `npm ci` restores the
- * registry tree, and localize takes it back, all with a clean tree.
+ * registry tree, and localize takes it back, all with a clean tree. And the
+ * first localize in an app not set up yet: the work tree then holds exactly
+ * the set-up to commit, its lockfile hunk included.
  *
  * The hook is run from this repository (`hooks/lock-at-rest.cjs`) by absolute
  * path: the fixture app has no `node_modules/@_linked/cli` to run it from.
@@ -202,6 +204,58 @@ test(
       'no clone left in packages-local/',
     );
     assert.equal(fs.existsSync(path.join(appRoot, 'node_modules', name)), false);
+  },
+  SLOW,
+);
+
+test(
+  'slow: a first localize in an app not yet set up leaves exactly the set-up to commit',
+  (t) => {
+    const scratch = tmpdir('localize-fixture-');
+    const {repoUrl, depName, depTarball, name} = buildFixtureRepo(scratch);
+    const appRoot = makeConsumer({
+      pkg: {dependencies: {[depName]: `file:${depTarball}`}},
+    });
+    t.after(() => {
+      rm(scratch);
+      rm(appRoot);
+    });
+    fs.writeFileSync(path.join(appRoot, '.gitignore'), 'node_modules/\n');
+    execFileSync('npm', ['install', '--no-audit', '--no-fund'], {
+      cwd: appRoot,
+      env: scrubbedNpmEnv(),
+      stdio: 'pipe',
+    });
+    git(appRoot, 'init', '-q', '-b', 'main');
+    git(appRoot, 'add', '-A');
+    git(appRoot, 'commit', '-q', '-m', 'app');
+
+    const deps = realDeps(appRoot);
+    const code = localize([name], {repo: repoUrl, build: ''}, deps);
+    assert.equal(code, 0, deps.output());
+    assert.match(deps.output(), /set up this app for checkouts/);
+    assert.match(deps.output(), /put back the set-up's lockfile/);
+    assert.ok(
+      fs.lstatSync(path.join(appRoot, 'node_modules', name)).isSymbolicLink(),
+      'and the checkout is linked',
+    );
+
+    assert.deepEqual(
+      status(appRoot).split('\n').filter(Boolean).sort(),
+      [' M .gitignore', ' M package-lock.json', ' M package.json'],
+    );
+    const lockDiff = git(appRoot, 'diff', '-U0', '--', 'package-lock.json');
+    // Only the root entry's set-up hunk: the glob, and the install script the hook added.
+    const changed = lockDiff
+      .split('\n')
+      .filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l))
+      .map((l) => l.replace(/\s+/g, ''));
+    assert.deepEqual(
+      changed,
+      ['+"hasInstallScript":true,', '+"workspaces":[', '+"packages-local/*"', '+],'],
+      lockDiff,
+    );
+    assert.equal((lockDiff.match(/^@@/gm) ?? []).length, 1, 'one hunk');
   },
   SLOW,
 );

@@ -10,11 +10,17 @@ import path from 'node:path';
 import {localize} from '../../../src/localize/localize.js';
 import {delocalize} from '../../../src/localize/delocalize.js';
 import {list} from '../../../src/localize/list.js';
+import {ensureAppSetup} from '../../../src/localize/app-setup.js';
 import {fail, makeConsumer, ok, rm, stubbed, test} from './helpers.js';
 
-const consumer = (t, pkg = {}) => {
+/**
+ * An app, already set up for checkouts unless `setUp: false` -- the set-up
+ * and the lockfile it captures have tests of their own.
+ */
+const consumer = (t, pkg = {}, {setUp = true} = {}) => {
   const root = makeConsumer({pkg});
   t.after(() => rm(root));
+  if (setUp) ensureAppSetup(root);
   return root;
 };
 
@@ -57,13 +63,14 @@ const trace = (deps, appRoot) =>
 // --- localize --------------------------------------------------------------
 
 test('localize clones, sets up, installs once at the root, then builds', (t) => {
-  const appRoot = consumer(t, {dependencies: {'@x/a': '^1.0.0'}});
+  const appRoot = consumer(t, {dependencies: {'@x/a': '^1.0.0'}}, {setUp: false});
   const deps = cloning(appRoot, {name: '@x/a'});
 
   const code = localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps);
 
   assert.equal(code, 0, deps.output());
   assert.deepEqual(trace(deps, appRoot), [
+    'npm install --package-lock-only --ignore-scripts --no-audit --no-fund @ .',
     'git clone https://example.invalid/a.git packages-local/x-a @ -',
     'npm install --no-audit --no-fund @ .',
     'linked build @ packages-local/x-a',
@@ -77,6 +84,68 @@ test('localize clones, sets up, installs once at the root, then builds', (t) => 
   );
   assert.match(deps.output(), /commit these/);
   assert.match(deps.output(), /@x\/a -> packages-local\/x-a \(branch main\)/);
+});
+
+/** A runner that writes `package-lock.json` as npm would: `lockOnly` for the set-up call, `installed` for the install. */
+function writingLockfile(appRoot, {lockOnly, installed}) {
+  const lockfile = path.join(appRoot, 'package-lock.json');
+  return cloning(appRoot, {name: '@x/a'}, (inv) => {
+    if (inv.cmd !== 'npm' || inv.args[0] !== 'install') return undefined;
+    if (inv.args.includes('--package-lock-only')) {
+      // npm sees no checkout: the set-up moved none in yet.
+      assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/x-a')), false);
+      if (lockOnly === null) return fail('npm ERR! ENOTFOUND registry');
+      fs.writeFileSync(lockfile, lockOnly);
+    } else {
+      fs.writeFileSync(lockfile, installed);
+    }
+    return ok();
+  });
+}
+
+test('first set-up: the lockfile npm makes before the clone is written back after the install', (t) => {
+  const appRoot = consumer(t, {}, {setUp: false});
+  const lockfile = path.join(appRoot, 'package-lock.json');
+  fs.writeFileSync(lockfile, '{"before": true}\n');
+  const setupLock = '{"workspaces": ["packages-local/*"]}\n';
+  const deps = writingLockfile(appRoot, {
+    lockOnly: setupLock,
+    installed: '{"packages": {"packages-local/x-a": {}}}\n',
+  });
+
+  assert.equal(localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps), 0, deps.output());
+
+  assert.deepEqual(trace(deps, appRoot).slice(0, 3), [
+    'npm install --package-lock-only --ignore-scripts --no-audit --no-fund @ .',
+    'git clone https://example.invalid/a.git packages-local/x-a @ -',
+    'npm install --no-audit --no-fund @ .',
+  ]);
+  assert.equal(fs.readFileSync(lockfile, 'utf8'), setupLock, 'the set-up lockfile, not the install\'s');
+  assert.match(deps.output(), /put back the set-up's lockfile/);
+  assert.match(deps.output(), /git add package\.json package-lock\.json \.gitignore/);
+  assert.doesNotMatch(deps.output(), /npx linked delocalize/);
+});
+
+test('first set-up: when npm cannot make the lockfile, the manual steps are printed and nothing is written back', (t) => {
+  const appRoot = consumer(t, {}, {setUp: false});
+  const installed = '{"packages": {"packages-local/x-a": {}}}\n';
+  const deps = writingLockfile(appRoot, {lockOnly: null, installed});
+
+  assert.equal(localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps), 0, deps.output());
+
+  assert.equal(fs.readFileSync(path.join(appRoot, 'package-lock.json'), 'utf8'), installed);
+  assert.match(deps.output(), /could not make the set-up's package-lock\.json in one step/);
+  assert.match(deps.output(), /ENOTFOUND/);
+  assert.match(deps.output(), /npx linked delocalize\n {2}npm install\n/);
+  assert.match(deps.output(), /npx linked localize --parked/);
+});
+
+test('an app already set up makes no set-up lockfile', (t) => {
+  const appRoot = consumer(t);
+  const deps = cloning(appRoot, {name: '@x/a'});
+  assert.equal(localize(['@x/a'], {repo: 'https://example.invalid/a.git'}, deps), 0);
+  assert.equal(deps.calls.some((c) => c.args.includes('--package-lock-only')), false);
+  assert.doesNotMatch(deps.output(), /commit these|set-up/);
 });
 
 test('one install for several names, and a failing build only warns (exit 5)', (t) => {
@@ -282,8 +351,8 @@ test('delocalize --purge refuses on unpushed commits, and --force deletes', (t) 
     inv.cmd === 'git' && inv.args[0] === 'log' ? ok('abc123 wip\n') : undefined;
 
   const deps = stubbed(appRoot, unpushed);
-  assert.equal(delocalize(['@x/a'], {purge: true}, deps), 5);
-  assert.match(deps.output(), /1 unpushed commit/);
+  assert.equal(delocalize(['@x/a'], {purge: true}, deps), 6);
+  assert.match(deps.output(), /1 commit on a branch no remote has/);
   assert.ok(fs.existsSync(dir), 'kept');
   assert.equal(deps.npmCalls().length, 0, 'nothing changed, nothing installed');
 
