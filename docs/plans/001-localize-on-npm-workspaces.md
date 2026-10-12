@@ -292,8 +292,11 @@ manifests:
   glob". **Approved change:** `packages-local/*` joins the globs; the guarantee "localizing never
   changes a committed file" becomes "the committed manifests are restored after every install, and
   hooks plus CI refuse a leaked checkout". `01-domain-model.md` mentions of localize symlinks are
-  updated. No other architecture doc applies (searched `npx semantu-agents docs architecture`
-  summaries: 04–09, 17, 20, 21 do not cover dependency installation).
+  updated. Checked with `npx semantu-agents docs architecture` and a grep for `localize`,
+  `packages-local`, `node_modules` and `docker compose`: `07-infrastructure-and-execution.md`
+  (local dev topology) mentions compose only for ports and Fuseki, so the Docker volume (D10)
+  needs no change there; `12-starter-template-and-cli_draft.md` (CLI consolidation) does not cover
+  localize. No other doc covers dependency installation.
 
 ### Test strategy
 
