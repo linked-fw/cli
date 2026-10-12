@@ -35,7 +35,10 @@ test.beforeAll(async () => {
   fuseki = await new GenericContainer('stain/jena-fuseki')
     .withExposedPorts(3030)
     .withEnvironment({ADMIN_PASSWORD: 'admin'})
-    .withWaitStrategy(Wait.forLogMessage(/Started.*Server/))
+    // Ready when Fuseki answers its own health endpoint, not when a log line matches: the
+    // startup message has changed wording between image versions and silently broke the wait.
+    .withWaitStrategy(Wait.forHttp('/$/ping', 3030).forStatusCode(200))
+    .withStartupTimeout(120_000)
     .start();
   fusekiUrl = `http://${fuseki.getHost()}:${fuseki.getMappedPort(3030)}`;
 
@@ -64,10 +67,10 @@ test.beforeAll(async () => {
   // 4. Install scaffolded app deps from npm. The scaffolded package.json
   // pins @_linked/* versions; install resolves them straight from the
   // registry (no workspace symlinks involved).
-  execSync('yarn install', {cwd: APP_DIR, stdio: 'inherit'});
+  execSync('npm install', {cwd: APP_DIR, stdio: 'inherit'});
 
   // 5. Boot the app with env overrides pointing at the testcontainer Fuseki.
-  appProc = spawn('yarn', ['start'], {
+  appProc = spawn('npm', ['start'], {
     cwd: APP_DIR,
     env: {
       ...process.env,
