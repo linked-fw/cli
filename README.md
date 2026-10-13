@@ -295,10 +295,6 @@ directory whose `package.json` has `workspaces`. It also writes git hooks into t
 `script`, `call` and `build-all` report a range a checkout misses, a second copy of a localized
 package, a nested copy of `@_linked/core`/`react`/`server-utils`, and a checkout that is gone.
 
-`--relink` and `--ensure` are deprecated no-ops that exit 0; `local-packages.json` is no longer
-read. Localize used to be the separate `@_linked/localize` package (binary `linked-localize`),
-which is being retired; `linked localize` replaces it.
-
 ### Registry / dev utilities
 
 ```bash
