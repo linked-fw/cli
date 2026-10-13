@@ -5,7 +5,7 @@ summary: >
   works (glob, lock-at-rest hook, git hooks incl. core.hooksPath/husky and worktrees, drift check),
   the app root (nested worktrees stay their own), the one-step app set-up, what to commit and
   `.setup-aside/` recovery, the missing-hooks notice, commands, purge rules, monorepos (`.repos/`), building (incl. the cli), drift, parking, changing
-  dependencies while localized, Docker/CI, migrating from the old localize, exit codes.
+  dependencies while localized, Docker/CI, exit codes.
 ---
 
 # `linked localize` — develop a dependency from a git checkout
@@ -464,29 +464,6 @@ Some npm behaviour that comes with being a member:
   with that version);
 - npm runs every checkout's `prepare` and `postinstall` on every root install, so keep them cheap;
 - npm warns `allowScripts in workspace … is ignored` for checkouts. Harmless.
-
-## Migrating from the old localize
-
-The previous localize installed inside each checkout, pruned copies, symlinked by hand and
-recorded checkouts in `local-packages.json`. Move every checkout in one step: a checkout still
-holding its own pruned `node_modules` must not sit next to members.
-
-1. Update `@_linked/cli` to this version.
-2. Delete the record and each checkout's own install:
-   `rm -rf local-packages.json packages-local/*/node_modules`. (`local-packages.json` is ignored
-   now; localize prints a one-line hint while it exists.)
-3. A monorepo checkout cloned whole into `packages-local/<checkout>`: move it to
-   `packages-local/.repos/<checkout>` and link `packages-local/<checkout>` to the package inside
-   it (`ln -s .repos/<checkout>/<subdir> packages-local/<checkout>`).
-4. Remove any root `overrides` key on a package you localize (localize refuses with exit 6
-   until you do) and `linked localize --ensure` from `pre*` scripts. `--relink` in `postinstall`
-   is replaced by the set-up.
-5. Take them all in at once: `npx linked localize <every checkout's name> --adopt`. That makes the
-   set-up, runs one `npm install` and builds each checkout.
-6. Commit the set-up: `package.json`, `package-lock.json` and `.gitignore`, as printed. With
-   checkouts present, the set-up's lockfile is an edit of its root entry, or made with them
-   moved into `packages-local/.setup-aside/` for one `npm install --package-lock-only` (see
-   [Set-up](#set-up)); if that fails, use the manual steps printed there.
 
 ## Windows
 

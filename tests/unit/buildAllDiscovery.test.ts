@@ -207,18 +207,4 @@ describe('build-all package discovery', () => {
       '@local/unrelated',
     );
   });
-
-  it('ignores a leftover local-packages.json: only the directories count', () => {
-    makeTree();
-    writeJson(path.join(tmp, 'local-packages.json'), {
-      version: 1,
-      packages: {
-        '@w/unrelated': {path: 'packages/unrelated', branch: 'main'},
-      },
-    });
-    const plan = planBuildAll(tmp, tmp);
-    expect(
-      plan.skipped.find((s) => s.packageName === '@w/unrelated')?.reason,
-    ).toMatch(/dependency tree/);
-  });
 });

@@ -18,7 +18,6 @@ import type {Drift} from './drift.js';
 import {EXIT_DRIFT} from './errors.js';
 import {
   currentBranch,
-  legacyManifestHint,
   reportError,
   restoreSetAside,
 } from './localize.js';
@@ -48,7 +47,6 @@ export function collect(deps: Deps): {rows: ListRow[]; drift: Drift[]} {
 }
 
 export function list(opts: {check?: boolean}, deps: Deps): number {
-  legacyManifestHint(deps);
   try {
     restoreSetAside(deps);
   } catch (e) {

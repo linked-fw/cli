@@ -736,18 +736,6 @@ test('--list says nothing when nothing is localized, and --check exits 0', (t) =
   assert.equal(deps.output(), '');
 });
 
-test('a leftover local-packages.json gets one migration hint and is otherwise ignored', (t) => {
-  const appRoot = consumer(t);
-  fs.writeFileSync(
-    path.join(appRoot, 'local-packages.json'),
-    '{"packages": {"@x/a": {}}}',
-  );
-  const deps = stubbed(appRoot);
-  assert.equal(list({}, deps), 0);
-  assert.equal(deps.warns.length, 1);
-  assert.match(deps.warns[0], /local-packages\.json is no longer read/);
-});
-
 // --- an interrupted set-up -------------------------------------------------
 
 test('checkouts an interrupted set-up left in packages-local/.setup-aside are moved back first', (t) => {
