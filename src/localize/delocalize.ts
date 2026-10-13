@@ -36,7 +36,6 @@ import {
 import {
   INSTALL_ARGS,
   LOCKFILE,
-  legacyManifestHint,
   reportError,
   restoreSetAside,
   tail,
@@ -50,7 +49,6 @@ export function delocalize(
   opts: {purge?: boolean; force?: boolean},
   deps: Deps,
 ): number {
-  legacyManifestHint(deps);
   try {
     restoreSetAside(deps);
   } catch (e) {

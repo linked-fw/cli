@@ -80,8 +80,6 @@ const REPOS_DIR = `${LOCAL_DIR}/.repos`;
 const SETUP_ASIDE_DIR = `${LOCAL_DIR}/.setup-aside`;
 /** The app's lockfile, kept clean of checkouts. */
 export const LOCKFILE = 'package-lock.json';
-/** What an app recorded checkouts in before they were workspace members. */
-const LEGACY_MANIFEST = 'local-packages.json';
 
 export interface LocalizeOptions {
   /** Where checkouts live. Only `packages-local` is accepted: the workspace glob names it. */
@@ -131,7 +129,6 @@ export function runLocalize(
   deps: Deps,
   prepare: Prepare,
 ): number {
-  legacyManifestHint(deps);
   let setupLock: string | undefined;
   try {
     restoreSetAside(deps);
@@ -578,18 +575,6 @@ function reportHooks(hooks: HookInstall, deps: Deps): void {
         `repository. They act only in a work tree whose ${LOCAL_DIR}/ has checkouts.`,
     );
   }
-}
-
-/**
- * One line when an app still has the retired record. It is ignored: the
- * record now is the directories in `packages-local/`.
- */
-export function legacyManifestHint(deps: Pick<Deps, 'appRoot' | 'warn'>): void {
-  if (!fs.existsSync(path.join(deps.appRoot, LEGACY_MANIFEST))) return;
-  deps.warn(
-    `[localize] ${LEGACY_MANIFEST} is no longer read: every directory in ${LOCAL_DIR}/ is ` +
-      `localized, ${PARKED_DIR}/ holds parked ones. Delete the file.`,
-  );
 }
 
 /**
