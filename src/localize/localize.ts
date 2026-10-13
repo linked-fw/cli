@@ -55,7 +55,7 @@ import {
 import {existsOrLink, moveEntry, readJson} from './fsops.js';
 import {installGitHooks} from './git-hooks.js';
 import type {HookInstall} from './git-hooks.js';
-import {LOCAL_DIR, localMembers, parkedMembers, PARKED_DIR} from './members.js';
+import {LOCAL_DIR, localMembers, parkedMembers} from './members.js';
 import {setupLockfileByEdit} from './setup-lockfile.js';
 import type {Member} from './members.js';
 import {checkoutNameFor, resolvePackage} from './resolve.js';
