@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.47.1
+
+### Patch Changes
+
+- [#268](https://github.com/linked-fw/cli/pull/268) [`f4db679`](https://github.com/linked-fw/cli/commit/f4db679591afc51ba5f4a8313d37580c18ee62d9) Thanks [@flyon](https://github.com/flyon)! - `linked localize`, `--list` and `delocalize` no longer warn about a leftover `local-packages.json`. The file was never read by the workspace-based localize; delete it if one is still around. `docs/localize.md` drops its one-time migration section.
+
 ## 1.47.0
 
 ### Minor Changes
