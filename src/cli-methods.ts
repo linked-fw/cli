@@ -1590,7 +1590,12 @@ const replaceVariablesInFolder = async function (
 ): Promise<void> {
   //get all files in folder, including files that start with a dot
   try {
-    const files = await glob(folder + '/**/*', {dot: true, nodir: true});
+    const files = await glob('**/*', {
+      cwd: folder,
+      absolute: true,
+      dot: true,
+      nodir: true,
+    });
     await Promise.all(
       files.map((file) => {
         return replaceVariablesInFile(file);
@@ -3250,7 +3255,11 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
   {
     name: 'Copying files to lib folder',
     apply: async () => {
-      const files = await glob(packagePath + '/src/**/*.{json,d.ts,css,scss}');
+      // Relative to src/ (glob's cwd), so the destination is a plain join: a pattern or a
+      // prefix built from an absolute Windows path would not match.
+      const files = await glob('**/*.{json,d.ts,css,scss}', {
+        cwd: path.join(packagePath, 'src'),
+      });
       let cjsPublished = false;
       try {
         cjsPublished = packagePublishesCjs(
@@ -3261,21 +3270,12 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
       } catch {}
       return Promise.all(
         files.map(async (file) => {
+          const source = path.join(packagePath, 'src', file);
           try {
-            await fs.copy(
-              file,
-              packagePath +
-                '/lib/esm/' +
-                file.replace(packagePath + '/src/', ''),
-            );
+            await fs.copy(source, path.join(packagePath, 'lib', 'esm', file));
             // Only mirror into lib/cjs when there is a CJS build to mirror.
             if (cjsPublished) {
-              await fs.copy(
-                file,
-                packagePath +
-                  '/lib/cjs/' +
-                  file.replace(packagePath + '/src/', ''),
-              );
+              await fs.copy(source, path.join(packagePath, 'lib', 'cjs', file));
             }
             return true;
           } catch (err) {
@@ -4057,7 +4057,7 @@ export const removeOldFiles = async (packagePath) => {
 
   try {
     // Read all files in the 'lib' folder asynchronously
-    const files = await glob(packagePath + '/lib/**/*.*');
+    const files = await glob('**/*.*', {cwd: libPath, absolute: true});
 
     // Iterate through each file
     for (const file of files) {
