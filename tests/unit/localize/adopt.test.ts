@@ -1,30 +1,39 @@
 /**
- * `adopt`, with the subprocess runner stubbed: what it refuses, what it
- * records, and -- the property that distinguishes it from `localize` -- that it
- * never clones, pulls or fetches.
+ * `adopt` and `--parked`, with the subprocess runner stubbed: what adopt
+ * refuses, and -- the property that distinguishes it from `localize` -- that
+ * it never clones, pulls or fetches, but otherwise runs the same setup,
+ * install and build.
  */
 import {spawnSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {adopt} from '../../../src/localize/adopt.js';
+import {adopt, localizeParked} from '../../../src/localize/adopt.js';
 import {localize} from '../../../src/localize/localize.js';
-import {relink} from '../../../src/localize/relink.js';
-import {list} from '../../../src/localize/list.js';
-import {readManifest} from '../../../src/localize/manifest.js';
 import {makeRun} from '../../../src/localize/run.js';
-import {fail, makeConsumer, ok, rm, stubbed, test} from './helpers.js';
+import {ensureAppSetup} from '../../../src/localize/app-setup.js';
+import {makeConsumer, ok, rm, stubbed, test} from './helpers.js';
 
-const consumer = (t, pkg) => {
+/**
+ * An app, already set up for checkouts unless `setUp: false` -- the set-up
+ * and the lockfile it captures have tests of their own.
+ */
+const consumer = (t, pkg = {}, {setUp = true} = {}) => {
   const root = makeConsumer({pkg});
   t.after(() => rm(root));
+  if (setUp) ensureAppSetup(root);
   return root;
 };
 
-/** A checkout under its localize name, e.g. `@scope/thing` -> packages-local/scope-thing. */
-function seed(appRoot, dirName, pkgJson, {git = true} = {}) {
-  const checkout = path.join(appRoot, 'packages-local', dirName);
+/** A checkout in `dir` (default packages-local) under `dirName`. */
+function seed(
+  appRoot,
+  dirName,
+  pkgJson,
+  {git = true, dir = 'packages-local'} = {},
+) {
+  const checkout = path.join(appRoot, dir, dirName);
   fs.mkdirSync(checkout, {recursive: true});
   if (git) fs.mkdirSync(path.join(checkout, '.git'));
   if (pkgJson)
@@ -35,155 +44,114 @@ function seed(appRoot, dirName, pkgJson, {git = true} = {}) {
   return checkout;
 }
 
-/** git answers: a branch, and an origin only when one is given. */
-const gitWith = (origin) => (inv) => {
-  if (inv.args[0] === 'symbolic-ref') return ok('main\n');
-  if (inv.args[0] === 'remote')
-    return origin
-      ? ok(origin + '\n')
-      : fail("error: No such remote 'origin'", 2);
-  return ok();
-};
+const branchMain = (inv) =>
+  inv.cmd === 'git' && inv.args[0] === 'symbolic-ref' ? ok('main\n') : ok();
 
-const linkOf = (appRoot, name) =>
-  fs.realpathSync(path.join(appRoot, 'node_modules', name));
-
-test('adopt installs inside the checkout, links it and records it -- without cloning or pulling', (t) => {
-  const appRoot = consumer(t);
-  const checkout = seed(appRoot, 'scope-thing', {
-    name: '@scope/thing',
-    version: '0.1.0',
+test('adopt sets up, installs at the root and builds the checkout -- without cloning or pulling', (t) => {
+  const appRoot = consumer(t, {}, {setUp: false});
+  seed(appRoot, 'scope-thing', {name: '@scope/thing', version: '1.0.0'});
+  let seenByLockOnly: boolean | null = null;
+  let asideDuringLockOnly: boolean | null = null;
+  const deps = stubbed(appRoot, (inv) => {
+    if (inv.args.includes('--package-lock-only')) {
+      seenByLockOnly = fs.existsSync(
+        path.join(appRoot, 'packages-local/scope-thing'),
+      );
+      asideDuringLockOnly = fs.existsSync(
+        path.join(
+          appRoot,
+          'packages-local/.setup-aside/scope-thing/package.json',
+        ),
+      );
+    }
+    return branchMain(inv);
   });
-  const deps = stubbed(appRoot, gitWith('git@github.com:scope/thing.git'));
 
   assert.equal(adopt(['@scope/thing'], {}, deps), 0, deps.output());
 
-  assert.equal(linkOf(appRoot, '@scope/thing'), fs.realpathSync(checkout));
-  assert.deepEqual(readManifest(appRoot, deps).entries['@scope/thing'], {
-    repo: 'git@github.com:scope/thing.git',
-    path: path.join('packages-local', 'scope-thing'),
-    branch: 'main',
-  });
-  const installs = deps.npmCalls().filter((c) => c.args[0] === 'install');
+  const gitVerbs = deps.calls
+    .filter((c) => c.cmd === 'git')
+    .map((c) => c.args[0]);
+  for (const verb of ['clone', 'pull', 'fetch'])
+    assert.equal(gitVerbs.includes(verb), false, `adopt ran git ${verb}`);
   assert.deepEqual(
-    installs.map((c) => c.cwd),
-    [checkout],
+    deps.calls
+      .filter((c) => c.cmd !== 'git')
+      .map(
+        (c) => `${c.cmd} ${c.args.join(' ')}@${path.relative(appRoot, c.cwd)}`,
+      ),
+    [
+      // The set-up's lockfile, made with the checkout moved aside.
+      'npm install --package-lock-only --ignore-scripts --no-audit --no-fund@',
+      'npm install --no-audit --no-fund@',
+      'linked build @packages-local/scope-thing',
+    ],
   );
-  for (const forbidden of ['clone', 'pull', 'fetch']) {
-    assert.ok(
-      !deps.calls.some((c) => c.cmd === 'git' && c.args[0] === forbidden),
-      `no git ${forbidden}`,
-    );
-  }
-  assert.ok(
-    !deps.npmCalls().some((c) => c.args[0] === 'view'),
-    'no registry lookup',
-  );
-});
-
-test('a checkout with no remote is recorded without a repo, and relinks and lists like any other', (t) => {
-  const appRoot = consumer(t);
-  seed(appRoot, 'fresh', {name: 'fresh', version: '1.0.0'});
-  const deps = stubbed(appRoot, gitWith(undefined));
-
-  assert.equal(adopt(['fresh'], {}, deps), 0, deps.output());
-  const entry = readManifest(appRoot, deps).entries.fresh;
-  assert.equal(entry.repo, undefined);
-  assert.equal(entry.path, path.join('packages-local', 'fresh'));
-
-  // npm ci removed the link; the postinstall puts it back.
-  fs.rmSync(path.join(appRoot, 'node_modules'), {recursive: true});
-  const after = stubbed(appRoot);
-  assert.equal(relink(after), 0);
-  assert.ok(
-    fs.lstatSync(path.join(appRoot, 'node_modules', 'fresh')).isSymbolicLink(),
-  );
-
-  const listing = stubbed(appRoot);
-  assert.equal(list({check: true}, listing), 0, listing.output());
-  assert.match(listing.output(), /fresh/);
-});
-
-test('--repo is recorded in place of the origin, normalised', (t) => {
-  const appRoot = consumer(t);
-  seed(appRoot, 'thing', {name: 'thing', version: '1.0.0'});
-  const deps = stubbed(appRoot, gitWith('https://github.com/old/thing.git'));
-
   assert.equal(
-    adopt(['thing'], {repo: 'git+https://github.com/new/thing.git'}, deps),
-    0,
+    seenByLockOnly,
+    false,
+    'npm made the set-up lockfile without the checkout',
+  );
+  assert.ok(
+    fs.existsSync(
+      path.join(appRoot, 'packages-local/scope-thing/package.json'),
+    ),
+    'moved back',
+  );
+  assert.equal(
+    asideDuringLockOnly,
+    true,
+    'set aside inside packages-local/, outside its glob',
+  );
+  assert.equal(
+    fs.existsSync(path.join(appRoot, 'packages-local/.setup-aside')),
+    false,
+  );
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
+  );
+  assert.deepEqual(pkg.workspaces, ['packages-local/*']);
+  assert.match(
     deps.output(),
-  );
-  assert.equal(
-    readManifest(appRoot, deps).entries.thing.repo,
-    'https://github.com/new/thing.git',
+    /@scope\/thing -> packages-local\/scope-thing \(branch main\)/,
   );
 });
 
-test('--repo with more than one package is refused before anything runs', (t) => {
+test('adopt finds a member by name even under another directory name', (t) => {
   const appRoot = consumer(t);
-  const deps = stubbed(appRoot);
-  assert.equal(adopt(['a', 'b'], {repo: 'https://x/a.git'}, deps), 6);
-  assert.match(deps.output(), /only be used when adopting one package/);
-  assert.equal(deps.calls.length, 0);
+  seed(appRoot, 'my-own-name', {name: '@scope/thing', version: '1.0.0'});
+  const deps = stubbed(appRoot, branchMain);
+  assert.equal(adopt(['@scope/thing'], {build: ''}, deps), 0, deps.output());
+  assert.match(deps.output(), /adopting packages-local\/my-own-name/);
 });
 
 test('adopt refuses a missing checkout, a non-git directory and a name mismatch', (t) => {
   const appRoot = consumer(t);
-  seed(appRoot, 'nogit', {name: 'nogit', version: '1.0.0'}, {git: false});
-  seed(appRoot, 'wrong', {name: 'something-else', version: '1.0.0'});
-  seed(appRoot, 'nopkg', null);
+  seed(appRoot, 'nogit', {name: 'nogit'}, {git: false});
+  seed(appRoot, 'other', {name: 'something-else'});
 
-  const cases = [
-    ['missing', /nothing to adopt at packages-local[/\\]missing/],
-    ['nogit', /is not a git checkout/],
-    ['wrong', /declares itself as "something-else"/],
-    ['nopkg', /has no package.json naming it/],
-  ];
-  for (const [name, message] of cases) {
-    const deps = stubbed(appRoot, gitWith(undefined));
-    assert.equal(adopt([name], {}, deps), 6, name);
-    assert.match(deps.output(), message, name);
-    assert.equal(deps.npmCalls().length, 0, `${name}: nothing installed`);
-  }
-  assert.deepEqual(Object.keys(readManifest(appRoot).entries), []);
+  const deps = stubbed(appRoot);
+  assert.equal(adopt(['missing'], {}, deps), 6);
+  assert.match(deps.output(), /nothing to adopt at packages-local\/missing/);
+  assert.equal(adopt(['nogit'], {}, deps), 6);
+  assert.match(deps.output(), /not a git checkout/);
+  assert.equal(adopt(['other'], {}, deps), 6);
+  assert.match(deps.output(), /declares itself as "something-else"/);
+  assert.equal(deps.npmCalls().length, 0, 'a refusal installs nothing');
 });
 
-const HOOKS = {
-  postinstall: 'linked localize --relink',
-  dependencies: 'linked localize --relink',
-};
-
-test('adopt leaves the consumer package.json alone and runs the configured build in the checkout', (t) => {
-  const appRoot = consumer(t, {dependencies: {}, scripts: HOOKS});
-  const checkout = seed(appRoot, 'built', {name: 'built', version: '1.0.0'});
-  const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
-  const deps = stubbed(appRoot, gitWith(undefined));
-
-  assert.equal(adopt(['built'], {build: 'make it'}, deps), 0, deps.output());
-  const build = deps.calls.find((c) => c.cmd === 'make it');
-  assert.equal(build?.cwd, checkout);
-  assert.equal(
-    fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
-    before,
-  );
-});
-
-test('localize on an unpublished package whose checkout is already there points at adopt', (t) => {
+test('adopt of a parked package points at localize, which takes it back', (t) => {
   const appRoot = consumer(t);
-  seed(appRoot, 'scope-unpublished', {
-    name: '@scope/unpublished',
-    version: '0.1.0',
-  });
-  const deps = stubbed(appRoot, (inv) =>
-    inv.args[0] === 'view' ? fail('npm error code E404', 1) : ok(),
+  seed(appRoot, 'thing', {name: 'thing'}, {dir: '.packages-local.parked'});
+  const deps = stubbed(appRoot);
+  assert.equal(adopt(['thing'], {}, deps), 6);
+  assert.match(
+    deps.output(),
+    /thing is parked\. To take it back:\n {2}linked localize thing/,
   );
-
-  assert.equal(localize(['@scope/unpublished'], {}, deps), 4);
-  assert.match(deps.output(), /linked localize @scope\/unpublished --adopt/);
 });
 
-test('a fresh `git init` with no commit yet is recorded on its branch, not as HEAD', (t) => {
+test('a fresh `git init` with no commit yet is reported on its branch, not as HEAD', (t) => {
   const appRoot = consumer(t);
   const checkout = seed(
     appRoot,
@@ -204,79 +172,81 @@ test('a fresh `git init` with no commit yet is recorded on its branch, not as HE
   );
 
   assert.equal(adopt(['unborn'], {}, deps), 0, deps.output());
-  assert.equal(readManifest(appRoot, deps).entries.unborn.branch, 'trunk');
-});
-
-// npm runs the root `postinstall` only on a bare install, the root
-// `dependencies` script after any command that changes node_modules -- so a
-// recorded package needs both, and localize/adopt add them when missing.
-const appScripts = (appRoot) =>
-  JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'))
-    .scripts;
-
-test('adopt adds both relink hooks to an app that has neither, and says so once', (t) => {
-  const appRoot = consumer(t);
-  seed(appRoot, 'hooked', {name: 'hooked', version: '1.0.0'});
-  const deps = stubbed(appRoot, gitWith(undefined));
-
-  assert.equal(adopt(['hooked'], {}, deps), 0, deps.output());
-  assert.deepEqual(appScripts(appRoot), HOOKS);
   assert.match(
     deps.output(),
-    /Added `linked localize --relink` to the app's postinstall and dependencies scripts so npm keeps the links/,
+    /unborn -> packages-local\/unborn \(branch trunk\)/,
   );
 });
 
-test('adopt appends to scripts that do something else and leaves ones that already relink', (t) => {
-  const appRoot = consumer(t, {
-    scripts: {postinstall: 'patch-package', dependencies: HOOKS.dependencies},
-  });
-  seed(appRoot, 'merged', {name: 'merged', version: '1.0.0'});
-  const deps = stubbed(appRoot, gitWith(undefined));
-
-  assert.equal(adopt(['merged'], {}, deps), 0, deps.output());
-  assert.deepEqual(appScripts(appRoot), {
-    postinstall: 'patch-package && linked localize --relink',
-    dependencies: 'linked localize --relink',
-  });
-  assert.match(deps.output(), /to the app's postinstall script so npm/);
-});
-
-test('a run that records nothing does not touch the app scripts', (t) => {
+test('localize on an unpublished package whose checkout is already there points at adopt', (t) => {
   const appRoot = consumer(t);
-  const before = fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8');
-  const deps = stubbed(appRoot, gitWith(undefined));
-
-  assert.equal(adopt(['absent'], {}, deps), 6, deps.output());
+  seed(appRoot, 'local-only', {name: 'local-only'});
+  const deps = stubbed(appRoot);
+  assert.equal(localize(['local-only'], {}, deps), 6);
+  assert.match(deps.output(), /linked localize local-only --adopt/);
   assert.equal(
-    fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
-    before,
+    deps.calls.some((c) => c.cmd === 'npm'),
+    false,
+    'refused before any registry lookup or install',
   );
-  assert.doesNotMatch(deps.output(), /Added `linked localize --relink`/);
 });
 
-test('localize adds the relink hooks when it records a package', (t) => {
-  const appRoot = consumer(t, {
-    scripts: {postinstall: 'linked-localize --relink'},
-  });
-  const deps = stubbed(appRoot, (inv) => {
-    if (inv.args[0] === 'clone') {
-      const dest = inv.args[2];
-      fs.mkdirSync(path.join(dest, '.git'), {recursive: true});
-      fs.writeFileSync(
-        path.join(dest, 'package.json'),
-        JSON.stringify({name: 'widget', version: '1.0.0'}),
-      );
-      return ok();
-    }
-    if (inv.args[0] === 'symbolic-ref') return ok('main\n');
-    return ok();
-  });
+test('--parked takes every parked checkout back with one install and no builds', (t) => {
+  const appRoot = consumer(t);
+  seed(
+    appRoot,
+    'a',
+    {name: 'a', version: '1.0.0'},
+    {dir: '.packages-local.parked'},
+  );
+  seed(
+    appRoot,
+    'b',
+    {name: 'b', version: '1.0.0'},
+    {dir: '.packages-local.parked'},
+  );
+  const deps = stubbed(appRoot, branchMain);
 
-  assert.equal(localize(['widget'], {repo: 'r'}, deps), 0, deps.output());
-  assert.deepEqual(appScripts(appRoot), {
-    postinstall: 'linked-localize --relink',
-    dependencies: 'linked localize --relink',
-  });
-  assert.match(deps.output(), /to the app's dependencies script so npm/);
+  assert.equal(localizeParked({}, deps), 0, deps.output());
+
+  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/a/package.json')));
+  assert.ok(fs.existsSync(path.join(appRoot, 'packages-local/b/package.json')));
+  assert.deepEqual(
+    deps.calls
+      .filter((c) => c.cmd !== 'git')
+      .map((c) => `${c.cmd} ${c.args[0]}`),
+    ['npm install'],
+  );
+
+  const none = stubbed(appRoot);
+  assert.equal(localizeParked({}, none), 0);
+  assert.match(none.output(), /nothing is parked/);
+  assert.equal(none.calls.length, 0);
+});
+
+test('--parked refuses (exit 6) a parked name that is already a member under another directory', (t) => {
+  const appRoot = consumer(t);
+  seed(
+    appRoot,
+    'a',
+    {name: 'a', version: '1.0.0'},
+    {dir: '.packages-local.parked'},
+  );
+  seed(appRoot, 'a-copy', {name: 'a', version: '1.0.0'});
+  const deps = stubbed(appRoot, branchMain);
+
+  assert.equal(localizeParked({}, deps), 6, deps.output());
+
+  assert.match(
+    deps.output(),
+    /a is parked in \.packages-local\.parked\/a, but packages-local\/a-copy is a already/,
+  );
+  assert.ok(
+    fs.existsSync(path.join(appRoot, '.packages-local.parked/a/package.json')),
+  );
+  assert.equal(fs.existsSync(path.join(appRoot, 'packages-local/a')), false);
+  assert.equal(
+    deps.calls.some((c) => c.cmd === 'npm'),
+    false,
+  );
 });

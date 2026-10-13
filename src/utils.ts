@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import {exec, ExecOptions} from 'child_process';
+import {exec, execFile, ExecOptions} from 'child_process';
 import * as fs from 'fs';
 import {builtinModules} from 'module';
 import * as path from 'path';
@@ -366,14 +366,17 @@ export const getLastCommitTime = (
 ): Promise<{date: Date; changes: string; commitId: string}> => {
   // console.log(`git log -1 --format=%ci -- ${packagePath}`);
   // process.exit();
-  return execPromise(`cd ${packagePath} && git log -1 --format="%h %ci" -- .`)
+  // git with an argument list and a cwd: no `cd` (cmd.exe's does not change
+  // drives) and no `%` for cmd.exe to expand.
+  return gitOutput(['log', '-1', '--format=%h %ci', '--', '.'], packagePath)
     .then(async (result) => {
       let commitId = result.substring(0, result.indexOf(' '));
       let date = result.substring(commitId.length + 1);
       let lastCommitDate = new Date(date);
 
-      let changes = await execPromise(
-        `cd ${packagePath} && git show --stat --oneline ${commitId} -- .`,
+      let changes = await gitOutput(
+        ['show', '--stat', '--oneline', commitId, '--', '.'],
+        packagePath,
       );
       // log(packagePath, result, lastCommitDate);
       // log(changes);
@@ -384,6 +387,16 @@ export const getLastCommitTime = (
       return null;
     });
 };
+
+/** git's trimmed stdout; rejects like `execPromise`, with `{error, stdout, stderr}`. */
+function gitOutput(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, {cwd, maxBuffer: 64 * 1024 * 1024}, (error, stdout, stderr) => {
+      if (error) reject({error, stdout, stderr});
+      else resolve(String(stdout).trim());
+    });
+  });
+}
 
 export const getLastModifiedFile = (filePath, config = {}) => {
   var files = glob.sync(filePath, config);
@@ -432,8 +445,9 @@ export var getModulePackageJSON = function (module_name, work_dir?) {
     }
   }
 
-  if (!package_json && work_dir != '/') {
-    return getModulePackageJSON(module_name, path.resolve(work_dir, '..'));
+  // The filesystem root is its own parent: `/`, or `C:\` on Windows.
+  if (!package_json && path.dirname(work_dir) !== work_dir) {
+    return getModulePackageJSON(module_name, path.dirname(work_dir));
   }
 
   return [package_json, module_dir];

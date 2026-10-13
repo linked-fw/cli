@@ -3,7 +3,8 @@ import {exec} from 'child_process';
 import depcheck from 'depcheck';
 import {getEnvFile} from 'env-cmd/dist/get-env-vars.js';
 import fs from 'fs-extra';
-import path, {dirname} from 'path';
+import path from 'path';
+import {fileURLToPath} from 'url';
 import {createInterface} from 'readline';
 import {
   debugInfo,
@@ -18,15 +19,14 @@ import {
   needsRebuilding,
 } from './utils.js';
 import {renameShippedDotfiles} from './utils/shippedDotfiles.js';
+import {findWorkspaceRoot} from './localize/app-root.js';
 import {planPackageSetup} from './utils/packageSetup.js';
 import {
   bareName,
   CreatePackageError,
   decideCreatePackageTarget,
-  ensureRelinkPostinstall,
   ensureWorkspaceGlob,
   findLinkedAppRoot,
-  RELINK_COMMAND,
   repositoryUrlFor,
 } from './utils/createPackageLocation.js';
 import type {
@@ -47,7 +47,9 @@ import {
 } from './utils/shapeReferences.js';
 import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
 
-import {spawn as spawnChild, spawnSync} from 'child_process';
+import {spawnSync} from 'child_process';
+import {spawnCommand} from './utils/spawn.js';
+import {importFile, withEolOf} from './utils/platform.js';
 import {findNearestPackageJson} from 'find-nearest-package-json';
 import {statSync} from 'fs';
 import {LinkedFileStorage} from '@_linked/core/utils/LinkedFileStorage';
@@ -72,11 +74,9 @@ import type {PackageKind, ScaffoldKind} from './utils/packageKind.js';
 import {resolvePackageBaseUri, withBaseUri} from './utils/packageBaseUri.js';
 import type {ResolvedBaseUri} from './utils/packageBaseUri.js';
 
-let dirname__ =
-  typeof __dirname !== 'undefined'
-    ? __dirname
-    : //@ts-ignore
-      dirname(import.meta.url).replace('file:/', '');
+// This module's directory. fileURLToPath, not the URL with `file:/` cut off,
+// which on Windows leaves `//C:/...`.
+let dirname__ = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * A folder under this package's `defaults/`. The built module sits in `lib/esm/`
@@ -309,13 +309,14 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
       stderr: string;
       failed: boolean;
     }>((resolve) => {
+      // The folder as cwd, not `cd <dir> &&`: cmd.exe's `cd` does not change drives.
       exec(
-        `cd ${hyphenName} && ${installCommand}`,
-        {maxBuffer: 50 * 1024 * 1024} as any,
+        installCommand,
+        {cwd: targetFolder, maxBuffer: 50 * 1024 * 1024},
         (error, out, err) => {
           resolve({
-            stdout: typeof out === 'string' ? out : out?.toString() ?? '',
-            stderr: typeof err === 'string' ? err : err?.toString() ?? '',
+            stdout: out ?? '',
+            stderr: err ?? '',
             failed: !!error,
           });
         },
@@ -944,64 +945,6 @@ function hasDependency(pkg, childPkg, dependencies, depth = 1) {
 }
 
 /**
- * Finds the topmost package.json that could be an APP_ROOT
- * Returns null if no app root is found (standalone repo case)
- */
-function findAppRoot(startPath = process.cwd()): string | null {
-  let currentPath = startPath;
-  let candidateRoots: Array<{
-    path: string;
-    hasWorkspaces: boolean;
-    isLinked: boolean;
-  }> = [];
-
-  // Walk up the directory tree
-  for (let i = 0; i < 10; i++) {
-    const packageJsonPath = path.join(currentPath, 'package.json');
-
-    if (fs.existsSync(packageJsonPath)) {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-
-      candidateRoots.push({
-        path: currentPath,
-        hasWorkspaces: !!packageJson.workspaces,
-        isLinked: packageJson.linkedPackage === true,
-      });
-    }
-
-    const parentPath = path.join(currentPath, '..');
-    // If we've reached the root or haven't moved up
-    if (parentPath === currentPath) {
-      break;
-    }
-    currentPath = parentPath;
-  }
-
-  // Find the topmost package.json that has workspaces
-  // Prefer non-linked packages (app roots) over linked packages
-  let appRoot = null;
-  for (let i = candidateRoots.length - 1; i >= 0; i--) {
-    const candidate = candidateRoots[i];
-    if (candidate.hasWorkspaces && !candidate.isLinked) {
-      appRoot = candidate.path;
-      break;
-    }
-  }
-
-  // If no non-linked workspace found, use the topmost workspace
-  if (!appRoot) {
-    for (let i = candidateRoots.length - 1; i >= 0; i--) {
-      if (candidateRoots[i].hasWorkspaces) {
-        appRoot = candidateRoots[i].path;
-        break;
-      }
-    }
-  }
-
-  return appRoot;
-}
-
-/**
  * Print the discovery result in full: what will be built, and every package
  * that was found and will not be. Nothing is discovered silently.
  */
@@ -1065,12 +1008,12 @@ function runBuildScript(
     });
 }
 
-export function buildAll(options) {
+export async function buildAll(options): Promise<void> {
   console.log(
     'Building all linked packages of this repository in order of dependencies',
   );
 
-  const plan = planBuildAll('./', findAppRoot() || undefined);
+  const plan = planBuildAll('./', findWorkspaceRoot(process.cwd()) ?? undefined);
   printBuildAllPlan(plan);
 
   if (plan.build.size === 0) {
@@ -1078,38 +1021,59 @@ export function buildAll(options) {
     return;
   }
 
-  // The build tool goes first and alone: every other build runs it.
+  // The build tool's own dependencies, then the tool alone (every other build
+  // runs it), then the rest. See `orderBuildToolFirst`.
   const order = orderBuildToolFirst(plan.build, options?.from);
   const sync = options?.sync || false;
 
   // Successfully built (or deliberately passed over by --from).
   const done: Set<PackageDetails> = new Set();
 
-  if (!order.tool) {
-    return buildInDependencyOrder(order.rest, order.from, sync, done);
-  }
   const tool = order.tool;
-  if (!order.buildToolFirst) {
-    log(chalk.blue('skipping ' + tool.packageName));
-    done.add(tool);
-    return buildInDependencyOrder(order.rest, order.from, sync, done);
+  if (!tool) {
+    await buildInDependencyOrder(order.rest, order.from, sync, done);
+    return;
+  }
+  const passOver = (pkg: PackageDetails) => {
+    log(chalk.blue('skipping ' + pkg.packageName));
+    done.add(pkg);
+  };
+  const plural = (n: number) => `${n} package${n === 1 ? '' : 's'}`;
+
+  if (order.start === 'pre' && order.pre.size > 0) {
+    const names = [...order.pre.keys()].join(', ');
+    const them = order.pre.size === 1 ? 'it' : 'them';
+    console.log(
+      chalk.blue(`Building ${names} first: ${tool.packageName} depends on ${them}.`),
+    );
+    const built = await buildInDependencyOrder(order.pre, order.from, sync, done, {
+      stopNote:
+        `${tool.packageName} needs ${names}, so build-all stopped before it and ` +
+        `the other ${plural(order.rest.size)}, which build with it. ` +
+        `Fix the failure and run build-all again.`,
+    });
+    if (!built) return;
+  } else {
+    order.pre.forEach(passOver);
   }
 
-  // This process has already loaded every module `build-all` uses (the
-  // command's code is imported statically), so the tool's `rimraf ./lib`
-  // cannot pull anything out from under it.
-  console.log(
-    chalk.blue(
-      `Building ${tool.packageName} first: the other packages build with it.`,
-    ),
-  );
-  return runBuildScript(tool).then((res) => {
+  if (order.start === 'rest') {
+    passOver(tool);
+  } else {
+    // This process has already loaded every module `build-all` uses (the
+    // command's code is imported statically), so the tool's `rimraf ./lib`
+    // cannot pull anything out from under it.
+    console.log(
+      chalk.blue(
+        `Building ${tool.packageName} alone: the other packages build with it.`,
+      ),
+    );
+    const res = await runBuildScript(tool);
     if (typeof res === 'undefined') {
-      const others = order.rest.size;
       console.error(
         chalk.red(
           `${tool.packageName} failed to build, so build-all stopped before ` +
-            `the other ${others} package${others === 1 ? '' : 's'}: they build with it. ` +
+            `the other ${plural(order.rest.size)}: they build with it. ` +
             `Fix ${tool.packageName} and run build-all again.`,
         ),
       );
@@ -1121,20 +1085,35 @@ export function buildAll(options) {
         (res === false ? chalk.redBright(' (with warnings)') : ''),
     );
     done.add(tool);
-    if (order.rest.size === 0) {
-      printBuildAllSummary(done, new Set(), new Map(), [], new Map());
-      return;
-    }
-    return buildInDependencyOrder(order.rest, order.from, sync, done);
-  });
+  }
+
+  if (order.rest.size === 0) {
+    printBuildAllSummary(done, new Set(), new Map(), [], new Map());
+    return;
+  }
+  await buildInDependencyOrder(
+    order.rest,
+    order.start === 'rest' ? order.from : undefined,
+    sync,
+    done,
+  );
 }
 
+/**
+ * Build `lincdPackages` in dependency order, in parallel where they allow it.
+ * Resolves to whether every package was built (or passed over by `from`).
+ *
+ * The last group of a run prints the end-of-run summary. A group with more to
+ * follow (`then`) prints it only when something failed, followed by
+ * `then.stopNote`, since nothing after it can be built.
+ */
 function buildInDependencyOrder(
   lincdPackages: Map<string, PackageDetails>,
   from: string | undefined,
   sync: boolean,
   done: Set<PackageDetails>,
-) {
+  then?: {stopNote: string},
+): Promise<boolean> {
   let startFrom: string;
   //by default start building
   let building: boolean = true;
@@ -1158,7 +1137,8 @@ function buildInDependencyOrder(
   progressUpdate(lincdPackages.size + ' packages left');
 
   let packagesLeft = lincdPackages.size;
-  // `done` may already hold the build tool, built before this ran.
+  let allBuilt = false;
+  // `done` may already hold earlier groups (the build tool and what it needs).
   const doneBefore = done.size;
   const finished = runOnPackagesGroupedByDependencies(
     lincdPackages,
@@ -1289,14 +1269,21 @@ function buildInDependencyOrder(
         }
       }
 
-      printBuildAllSummary(done, failed, notBuilt, unscheduled, failureOutput);
-      if (failed.size > 0 || notBuilt.size > 0 || unscheduled.length > 0) {
-        process.exit(1);
+      const problems =
+        failed.size > 0 || notBuilt.size > 0 || unscheduled.length > 0;
+      if (problems || !then) {
+        printBuildAllSummary(done, failed, notBuilt, unscheduled, failureOutput);
       }
+      if (problems) {
+        if (then) console.error(chalk.red(then.stopNote));
+        process.exit(1);
+        return;
+      }
+      allBuilt = true;
     },
     sync,
   );
-  return finished;
+  return finished.then(() => allBuilt);
 }
 
 /**
@@ -1521,7 +1508,7 @@ const ensureBackendImportsShapes = function (root: string = process.cwd()) {
   if (!fs.existsSync(backendPath)) return;
   let contents = fs.readFileSync(backendPath, 'utf-8');
   if (contents.includes('./shapes/index')) return;
-  fs.writeFileSync(backendPath, `import './shapes/index.js';\n` + contents);
+  fs.writeFileSync(backendPath, withEolOf(`import './shapes/index.js';\n`, contents) + contents);
 };
 
 // Register a shape in the shapes barrel (src/shapes/index.ts), creating it if needed, and
@@ -1538,7 +1525,7 @@ export const addShapeToBarrel = function (shapeHyphenName: string, root: string 
     contents = contents.includes('//SHAPES')
       ? contents.replace('//SHAPES', `//SHAPES\n${line}`)
       : contents.replace(/\n*$/, '') + `\n${line}\n`;
-    fs.writeFileSync(barrelPath, contents);
+    fs.writeFileSync(barrelPath, withEolOf(contents, contents));
   }
   // Both boot paths must load the barrel (idempotent).
   addLineToIndex(`import './shapes/index.js';`, 'shapes', root);
@@ -1587,7 +1574,7 @@ export const addLineToIndex = function (
       }
       // log("Added at end",newContents);
     }
-    fs.writeFileSync(indexPath, newContents);
+    fs.writeFileSync(indexPath, withEolOf(newContents, indexContents));
   }
   return indexPath;
 };
@@ -1603,7 +1590,12 @@ const replaceVariablesInFolder = async function (
 ): Promise<void> {
   //get all files in folder, including files that start with a dot
   try {
-    const files = await glob(folder + '/**/*', {dot: true, nodir: true});
+    const files = await glob('**/*', {
+      cwd: folder,
+      absolute: true,
+      dot: true,
+      nodir: true,
+    });
     await Promise.all(
       files.map((file) => {
         return replaceVariablesInFile(file);
@@ -2017,7 +2009,7 @@ export const runScript = async (
 
   log('Running script ' + scriptName);
   const scriptPath = path.join(process.cwd(), 'scripts', scriptName);
-  const script = await import(scriptPath);
+  const script = await importFile(scriptPath);
   await script.default().catch((error) => {
     log('Script ' + scriptName + ' finished with errors');
     logError(error);
@@ -2036,7 +2028,7 @@ export const runMethod = async (
 
   if (options.spawn) {
     let linkedConfig = (
-      await import(path.join(process.cwd(), 'linked.config.js'))
+      await importFile(path.join(process.cwd(), 'linked.config.js'))
     ).default;
 
     // Set default loadAppComponent if not provided
@@ -2045,12 +2037,12 @@ export const runMethod = async (
     }
     if (!linkedConfig.server.loadAppComponent) {
       linkedConfig.server.loadAppComponent = async () =>
-        (await import(path.join(process.cwd(), 'src', 'App'))).default;
+        (await importFile(path.join(process.cwd(), 'src', 'App'))).default;
     }
     // Set default loadRoutes if not provided
     if (!linkedConfig.server.loadRoutes) {
       linkedConfig.server.loadRoutes = async () =>
-        await import(path.join(process.cwd(), 'src', 'routes.tsx'));
+        await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
     }
 
     const ServerClass = await loadServerClass();
@@ -2148,7 +2140,7 @@ export const startServer = async (
 ) => {
   await ensureEnvironmentLoaded();
 
-  let linkedConfig = (await import(path.join(process.cwd(), 'linked.config.js')))
+  let linkedConfig = (await importFile(path.join(process.cwd(), 'linked.config.js')))
     .default;
 
   // function scssLoadcall(source, filename) {
@@ -2174,10 +2166,10 @@ export const startServer = async (
   if (!linkedConfig.server.loadAppComponent) {
     let appPromise;
     if (process.env.NODE_ENV !== 'development') {
-      appPromise = (await import(path.join(process.cwd(), 'lib', 'App.js')))
+      appPromise = (await importFile(path.join(process.cwd(), 'lib', 'App.js')))
         .default;
     } else {
-      appPromise = (await import(path.join(process.cwd(), 'src', 'App.tsx')))
+      appPromise = (await importFile(path.join(process.cwd(), 'src', 'App.tsx')))
         .default;
     }
     linkedConfig.server.loadAppComponent = async () => {
@@ -2189,9 +2181,9 @@ export const startServer = async (
   if (!linkedConfig.server.loadRoutes) {
     linkedConfig.server.loadRoutes = async () => {
       if (process.env.NODE_ENV !== 'development') {
-        return await import(path.join(process.cwd(), 'lib', 'routes.js'));
+        return await importFile(path.join(process.cwd(), 'lib', 'routes.js'));
       } else {
-        return await import(path.join(process.cwd(), 'src', 'routes.tsx'));
+        return await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
       }
     };
   }
@@ -2510,6 +2502,8 @@ export const createPackage = async (
       // The app's package.json is wired either way: that is files, not install.
       await installWorkspacePackage(packageName, targetFolder, appRoot, options.skipInstall);
     } else if (options.skipInstall) {
+      // Files, not install: the app is set up for checkouts either way.
+      await setUpAppForCheckouts(appRoot);
       skipped();
     } else {
       await installOwnRepoPackage(packageName, targetFolder, appRoot, decision);
@@ -2572,8 +2566,8 @@ async function packageTargetFolder(
   }
   // localize's own naming, so `linked localize` and this command can never
   // disagree about where a package lives.
-  const {checkoutNameFor, DEFAULT_DIR} = await import('./localize/index.js');
-  return path.join(appRoot, DEFAULT_DIR, checkoutNameFor(name));
+  const {checkoutNameFor, LOCAL_DIR} = await import('./localize/index.js');
+  return path.join(appRoot, LOCAL_DIR, checkoutNameFor(name));
 }
 
 /**
@@ -2800,12 +2794,13 @@ async function installWorkspacePackage(
   skipInstall = false,
 ) {
   const appPkgPath = path.join(appRoot, 'package.json');
-  const appPkg = fs.readJsonSync(appPkgPath);
+  const appPkgText = fs.readFileSync(appPkgPath, 'utf8');
+  const appPkg = JSON.parse(appPkgText);
   const workspaces = ensureWorkspaceGlob(appPkg);
   if (workspaces.warning) console.warn(chalk.yellow(workspaces.warning));
   const version = fs.readJsonSync(path.join(targetFolder, 'package.json')).version;
   appPkg.dependencies = {...appPkg.dependencies, [name]: `^${version}`};
-  fs.writeJsonSync(appPkgPath, appPkg, {spaces: 2});
+  fs.writeFileSync(appPkgPath, withEolOf(JSON.stringify(appPkg, null, 2) + '\n', appPkgText));
   log(
     `Added ${name}@^${version} to ${path.relative(process.cwd(), appPkgPath) || 'package.json'}` +
       (workspaces.changed ? ' and packages/* to its workspaces' : ''),
@@ -2832,7 +2827,8 @@ async function installWorkspacePackage(
 
 /**
  * packages-local/: a repository of its own. Its git history starts here, and
- * localize's `adopt` installs, builds, links and records it. The app's
+ * localize's `adopt` sets the app up for checkouts, installs at the app root
+ * (npm links it as a workspace member) and builds it. The app's
  * dependencies are NOT touched: until the package is published a version range
  * fails `npm install` (E404 once a lockfile exists), and a `file:` path would
  * install cleanly for a teammate without the checkout and fail at runtime.
@@ -2863,17 +2859,8 @@ async function installOwnRepoPackage(
     fs.writeJsonSync(pkgPath, pkg, {spaces: 2});
   }
 
-  // Before adopt, never during it: adopt asserts the app's package.json did not
-  // change while it ran.
-  const appPkgPath = path.join(appRoot, 'package.json');
-  const appPkg = fs.readJsonSync(appPkgPath);
-  if (ensureRelinkPostinstall(appPkg)) {
-    fs.writeJsonSync(appPkgPath, appPkg, {spaces: 2});
-    log(
-      `Added \`${RELINK_COMMAND}\` to the app's postinstall, so npm install keeps the link`,
-    );
-  }
-
+  // adopt sets the app up for checkouts (workspaces glob, lock-at-rest hook,
+  // .gitignore) and says what it changed, then installs at the app root.
   const {adoptPackage} = await import('./commands/localize.js');
   const {EXIT_WARNED} = await import('./localize/index.js');
   // Only the build command matters here: adopt always installs with npm, so
@@ -2885,12 +2872,11 @@ async function installOwnRepoPackage(
   );
   const code = await adoptPackage(name, {appRoot, build: buildCommand});
   if (code === EXIT_WARNED) {
-    fail('The package is linked, but its initial build failed');
+    fail('The package is installed, but its initial build failed');
   } else if (code !== 0) {
     return fail(
-      `Linking ${name} failed (localize exit ${code}). ${rel} is scaffolded with an uncommitted ` +
-        `git init, and the app's postinstall relinks localized packages. Fix the cause and retry ` +
-        `with: linked localize ${name} --adopt`,
+      `Installing ${name} failed (localize exit ${code}). ${rel} is scaffolded with an uncommitted ` +
+        `git init. Fix the cause and retry with: linked localize ${name} --adopt`,
     );
   }
 
@@ -2913,15 +2899,32 @@ async function installOwnRepoPackage(
   log(
     `Prepared ${name} in ${chalk.magenta(rel)}, in its own git repository` +
       (remote ? ` (origin ${remote}${pushed ? ', pushed' : ''})` : ' (no remote yet)'),
-    `It is linked into node_modules and recorded in local-packages.json.`,
+    `It is a workspace member through the app's packages-local/* glob, so npm links it.`,
     `It is not in the app's dependencies: until it is published a version range would fail npm install.`,
     `  After publishing: ${chalk.blueBright(`npm install ${name}@^${version}`)}`,
   );
   if (!remote) {
     log(
-      `To add a remote later: ${chalk.blueBright('git remote add origin <url>')} in ${rel}, ` +
-        `then ${chalk.blueBright(`linked localize ${name} --adopt`)} to record it.`,
+      `To add a remote later: ${chalk.blueBright('git remote add origin <url>')} in ${rel}.`,
     );
+  }
+}
+
+/** localize's one-time app setup, reported the way localize reports it. */
+async function setUpAppForCheckouts(appRoot: string) {
+  const {ensureAppSetup, LocalizeError} = await import('./localize/index.js');
+  try {
+    const changes = ensureAppSetup(appRoot);
+    if (changes.length) {
+      log(
+        `Set up this app for checkouts in packages-local/ (commit these):`,
+        ...changes.map((c) => `  ${c.file}: ${c.what}`),
+      );
+    }
+  } catch (e) {
+    if (!(e instanceof LocalizeError)) throw e;
+    console.warn(chalk.yellow(e.message));
+    process.exitCode = 1;
   }
 }
 
@@ -3252,7 +3255,11 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
   {
     name: 'Copying files to lib folder',
     apply: async () => {
-      const files = await glob(packagePath + '/src/**/*.{json,d.ts,css,scss}');
+      // Relative to src/ (glob's cwd), so the destination is a plain join: a pattern or a
+      // prefix built from an absolute Windows path would not match.
+      const files = await glob('**/*.{json,d.ts,css,scss}', {
+        cwd: path.join(packagePath, 'src'),
+      });
       let cjsPublished = false;
       try {
         cjsPublished = packagePublishesCjs(
@@ -3263,21 +3270,12 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
       } catch {}
       return Promise.all(
         files.map(async (file) => {
+          const source = path.join(packagePath, 'src', file);
           try {
-            await fs.copy(
-              file,
-              packagePath +
-                '/lib/esm/' +
-                file.replace(packagePath + '/src/', ''),
-            );
+            await fs.copy(source, path.join(packagePath, 'lib', 'esm', file));
             // Only mirror into lib/cjs when there is a CJS build to mirror.
             if (cjsPublished) {
-              await fs.copy(
-                file,
-                packagePath +
-                  '/lib/cjs/' +
-                  file.replace(packagePath + '/src/', ''),
-              );
+              await fs.copy(source, path.join(packagePath, 'lib', 'cjs', file));
             }
             return true;
           } catch (err) {
@@ -3687,13 +3685,14 @@ export var publishPackage = async function (
       ? `yarn version ${publishVersion} && yarn npm publish`
       : `npm version ${publishVersion} --no-git-tag-version && npm publish`;
 
+  // The package as cwd, not `cd <dir> &&`: cmd.exe's `cd` does not change drives.
   return execPromise(
-    `cd ${pkg.path} && ${
-      envJsonPath ? `env-cmd -f ${envJsonPath} --use-shell "` : ''
+    `${
+      envJsonPath ? `env-cmd -f "${envJsonPath}" --use-shell "` : ''
     }${versionAndPublish}${envJsonPath ? `"` : ''}`,
     true,
     false,
-    {},
+    {cwd: pkg.path},
     true,
   )
     .then((res) => {
@@ -3901,7 +3900,7 @@ export var executeCommandForEachPackage = function (
   packages.forEach((pkg) => {
     p = p.then(() => {
       log('# Package ' + chalk.magenta(pkg.packageName));
-      return execp('cd ' + pkg.path + ' && ' + command);
+      return execp(command, false, false, {cwd: pkg.path});
     });
   });
   return p;
@@ -4025,28 +4024,22 @@ export var executeCommandForPackage = function (packageName, command) {
     // npm is the default; only a package inside a yarn project is driven with
     // yarn (`yarn linked <cmd>` resolves the bin from the yarn workspace).
     const pm = detectPackageManager(packageDetails.path);
-    // Windows quirk: the shim is `yarn.cmd` / `npx.cmd`.
-    const isWin = process.platform === 'win32';
-    const runner =
-      pm === 'yarn' ? (isWin ? 'yarn.cmd' : 'yarn') : isWin ? 'npx.cmd' : 'npx';
+    const runner = pm === 'yarn' ? 'yarn' : 'npx';
     const runnerArgs = pm === 'yarn' ? ['linked'] : ['--no-install', 'linked'];
+    const commandArgs = command ? String(command).split(/\s+/).filter(Boolean) : [];
 
     log(
-      "Executing 'cd " +
-        packageDetails.path +
-        ` && ${runner} linked` +
-        (command ? ' ' + command : '') +
-        "'",
+      "Executing '" +
+        [runner, ...runnerArgs, ...commandArgs].join(' ') +
+        "' in " +
+        packageDetails.path,
     );
 
-    spawnChild(
-      runner,
-      [...runnerArgs, command || null],
-      {
-        cwd: packageDetails.path,
-        stdio: 'inherit',
-      },
-    );
+    // spawnCommand starts the `.cmd` shim on Windows.
+    spawnCommand(runner, [...runnerArgs, ...commandArgs], {
+      cwd: packageDetails.path,
+      stdio: 'inherit',
+    });
   } else {
     warn(
       "Could not find a pkg who's name (partially) matched " +
@@ -4064,7 +4057,7 @@ export const removeOldFiles = async (packagePath) => {
 
   try {
     // Read all files in the 'lib' folder asynchronously
-    const files = await glob(packagePath + '/lib/**/*.*');
+    const files = await glob('**/*.*', {cwd: libPath, absolute: true});
 
     // Iterate through each file
     for (const file of files) {

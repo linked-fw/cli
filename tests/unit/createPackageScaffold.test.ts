@@ -192,6 +192,11 @@ describe('createPackage kinds', () => {
       const assets = JSON.parse(read(tmp, 'packages-local', assetsDir, 'package.json'));
       expect(assets.dependencies['@acme/planning-ont']).toBeUndefined();
       expect(logged()).toMatch(/once @acme\/planning-ont is published.*npm install @acme\/planning-ont/);
+      // The app is set up for checkouts even with the install skipped: that is files.
+      const app = JSON.parse(read(tmp, 'package.json'));
+      expect(app.workspaces).toEqual(['packages-local/*']);
+      expect(app.scripts.postinstall).toMatch(/hooks\/lock-at-rest\.cjs/);
+      expect(read(tmp, '.gitignore')).toMatch(/^packages-local\/$/m);
     });
 
     test('standalone: no dependency, and one line says how to add it', async () => {

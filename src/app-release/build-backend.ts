@@ -1,6 +1,7 @@
 import {builtinModules} from 'module';
 import fs from 'fs-extra';
 import path from 'path';
+import {fileURLToPath} from 'url';
 
 /**
  * The backend entry points a compiled app is started from.
@@ -281,7 +282,7 @@ export const findInlinedPackageImports = async (
         specifier.startsWith('file://');
       if (!isPath) continue;
       const target = specifier.startsWith('file://')
-        ? specifier.slice('file://'.length)
+        ? fileURLToPath(specifier)
         : path.resolve(path.dirname(file), specifier);
 
       let found: {origin: string; owner: PackageRoot} | undefined;

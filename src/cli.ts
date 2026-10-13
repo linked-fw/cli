@@ -38,7 +38,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import 'require-extensions';
 import {unknownCommandError} from './unknown-command.js';
-import {installOneCopyHook} from './localize/one-copy-hook.js';
+import {installDriftHook} from './localize/drift-hook.js';
 
 /**
  * Run an async command action and report a failure the way the rest of this
@@ -157,7 +157,7 @@ const reportRefusal = (e: unknown) => {
 };
 
 const LOCATION_HELP =
-  "packages: part of this app's repository, a workspace member added to its dependencies. packages-local: its own git repository (git init + a first commit), linked and recorded by `linked localize` and not added to the app's dependencies until it is published.";
+  "packages: part of this app's repository, a workspace member added to its dependencies. packages-local: its own git repository (git init + a first commit) in packages-local/, which the app gitignores; a workspace member through the app's \"packages-local/*\" glob, so npm links it (`linked localize --adopt` sets the app up and installs). Not added to the app's dependencies until it is published.";
 const REMOTE_HELP =
   "The new repository's origin; also written to repository.url. Implies --location packages-local.";
 const PUSH_HELP = 'Push the first commit to --remote.';
@@ -480,7 +480,7 @@ program
 program
   .command('build-all')
   .action((options) => {
-    buildAll(options);
+    return buildAll(options);
   })
   .option(
     '--sync',
@@ -520,49 +520,47 @@ program
 program
   .command('localize [packages...]')
   .description(
-    'Develop an npm dependency from a git checkout: clone it, install inside the checkout, build it and symlink it into node_modules — without touching package.json or package-lock.json. Name packages exactly as npm names them (@_linked/rdfs, lodash); the repository is read from the published `repository` field. With no names, reports what is localized.',
+    'Develop an npm dependency from a git checkout in packages-local/, which the app lists in its workspaces so npm links it. Clones each package (the repository comes from its published `repository` field), sets the app up the first time (workspaces glob, lock-at-rest hook, .gitignore and the matching lockfile; commit those), installs git hooks (or, under core.hooksPath, prints the line to add to each), runs one npm install at the app root and builds the new checkouts. The app root is the topmost directory whose package.json has workspaces, so it can run from inside a member. Name packages exactly as npm names them (@_linked/rdfs, lodash). With no names, reports what is localized.',
   )
-  .option('--list', 'Report what is localized rather than localizing anything.')
   .option(
-    '--adopt',
-    'Link a checkout that is already in packages-local under its localize name (e.g. packages-local/_linked-foo for @_linked/foo): install, build, link and record it, without cloning or asking the registry. For a package created locally, or a clone put there by hand.',
+    '--list',
+    'Report the checkouts (name, directory, branch, version), the parked ones and any drift.',
   )
   .option(
     '--check',
-    'With --list: exit 1 when something recorded is not actually linked.',
+    'With --list: print only the drift, and exit 1 when there is any (for CI and scripts).',
   )
   .option(
-    '--relink',
-    'Recreate the recorded symlinks. This is what a postinstall runs.',
+    '--adopt',
+    'Use a checkout that is already in packages-local (e.g. packages-local/_linked-foo for @_linked/foo) as it is: no registry lookup and no clone. For a package created locally, or a clone put there by hand.',
   )
   .option(
-    '--ensure',
-    "Remove every localized checkout's own copy of a package the app provides (what --relink would prune), and exit 0. Takes no package names; skips a checkout localized with --no-prune, and with --no-prune does nothing. Never runs npm; prints nothing when there is nothing to remove. For an app's npm pre* scripts (linked start, script, call and build-all already run it).",
+    '--parked',
+    'Take back every checkout `linked delocalize` parked, then npm install once.',
   )
-  .option(
-    '--reinstall <package>',
-    "npm install inside that package's checkout, then remove its own copies of what the app provides. Use this instead of running npm install in a checkout by hand.",
-  )
-  .option('--dir <path>', 'Where checkouts live (default: packages-local).')
   .option(
     '--repo <git-url>',
-    "Clone this instead of the published repository, and record it. With --adopt: record this instead of the checkout's origin.",
+    'Clone this instead of the published repository.',
   )
   .option(
     '--subdir <path>',
-    "The package's directory inside the repository (monorepos).",
+    "The package's directory inside the repository (monorepos). The repository is cloned into packages-local/.repos/ and packages-local/<name> links to the package.",
   )
   .option(
     '--build <cmd>',
-    'Run this in the checkout after installing; a failure only warns. Defaults to `linked build`; pass an empty string to build nothing.',
+    'Run this in each new checkout after the install; a failure only warns. Defaults to `linked build` (`npm run build` for @_linked/cli); pass an empty string to build nothing.',
   )
   .option(
-    '--force',
-    'Overwrite a symlink pointing outside the checkout directory.',
+    '--dir <path>',
+    'Where checkouts live. Only packages-local is accepted: the workspaces glob names it.',
   )
   .option(
-    '--no-prune',
-    "Keep the checkout's node_modules as npm installed it. With a package to localize or --adopt, this is recorded in local-packages.json (prune: false), so --relink, --reinstall and the run-time check (--ensure, linked start etc.) leave that checkout alone too; localizing it again without --no-prune turns pruning back on. On --relink or --reinstall alone it applies to that run. By default a checkout's own copy of something the app provides is removed: a localized sibling, react or react-dom, or one of the checkout's own runtime dependencies that the app has at a version satisfying every range that would load it. The checkout then loads the app's copy instead of a second one. A copy the app's version does not satisfy, or whose own dependencies would resolve differently from the app, is kept and reported.",
+    '--relink',
+    'Deprecated, does nothing: npm links the checkouts. Exits 0, so old postinstall scripts keep working.',
+  )
+  .option(
+    '--ensure',
+    'Deprecated, does nothing but print a hint: drift is reported by --list and before linked start. Exits 0.',
   )
   .action(async (packages: string[], options) => {
     const {runLocalize} = await import('./commands/localize.js');
@@ -572,10 +570,16 @@ program
 program
   .command('delocalize [packages...]')
   .description(
-    'Undo localize: unlink the packages and forget them, keeping the checkout. With no names, undoes every localized package.',
+    'Park checkouts: move them from packages-local/ to .packages-local.parked/, then reinstall the registry copies (npm ci when no checkout remains and the committed lockfile and package.json are unchanged, else npm install and npm rebuild). `linked localize <name>` or `--parked` takes them back. With no names, parks every checkout.',
   )
-  .option('--purge', 'Also delete the checkout.')
-  .option('--force', 'With --purge, delete even a checkout localize refuses.')
+  .option(
+    '--purge',
+    'Delete the checkout instead of parking it. Refuses (exit 6) on unsaved work, or when it is not a git repository or git fails.',
+  )
+  .option(
+    '--force',
+    'With --purge, delete even a checkout with unsaved work (uncommitted changes, commits no remote has, on a branch or a detached HEAD, a stash) or one git cannot check.',
+  )
   .action(async (packages: string[], options) => {
     const {runDelocalize} = await import('./commands/localize.js');
     return runDelocalize(packages, options);
@@ -700,9 +704,9 @@ program.command('enable-capacitor').action(() => {
   addCapacitor();
 });
 
-// One copy, always (localize/ensure.ts): before a command that runs the app's
-// code, remove any localized checkout's own copy of what the app provides.
-installOneCopyHook(program);
+// Before a command that runs the app's code, report drift between the
+// localized checkouts and what npm installed (localize/drift.ts). Never fails it.
+installDriftHook(program);
 
 const unknownCommand = unknownCommandError(program, process.argv.slice(2));
 if (unknownCommand) {

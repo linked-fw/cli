@@ -30,9 +30,9 @@
   },
   "scripts": {
     "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib && npm run chmod-bin",
-    "chmod-bin": "chmod +x lib/esm/launch.js",
+    "chmod-bin": "node -e \"require('fs').chmodSync('lib/esm/launch.js', 0o755)\"",
     "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && tsc -p tsconfig-esm.json",
-    "copy-to-lib": "echo '💫 Copying CSS assets to lib folder' && copyfiles -u 1 'src/**/*.css' lib/esm",
+    "copy-to-lib": "echo Copying CSS assets to lib folder && copyfiles -u 1 \"src/**/*.css\" lib/esm",
     "dev": "tsc -p tsconfig-esm.json -w",
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "jest --config jest.config.cjs",
@@ -65,6 +65,7 @@
   "files": [
     "lib",
     "defaults",
+    "hooks",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

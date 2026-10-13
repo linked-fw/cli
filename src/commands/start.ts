@@ -15,6 +15,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
+import {importFile, isPathInside} from '../utils/platform.js';
 import fsExtra from 'fs-extra';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
 
@@ -264,21 +265,33 @@ function workspacePackageForPath(
   pkgs: WorkspacePackage[],
 ): string | null {
   for (const p of pkgs) {
-    if (filepath.startsWith(p.srcDir + path.sep) || filepath === p.srcDir) {
+    // The watcher's path may use `/` on Windows, and differ in case there.
+    if (isPathInside(filepath, p.srcDir)) {
       return p.name;
     }
   }
   return null;
 }
 
+/**
+ * The command that opens `url` in the default browser. Windows' `start` is a
+ * cmd.exe built-in, not a program, so there it is `explorer.exe <url>`.
+ */
+export function browserCommand(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+): {command: string; args: string[]} {
+  if (platform === 'darwin') return {command: 'open', args: [url]};
+  if (platform === 'win32') return {command: 'explorer.exe', args: [url]};
+  return {command: 'xdg-open', args: [url]};
+}
+
 function openBrowser(url: string): void {
-  const cmd =
-    process.platform === 'darwin'
-      ? 'open'
-      : process.platform === 'win32'
-        ? 'start'
-        : 'xdg-open';
-  spawn(cmd, [url], {detached: true, stdio: 'ignore'}).unref();
+  const {command, args} = browserCommand(url);
+  const child = spawn(command, args, {detached: true, stdio: 'ignore'});
+  // A missing opener must not take the dev server down.
+  child.on('error', (e) => console.warn(`[linked] could not open ${url}: ${e.message}`));
+  child.unref();
 }
 
 function installShortcuts(opts: {url: string; onRestart: () => void}): void {
@@ -366,7 +379,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   const linkedConfigPath = resolveLinkedConfigPath(cwd);
   let linkedConfig: any = {};
   if (fsExtra.existsSync(linkedConfigPath)) {
-    linkedConfig = (await import(linkedConfigPath)).default ?? {};
+    linkedConfig = (await importFile(linkedConfigPath)).default ?? {};
   }
   linkedConfig.server = linkedConfig.server || {};
   const apiOnly = isApiOnly(opts, linkedConfig);

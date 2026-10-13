@@ -2,6 +2,7 @@ import {execFile} from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import {pathToFileURL} from 'url';
 import {declaresShape} from './shapeNames.js';
 
 /**
@@ -208,7 +209,7 @@ const runProbe = (
         env: {
           ...process.env,
           ...env,
-          LINKED_PROBE_MODULE: 'file://' + modulePath,
+          LINKED_PROBE_MODULE: pathToFileURL(modulePath).href,
         },
         timeout: timeoutMs,
         maxBuffer: 64 * 1024 * 1024,
@@ -318,7 +319,7 @@ export const inspectShapeReferences = async (
   for (const name of new Set([ownName, pkgJson.name])) {
     entries[packageNameToSlug(name)] = {
       name,
-      specifier: fs.existsSync(ownEntry) ? 'file://' + ownEntry : name,
+      specifier: fs.existsSync(ownEntry) ? pathToFileURL(ownEntry).href : name,
     };
   }
   const env = {

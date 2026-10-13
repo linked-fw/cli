@@ -18,7 +18,6 @@ import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
-import {describeSkipped, localizedDedupe} from './localized-dedupe.js';
 import {
   discoverInstalledLinkedPackages,
   isLinkedPackageJson,
@@ -372,10 +371,11 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
  * ones that ship `src/`.
  *
  * A dep ships `src/` when it is a symlinked workspace clone, a `link:`/`portal:`
- * dev install, or a LOCALIZED checkout (`packages-local/<pkg>`, in no workspace
- * glob). That's what lets a STANDALONE app (not itself a workspace root — e.g. a
- * per-branch clone under /apps) resolve a linked package's `.tsx` sources with
- * extension probing, instead of falling through to the package's
+ * dev install, or a LOCALIZED checkout (`packages-local/<pkg>`, in an app
+ * not set up for localizing yet). That's what lets a STANDALONE app (not
+ * itself a workspace root — e.g. a per-branch clone under /apps) resolve a
+ * linked package's `.tsx` sources with extension probing, instead of falling
+ * through to the package's
  * `development → ./src/*.ts` export (which misses `.tsx` like LinkedServer). A
  * prod/ejected app installs PUBLISHED packages (no `src/`) → not registered,
  * resolved via each package's `lib`.
@@ -398,8 +398,8 @@ export async function discoverLinkedSourceDependencies(
 ): Promise<WorkspaceEntry[]> {
   const out: WorkspaceEntry[] = [];
   const seen = new Set<string>();
-  // The walk (breadth-first, keyed on the installed directory) is shared with
-  // `resolve.dedupe` and `linked localize`; see discoverInstalledLinkedPackages.
+  // The walk is breadth-first and keyed on the installed directory; see
+  // discoverInstalledLinkedPackages.
   for (const pkg of await discoverInstalledLinkedPackages(cwd)) {
     const entry = await readSourcePackage(pkg.realRoot);
     if (entry && !seen.has(entry.name)) {
@@ -471,9 +471,10 @@ export async function discoverWorkspaces(
     }
   }
 
-  // 2. Linked deps installed as source — including a localized checkout that is
-  //    in no workspace glob. Shared with the `linked start` watch set; see
-  //    discoverLinkedSourceDependencies above. Glob entries win on a name clash.
+  // 2. Linked deps installed as source — including a localized checkout in an
+  //    app whose globs do not cover `packages-local/*` yet. Shared with the
+  //    `linked start` watch set; see discoverLinkedSourceDependencies above.
+  //    Glob entries win on a name clash.
   for (const entry of await discoverLinkedSourceDependencies(cwd)) {
     if (seen.has(entry.name)) continue;
     seen.add(entry.name);
@@ -622,13 +623,24 @@ export function ssrNoExternal(
 const STANDALONE_DEDUPE = ['@_linked/server-utils', '@_linked/react'];
 
 /**
- * `resolve.dedupe` for every mode: the localized packages, what their checkouts
- * import that the app has at a version they accept, and React — see
- * `localizedDedupe`. Duplicates come from localization (a checkout's own
- * `node_modules`), so that is what is detected; an app with nothing localized
- * dedupes only React.
+ * Deduped in every mode when the app has them installed: one React for the
+ * whole tree, whoever imports it. A workspace member's own `react` (an older
+ * checkout, a package with a stale lockfile) would otherwise give hooks a
+ * second dispatcher.
  */
-export {localizedDedupe} from './localized-dedupe.js';
+const REACT_DEDUPE = ['react', 'react-dom'];
+
+/** `resolve.dedupe`: the standalone pair when standalone, then React where the app has it. */
+async function dedupeFor(
+  appRoot: string,
+  isStandalone: boolean,
+): Promise<string[]> {
+  const react: string[] = [];
+  for (const name of REACT_DEDUPE) {
+    if (await readInstalledPkg(name, appRoot)) react.push(name);
+  }
+  return [...(isStandalone ? STANDALONE_DEDUPE : []), ...react];
+}
 
 /**
  * The `process.env.*` values inlined into the browser bundle — and only there.
@@ -664,11 +676,6 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     // (CN monorepo or its workspace-member clones) this is false and none
     // of the standalone-gated branches below apply.
     const isStandalone = isDev && workspaces.length === 0;
-    const dedupe = await localizedDedupe(process.cwd());
-    if (isDev) {
-      const skippedLine = describeSkipped(dedupe.skipped);
-      if (skippedLine) console.warn(skippedLine);
-    }
 
     // The app's published framework deps — excluded from Vite's dep-optimizer below
     // (`optimizeDeps.exclude`) so the browser's native ESM graph loads ONE copy of each.
@@ -749,9 +756,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
                 // Workspace-internal `./Sibling.js` → `.tsx` / `.ts` rewrite.
                 if (
                   importer &&
-                  importer.includes(`${path.sep}packages${path.sep}`) &&
+                  // Vite's ids use `/`, on Windows too.
+                  /[\\/]packages[\\/]/.test(importer) &&
                   /\.(jsx?)$/.test(id) &&
-                  (id.startsWith('.') || id.startsWith('/'))
+                  (id.startsWith('.') || path.isAbsolute(id))
                 ) {
                   const importerDir = path.dirname(importer);
                   const base = path.resolve(importerDir, id);
@@ -764,7 +772,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
                 // Bare workspace specifier — resolve directly to src/.
                 if (
                   !id.startsWith('.') &&
-                  !id.startsWith('/') &&
+                  !path.isAbsolute(id) &&
                   workspaces.length > 0
                 ) {
                   const resolved = await resolveWorkspaceSpecifier(id, workspaces);
@@ -870,16 +878,18 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // conditions at Vite's defaults there (undefined = untouched), keeping
       // CN dev byte-for-byte unchanged.
       //
-      // DEDUPE, every mode: see `localizedDedupe`. Standalone also keeps its two
-      // context-holding packages even when they are not found on disk, so the two
-      // `ssrLoadModule` loads (LinkedServer + the app graph) resolve to ONE
-      // `server-utils`/`react` instance — otherwise their `AppContext` objects
-      // differ and `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
+      // DEDUPE, standalone only: its two context-holding packages, even when
+      // they are not found on disk, so the two `ssrLoadModule` loads
+      // (LinkedServer + the app graph) resolve to ONE `server-utils`/`react`
+      // instance — otherwise their `AppContext` objects differ and
+      // `useAppContext()` returns null. Pairs with `ssr.noExternal` below.
+      // Every mode also dedupes `react` and `react-dom` when the app has them
+      // (`dedupeFor`). Localized checkouts need nothing more: they are
+      // workspace members (`packages-local/*`), so npm links and dedupes them
+      // like any other.
       resolve: {
         ...(isStandalone ? {conditions: ['module', 'node']} : {}),
-        dedupe: [
-          ...new Set([...(isStandalone ? STANDALONE_DEDUPE : []), ...dedupe.names]),
-        ],
+        dedupe: await dedupeFor(process.cwd(), isStandalone),
       },
       // `ssr.external` is a minimal allowlist of
       // npm deps that genuinely can't (or shouldn't) go through Vite's

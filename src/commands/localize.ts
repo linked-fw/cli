@@ -1,81 +1,60 @@
 /**
  * `linked localize` / `linked delocalize` — develop an npm dependency from a
- * git checkout.
+ * git checkout. The commander adapter over `../localize/`.
  *
- * All of the work lives in `../localize/` (once the separate
- * `@_linked/localize` package), which knows nothing about this framework on
- * purpose: it resolves a package's repository from the registry, clones it,
- * installs inside the checkout and symlinks it into `node_modules`, without
- * touching `package.json` or `package-lock.json`. This module is the commander
- * adapter over it.
+ * A checkout lives in `packages-local/`, which the app lists in its
+ * `workspaces` (`"packages-local/*"`), so npm links and dedupes it like any
+ * workspace member; the committed lockfile is restored after every install by
+ * the cli's `hooks/lock-at-rest.cjs`. localize clones (from the registry's
+ * `repository`, or `--repo`/`--subdir`), adopts (`--adopt`), parks
+ * (`delocalize`), takes back (`--parked`) and reports (`--list`, drift).
  *
- * The one thing it deliberately does not know is how to build what it cloned.
- * That is the seam this module fills: `@_linked/cli` passes `build: 'linked
- * build'`, because in this ecosystem that is what building a package means.
- * A failing build only warns — a package whose build is broken is usually
- * exactly what you localized it to fix.
+ * Both commands act on the app root (app-root.ts): the topmost directory
+ * whose `package.json` has `workspaces`, so running them inside a workspace
+ * member still sets up and installs the app.
  *
  * Packages are named exactly as npm names them (`@_linked/rdfs`, `lodash`).
- * There is no short-name expansion and no org probing: the repository comes
- * from the registry's `repository` field, so a name that npm cannot resolve is
- * an error rather than a guess.
+ * There is no short-name expansion and no org probing: a name that npm cannot
+ * resolve is an error rather than a guess.
  *
- * A checkout's own install leaves its own copies of `@_linked/core`, React and
- * any localized sibling in its `node_modules`, and Node loads those instead of
- * the app's: a localized package then never sees a localized sibling, and core
- * loads once per copy. localize removes those copies by default wherever the
- * app's version satisfies the checkout's ranges (`--no-prune` turns it off for
- * that checkout, and is recorded so the run-time check honours it too).
- * What the app provides is one rule, `providedPackages` (localize/provided.ts),
- * shared with the run-time check (`--ensure`, and before `linked start` etc.)
- * and Vite's dedupe.
- *
- * `--adopt` is the exception to "clone from the registry": it links a git
- * checkout that is already in `packages-local/` under its localize name, with
- * no clone and no lookup — a package created locally, or a clone put there by
- * hand. It takes no `--subdir`: an adopted checkout is the package itself.
+ * `--relink` and `--ensure` are kept as no-ops that exit 0, so an app whose
+ * `postinstall` or `pre*` scripts still call them keeps installing.
  */
 import process from 'node:process';
 
+import {findAppRoot} from '../localize/app-root.js';
 import {
   adopt,
-  checkOneCopy,
   defaultDeps,
   delocalize,
   list,
   localize,
-  reinstall,
-  relink,
+  localizeParked,
 } from '../localize/index.js';
 
-/** The build command `localize` runs inside a fresh checkout by default. */
-export const DEFAULT_BUILD_COMMAND = 'linked build';
+export {DEFAULT_BUILD_COMMAND} from '../localize/index.js';
 
 export interface LocalizeCommandOptions {
   adopt?: boolean;
+  parked?: boolean;
   list?: boolean;
   check?: boolean;
+  /** Deprecated: npm links checkouts now. Exits 0 with no output. */
   relink?: boolean;
-  /** Check every checkout for a copy of what the app provides and prune it; exit 0. No names. */
+  /** Deprecated: drift is reported before `linked start` and by `--list`. Exits 0 with one hint. */
   ensure?: boolean;
-  /** `npm install` in this package's checkout, then prune it. */
-  reinstall?: string;
   dir?: string;
   repo?: string;
   subdir?: string;
   build?: string;
   force?: boolean;
   purge?: boolean;
-  /** Commander's `--no-prune` sets this to false; absent means on. */
-  prune?: boolean;
 }
 
-/** localize's prune options for a run: on unless explicitly turned off. */
-export function pruneOptions(prune: boolean | undefined = true): {
-  prune: boolean;
-} {
-  return {prune: prune !== false};
-}
+/** What `--ensure` prints, once, on stderr. */
+export const ENSURE_HINT =
+  '[localize] --ensure is deprecated and does nothing: checkouts are workspace members, so npm ' +
+  'dedupes them. Remove it from your scripts; `linked localize --list --check` reports drift.';
 
 /**
  * `localize` reports failure through an exit code rather than by throwing, so
@@ -86,87 +65,54 @@ export async function runLocalize(
   packages: string[] = [],
   options: LocalizeCommandOptions = {},
 ): Promise<void> {
-  const deps = defaultDeps(process.cwd());
-  const prune = pruneOptions(options.prune);
-
   if (options.relink) {
-    process.exitCode = relink(deps, prune);
-    return;
-  }
-  if (options.ensure) {
-    if (packages.length) {
-      // A name would read as "check only these", which it is not: say so
-      // rather than ignore it.
-      console.error(
-        '[localize] --ensure takes no package names: it checks every recorded checkout ' +
-          '(one localized with --no-prune is skipped). To reinstall one checkout and prune it: ' +
-          '`linked localize --reinstall <package>`.',
-      );
-      process.exitCode = 2;
-      return;
-    }
-    // `--ensure --no-prune` asks for nothing: a no-op, so a script can turn
-    // the check off without removing the hook.
-    if (prune.prune) checkOneCopy(deps.appRoot, deps);
-    // Run from an app's npm `pre*` scripts, so it never fails the script it
-    // guards (`checkOneCopy` never throws; it warns instead).
     process.exitCode = 0;
     return;
   }
-  if (options.reinstall) {
-    process.exitCode = reinstall(options.reinstall, prune, deps);
+  if (options.ensure) {
+    console.error(ENSURE_HINT);
+    process.exitCode = 0;
     return;
   }
-  if (options.adopt && packages.length === 0) {
-    console.error('[localize] --adopt needs at least one package name.');
+  const deps = defaultDeps(findAppRoot(process.cwd()));
+  const usage = (message: string) => {
+    console.error(`[localize] ${message}`);
     process.exitCode = 2;
-    return;
-  }
-  if (options.adopt && options.subdir) {
-    console.error(
-      '[localize] --adopt takes no --subdir: an adopted checkout is the package itself.',
+  };
+  if (options.adopt && packages.length === 0)
+    return usage('--adopt needs at least one package name.');
+  if (options.adopt && (options.subdir || options.repo))
+    return usage(
+      '--adopt takes no --repo or --subdir: an adopted checkout is used as it is.',
     );
-    process.exitCode = 2;
+  if (options.parked && (packages.length || options.adopt))
+    return usage(
+      '--parked takes back every parked checkout; it takes no package names.',
+    );
+  if (options.parked) {
+    process.exitCode = localizeParked({dir: options.dir}, deps);
     return;
   }
   if (options.list || packages.length === 0) {
     process.exitCode = list({check: options.check}, deps);
     return;
   }
-  // `--build ''` is how you ask for no build at all.
-  const build =
-    options.build === undefined ? DEFAULT_BUILD_COMMAND : options.build;
+  // `--build ''` is how you ask for no build at all; absent means the default.
+  const common = {dir: options.dir, build: options.build};
   if (options.adopt) {
-    process.exitCode = adopt(
-      packages,
-      {
-        force: options.force,
-        dir: options.dir,
-        repo: options.repo,
-        build,
-        ...prune,
-      },
-      deps,
-    );
+    process.exitCode = adopt(packages, common, deps);
     return;
   }
   process.exitCode = localize(
     packages,
-    {
-      force: options.force,
-      dir: options.dir,
-      repo: options.repo,
-      subdir: options.subdir,
-      build,
-      ...prune,
-    },
+    {...common, repo: options.repo, subdir: options.subdir},
     deps,
   );
 }
 
 /**
  * Adopt one checkout that already sits in `packages-local/` under its localize
- * name: install inside it, build it, link it and record it. This is how
+ * name: set the app up, install at the app root and build it. This is how
  * `create-package` hands a new package with its own repository to localize.
  *
  * @returns localize's exit code, rather than setting `process.exitCode`, so the
@@ -174,27 +120,19 @@ export async function runLocalize(
  */
 export async function adoptPackage(
   name: string,
-  options: {appRoot: string; build: string; repo?: string},
+  options: {appRoot: string; build?: string},
 ): Promise<number> {
   // Exit codes are localize's public contract; EXIT_WARNED (5) is the one a
-  // caller usually tolerates, meaning the build failed but the link is in place.
-  return adopt(
-    [name],
-    {
-      build: options.build,
-      repo: options.repo,
-      ...pruneOptions(),
-    },
-    defaultDeps(options.appRoot),
-  );
+  // caller usually tolerates, meaning the build failed but the checkout is installed.
+  return adopt([name], {build: options.build}, defaultDeps(options.appRoot));
 }
 
-/** `linked delocalize [packages...]` — unlink and forget; no names means all. */
+/** `linked delocalize [packages...]` — park the checkouts; no names means all. */
 export async function runDelocalize(
   packages: string[] = [],
   options: Pick<LocalizeCommandOptions, 'purge' | 'force'> = {},
 ): Promise<void> {
-  const deps = defaultDeps(process.cwd());
+  const deps = defaultDeps(findAppRoot(process.cwd()));
   process.exitCode = delocalize(
     packages,
     {purge: options.purge, force: options.force},

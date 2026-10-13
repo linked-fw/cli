@@ -41,10 +41,11 @@ describe('build-all package discovery', () => {
   afterEach(() => fs.rmSync(tmp, {recursive: true, force: true}));
 
   /**
-   * A tree shaped like Create Now's: an app root with six workspace members
+   * A tree shaped like a real app's: an app root with five workspace members
    * (one flagged app, one with no build script, one dependency that forgot
-   * the flag) plus localized checkouts in `packages-local/`, which is in no
-   * workspace glob.
+   * the flag, one the app does not depend on) plus localized checkouts in
+   * `packages-local/`, which this app's globs do not cover yet (it has not
+   * been set up by `linked localize`).
    */
   function makeTree() {
     writeJson(path.join(tmp, 'package.json'), {
@@ -78,6 +79,10 @@ describe('build-all package discovery', () => {
       linkedApp: true,
       scripts: buildScript,
     });
+    makePackage(path.join(tmp, 'packages', 'unrelated'), {
+      name: '@w/unrelated',
+      scripts: buildScript,
+    });
     makePackage(path.join(tmp, 'packages-local', 'dep'), {
       name: '@local/dep',
       linkedPackage: true,
@@ -90,7 +95,7 @@ describe('build-all package discovery', () => {
     });
   }
 
-  it('finds packages-local checkouts, which no workspace glob covers', () => {
+  it('finds packages-local checkouts even when no workspace glob covers them', () => {
     makeTree();
     const names = discoverLocalPackages(tmp)
       .map((p) => p.packageName)
@@ -102,11 +107,29 @@ describe('build-all package discovery', () => {
       '@w/inner-app',
       '@w/noscript',
       '@w/unflagged',
+      '@w/unrelated',
     ]);
     expect(
       discoverLocalPackages(tmp).find((p) => p.packageName === '@local/dep')
         ?.source,
     ).toBe('local-packages-dir');
+  });
+
+  it('finds a checkout once when the `packages-local/*` glob covers it', () => {
+    makeTree();
+    const pkgPath = path.join(tmp, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    pkg.workspaces = ['packages/*', 'packages-local/*'];
+    writeJson(pkgPath, pkg);
+
+    const found = discoverLocalPackages(tmp).filter(
+      (p) => p.packageName === '@local/dep',
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0].source).toBe('workspace');
+    expect(
+      planBuildAll(tmp, tmp).skipped.map((s) => s.packageName),
+    ).not.toContain('@local/dep');
   });
 
   it('records the facts callers filter on rather than filtering itself', () => {
@@ -150,7 +173,7 @@ describe('build-all package discovery', () => {
     );
     expect(reasons['@w/noscript']).toMatch(/no `build` script/);
     expect(reasons['@w/inner-app']).toMatch(/linked app/);
-    expect(reasons['@local/unrelated']).toMatch(/dependency tree/);
+    expect(reasons['@w/unrelated']).toMatch(/dependency tree/);
 
     // Nothing is discovered silently: found == built + skipped, exactly.
     const accounted = [...plan.build.keys(), ...plan.skipped.map((s) => s.packageName)];
@@ -169,19 +192,15 @@ describe('build-all package discovery', () => {
       '@local/unrelated',
       '@w/flagged',
       '@w/unflagged',
+      '@w/unrelated',
     ]);
   });
 
   it('builds a localized package the app does not declare yet', () => {
-    // A package made with `create-package --location packages-local` is linked
-    // and recorded, but cannot be in `dependencies` until it is published.
+    // A package made with `create-package --location packages-local` is a
+    // checkout in `packages-local/`, but cannot be in `dependencies` until it
+    // is published. The directory is the record: being there is enough.
     makeTree();
-    writeJson(path.join(tmp, 'local-packages.json'), {
-      version: 1,
-      packages: {
-        '@local/unrelated': {path: 'packages-local/unrelated', branch: 'main'},
-      },
-    });
     const plan = planBuildAll(tmp, tmp);
     expect([...plan.build.keys()]).toContain('@local/unrelated');
     expect(plan.skipped.map((s) => s.packageName)).not.toContain(
@@ -189,12 +208,17 @@ describe('build-all package discovery', () => {
     );
   });
 
-  it('treats an unreadable local-packages.json as nothing localized', () => {
+  it('ignores a leftover local-packages.json: only the directories count', () => {
     makeTree();
-    fs.writeFileSync(path.join(tmp, 'local-packages.json'), '{not json');
+    writeJson(path.join(tmp, 'local-packages.json'), {
+      version: 1,
+      packages: {
+        '@w/unrelated': {path: 'packages/unrelated', branch: 'main'},
+      },
+    });
     const plan = planBuildAll(tmp, tmp);
     expect(
-      plan.skipped.find((s) => s.packageName === '@local/unrelated')?.reason,
+      plan.skipped.find((s) => s.packageName === '@w/unrelated')?.reason,
     ).toMatch(/dependency tree/);
   });
 });

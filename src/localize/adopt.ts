@@ -1,85 +1,80 @@
 /**
- * `adopt` -- localize a checkout that is ALREADY in the checkout directory,
- * without asking the registry or a remote anything.
+ * `--adopt` and `--parked` -- the localize run for checkouts that need no
+ * clone.
  *
- * `localize` gets its checkout by resolving the published `repository` and
- * cloning it. That cannot work for two kinds of checkout that nonetheless
- * belong in `<dir>`:
+ * `adopt` takes a checkout that is ALREADY in `packages-local/` -- a package
+ * created locally and never published (`create-package --location
+ * packages-local`), or a clone put there by hand -- and runs the rest of
+ * localize on it: app setup, git hooks, the root `npm install`, its build. No
+ * registry lookup, no clone, no pull. It is found by its name among the
+ * members, else at `packages-local/<checkoutName>`, so `localize` and `adopt`
+ * agree about where a package lives.
  *
- * - a package created locally and never published, which may not even have a
- *   remote yet;
- * - a clone that was put there by hand.
- *
- * `adopt` takes the checkout as it finds it -- no clone, no pull, no fetch --
- * and runs the same tail as `localize`: install inside it, build, symlink,
- * record. The checkout has to be a git checkout at `<dir>/<checkoutName>`, so
- * that `localize` and `adopt` can never disagree about where a package lives.
- *
- * The recorded `repo` is `--repo` when given, else the checkout's `origin`,
- * else what an earlier run recorded, else absent. Absent is fine: `relink`,
- * `--list` and `remove` never need it.
+ * `localizeParked` takes back every checkout `linked delocalize` parked.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
 import {EXIT_REFUSED, LocalizeError} from './errors.js';
-import {
-  forEachName,
-  guardForeignLink,
-  installLinkAndRecord,
-  reportError,
-} from './localize.js';
-import type {LocalizeOptions, OneResult} from './localize.js';
-import type {ManifestEntry} from './manifest.js';
-import {checkoutNameFor, normalizeGitUrl} from './resolve.js';
+import {checkoutRepoRoot, readJson} from './fsops.js';
+import {runLocalize, unpark} from './localize.js';
+import type {LocalizeOptions, Prepared} from './localize.js';
+import {LOCAL_DIR, localMembers, parkedMembers} from './members.js';
+import {checkoutNameFor} from './resolve.js';
 import type {Deps} from './run.js';
-import {isGitCheckout, readJson} from './fsops.js';
 
 /**
- * @param {string[]} names  full npm package names
- * @param {object} opts  `{dir, repo, build, force}`
- * @param {object} deps  `{appRoot, run, log, warn, error}`
- * @returns {number} the process exit code, as `localize` returns it.
+ * @param names  full npm package names
+ * @returns the process exit code, as `localize` returns it.
  */
 export function adopt(
   names: string[],
-  opts: Omit<LocalizeOptions, 'subdir'>,
+  opts: Pick<LocalizeOptions, 'dir' | 'build'>,
   deps: Deps,
 ): number {
-  if (opts.repo && names.length > 1) {
-    return reportError(
-      new LocalizeError(
-        `--repo names one repository, so it can only be used when adopting one package.`,
-        EXIT_REFUSED,
-      ),
-      deps,
-    );
-  }
-  return forEachName(names, opts, deps, adoptOne);
+  return runLocalize(names, opts, deps, prepareAdopt);
 }
 
-function adoptOne(
-  name: string,
-  dir: string,
-  recorded: ManifestEntry | undefined,
-  opts: LocalizeOptions,
+/** Move every parked checkout back, then one install. No builds: each is as it was. */
+export function localizeParked(
+  opts: Pick<LocalizeOptions, 'dir'>,
   deps: Deps,
-): OneResult {
-  const relPkg = path.join(dir, checkoutNameFor(name));
-  const pkgDir = path.join(deps.appRoot, relPkg);
+): number {
+  const names = parkedMembers(deps.appRoot).map((m) => m.name);
+  if (!names.length) {
+    deps.log('[localize] nothing is parked.');
+    return 0;
+  }
+  return runLocalize(names, opts, deps, (name) => {
+    const parked = parkedMembers(deps.appRoot).find((m) => m.name === name);
+    return parked ? unpark(parked, deps) : null;
+  });
+}
+
+function prepareAdopt(
+  name: string,
+  _opts: LocalizeOptions,
+  deps: Deps,
+): Prepared {
+  const member = localMembers(deps.appRoot).find((m) => m.name === name);
+  const relDir = member?.dir ?? `${LOCAL_DIR}/${checkoutNameFor(name)}`;
+  const pkgDir = path.join(deps.appRoot, relDir);
 
   if (!fs.existsSync(pkgDir)) {
+    const parked = parkedMembers(deps.appRoot).some((m) => m.name === name);
     throw new LocalizeError(
-      `there is nothing to adopt at ${relPkg}.\n` +
-        `adopt links a checkout that is already there. To clone a published package instead:\n` +
-        `  linked localize ${name}`,
+      `there is nothing to adopt at ${relDir}.\n` +
+        (parked
+          ? `${name} is parked. To take it back:\n  linked localize ${name}`
+          : `adopt installs a checkout that is already there. To clone a published package instead:\n` +
+            `  linked localize ${name}`),
       EXIT_REFUSED,
     );
   }
-  if (!isGitCheckout(pkgDir)) {
+  if (!checkoutRepoRoot(pkgDir, deps.appRoot)) {
     throw new LocalizeError(
-      `${relPkg} is not a git checkout. Run \`git init\` in it first -- localize tracks a ` +
-        `checkout's branch, and a checkout without history has none.`,
+      `${relDir} is not a git checkout. Run \`git init\` in it first -- a checkout in ` +
+        `${LOCAL_DIR}/ is its own repository, never part of the app's.`,
       EXIT_REFUSED,
     );
   }
@@ -88,38 +83,12 @@ function adoptOne(
   if (declared !== name) {
     throw new LocalizeError(
       declared
-        ? `${relPkg} declares itself as "${declared}", not "${name}".`
-        : `${relPkg} has no package.json naming it, so it is not the package "${name}".`,
+        ? `${relDir} declares itself as "${declared}", not "${name}".`
+        : `${relDir} has no package.json naming it, so it is not the package "${name}".`,
       EXIT_REFUSED,
     );
   }
 
-  if (recorded?.subdir) {
-    deps.warn(
-      `[localize] ${name} was recorded inside a monorepo (${recorded.path}); adopt replaces that ` +
-        `with ${relPkg}.`,
-    );
-  }
-
-  guardForeignLink(name, dir, opts, deps);
-
-  const repo = opts.repo
-    ? normalizeGitUrl(opts.repo)
-    : (originOf(pkgDir, deps) ?? recorded?.repo);
-  deps.log(
-    `[localize] adopting ${relPkg}${repo ? ` (${repo})` : ' (no remote)'}`,
-  );
-
-  return installLinkAndRecord(
-    {npmName: name, clone: pkgDir, relPkg, pkgDir, repo},
-    opts,
-    deps,
-  );
-}
-
-/** The checkout's `origin` URL, or undefined when it has none. Read, never fetched. */
-function originOf(pkgDir, deps) {
-  const r = deps.run('git', ['remote', 'get-url', 'origin'], {cwd: pkgDir});
-  const url = r.stdout.trim();
-  return r.status === 0 && url ? normalizeGitUrl(url) : undefined;
+  deps.log(`[localize] adopting ${relDir}`);
+  return {name, dir: relDir, build: true};
 }

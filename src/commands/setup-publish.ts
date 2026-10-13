@@ -1,13 +1,14 @@
 import chalk from 'chalk';
 import fs from 'fs-extra';
-import path, {dirname} from 'path';
-import {execp, execPromise} from '../utils.js';
+import path from 'path';
+import {fileURLToPath} from 'url';
+import {execPromise} from '../utils.js';
+import {withEolOf} from '../utils/platform.js';
+import {runCommand} from '../utils/spawn.js';
 
-const dirname__ =
-  typeof __dirname !== 'undefined'
-    ? __dirname
-    : //@ts-ignore
-      dirname(import.meta.url).replace('file:/', '');
+// This module's directory. fileURLToPath, not the URL with `file:/` cut off,
+// which on Windows leaves `//C:/...`.
+const dirname__ = path.dirname(fileURLToPath(import.meta.url));
 
 // defaults/setup-publish/ lives at packages/cli/defaults/setup-publish/
 // This file compiles to lib/{esm,cjs}/commands/setup-publish.js — go up three
@@ -291,9 +292,8 @@ async function updateGitignore(cwd: string): Promise<void> {
     '#  are legit src files.)',
     'src/**/*.js.map',
   ];
-  const existing = fs.existsSync(gitignorePath)
-    ? fs.readFileSync(gitignorePath, 'utf8').split('\n')
-    : [];
+  const original = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf8') : '';
+  const existing = original ? original.split('\n') : [];
   const existingSet = new Set(existing.map((l) => l.trim()));
   const toAdd = entries.filter((e) => e && !existingSet.has(e.trim()));
   if (toAdd.length === 0) {
@@ -305,7 +305,7 @@ async function updateGitignore(cwd: string): Promise<void> {
     '',
     ...entries,
   ].join('\n');
-  fs.writeFileSync(gitignorePath, merged + '\n');
+  fs.writeFileSync(gitignorePath, withEolOf(merged + '\n', original));
   console.log(chalk.green('  ✓') + ' .gitignore');
 }
 
@@ -353,7 +353,7 @@ async function updateNpmrc(cwd: string, workflowOrg: string): Promise<void> {
     console.log(chalk.gray('  · .npmrc already has the required settings'));
     return;
   }
-  fs.writeFileSync(npmrcPath, next);
+  fs.writeFileSync(npmrcPath, withEolOf(next, existing));
   console.log(chalk.green('  ✓') + ' .npmrc');
 }
 
@@ -408,7 +408,8 @@ async function patchPackageJson(
   repoSlug: string,
 ): Promise<void> {
   if (applyPackageJsonPatches(pkgJson, repoSlug)) {
-    fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
+    const original = fs.readFileSync(pkgJsonPath, 'utf8');
+    fs.writeFileSync(pkgJsonPath, withEolOf(JSON.stringify(pkgJson, null, 2) + '\n', original));
     console.log(chalk.green('  ✓') + ' package.json (publishConfig + changesets devDeps)');
   } else {
     console.log(chalk.gray('  · package.json already configured'));
@@ -488,12 +489,13 @@ async function ensureLockfile(cwd: string): Promise<void> {
       const src = path.join(cwd, file);
       if (fs.existsSync(src)) fs.copyFileSync(src, path.join(tmpBase, file));
     }
-    await execp(
-      `npm install --package-lock-only --ignore-scripts --cache ${cacheDir}`,
-      false,
-      true,
-      {cwd: tmpBase},
+    // An argument list: the temp directory may hold a space (a Windows user name).
+    const install = await runCommand(
+      'npm',
+      ['install', '--package-lock-only', '--ignore-scripts', '--cache', cacheDir],
+      {cwd: tmpBase, echo: true},
     );
+    if (install.status !== 0) throw new Error(`npm install exited with ${install.status}`);
     const lockPath = path.join(tmpBase, 'package-lock.json');
     if (fs.existsSync(lockPath)) {
       fs.copyFileSync(lockPath, path.join(cwd, 'package-lock.json'));
@@ -535,12 +537,13 @@ async function configureGithub(repoSlug: string): Promise<void> {
   const payload = JSON.stringify(buildBranchProtectionPayload());
 
   try {
-    // Use --input - to pass the JSON payload via stdin
-    await execPromise(
-      `echo '${payload.replace(/'/g, "'\\''")}' | gh api -X PUT /repos/${repoSlug}/branches/main/protection --input -`,
-      false,
-      false,
+    // The JSON payload on stdin (--input -), with no shell: cmd.exe has no single quotes.
+    const put = await runCommand(
+      'gh',
+      ['api', '-X', 'PUT', `/repos/${repoSlug}/branches/main/protection`, '--input', '-'],
+      {input: payload},
     );
+    if (put.status !== 0) throw new Error(put.stderr || put.stdout);
     console.log(chalk.green('  ✓') + ` branch protection enabled on ${repoSlug}/main`);
     // A repo can pin a required check in a *ruleset* as well as in classic branch protection, and
     // the two are stored separately — this call only writes the classic one, so a leftover ruleset

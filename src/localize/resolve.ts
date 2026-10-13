@@ -48,8 +48,7 @@ export interface Resolved {
 /**
  * @param {string} name  a full npm package name (`lodash`, `@scope/thing`)
  * @param {object} deps
- * @param {object} [override]  `{repo, subdir}` from `--repo`/`--subdir` or from
- *   a manifest entry recorded by an earlier run
+ * @param {object} [override]  `{repo, subdir}` from `--repo`/`--subdir`
  * @returns {Resolved}
  * @throws {LocalizeError} code 4 when the registry has no usable `repository`.
  */
@@ -125,9 +124,8 @@ function readRepositoryField(meta, name) {
   const missing = () =>
     new LocalizeError(
       `"${name}" publishes no usable "repository" field, so there is nothing to clone.\n` +
-        `localize never guesses at a repository URL. Pass it once:\n` +
-        `  linked localize ${name} --repo <git-url> [--subdir <path-inside-the-repo>]\n` +
-        `It is recorded in local-packages.json, so you only pass it the first time.`,
+        `localize never guesses at a repository URL. Pass it:\n` +
+        `  linked localize ${name} --repo <git-url> [--subdir <path-inside-the-repo>]`,
       EXIT_NOT_FOUND,
     );
 

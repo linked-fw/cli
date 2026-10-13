@@ -1,6 +1,8 @@
 import {spawnSync} from 'node:child_process';
 import process from 'node:process';
 
+import {spawnCommandSync} from '../utils/spawn.js';
+
 /**
  * The single seam through which localize reaches the outside world.
  *
@@ -13,6 +15,7 @@ import process from 'node:process';
 export interface RunOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** `cmd` is one command line for the platform's shell; `args` must be empty. */
   shell?: boolean;
 }
 
@@ -38,13 +41,17 @@ export interface Deps {
 
 export function makeRun(defaultCwd: string): Run {
   return function run(cmd, args, opts: RunOptions = {}) {
-    const r = spawnSync(cmd, args, {
+    const options = {
       cwd: opts.cwd ?? defaultCwd,
-      encoding: 'utf8',
+      encoding: 'utf8' as const,
       env: opts.env ?? process.env,
-      shell: opts.shell ?? false,
       maxBuffer: 64 * 1024 * 1024,
-    });
+    };
+    // Without a shell, `npm` and the other shims go through the one helper
+    // that knows how to start them on Windows.
+    const r = opts.shell
+      ? spawnSync(cmd, args, {...options, shell: true})
+      : spawnCommandSync(cmd, args, options);
     return {
       status: r.status === null ? 1 : r.status,
       stdout: r.stdout ?? '',

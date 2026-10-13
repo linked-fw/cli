@@ -13,7 +13,7 @@ npm install --save-dev @_linked/cli
 One executable ships in this package: `linked`. (`lnk`, `lincd` and `lincd-cli` were dropped in
 [#40](https://github.com/linked-fw/cli/pull/40).)
 
-In a project that has `@_linked/cli` installed — any linked app, including Create Now — run it as
+In a project that has `@_linked/cli` installed — any linked app — run it as
 `npx linked <command>`. Everywhere else, name the package: `npx @_linked/cli <command>`.
 A bare `npx linked` outside such a project does **not** reach this CLI: npm resolves it to the
 unrelated `linked` package on the registry, which has no binary, and fails with
@@ -77,9 +77,11 @@ linked create-package @_linked/foo --remote <git-url> [--push] # the same, with 
 - `packages/foo` — a workspace member: added to the app's `dependencies` (and `packages/*` to its
   `workspaces` if missing), installed at the app root.
 - `packages-local/_linked-foo` — the name `linked localize` uses. `git init` and a first commit,
-  `origin` and `repository.url` from `--remote`, pushed with `--push`; then installed, built,
-  linked and recorded by `linked localize --adopt`. It is not added to the app's `dependencies`
-  until it is published. `--remote` or `--push` imply this location.
+  `origin` and `repository.url` from `--remote`, pushed with `--push`; then handed to
+  `linked localize --adopt`, which sets the app up for checkouts if needed (`packages-local/*` in
+  `workspaces`, the lock-at-rest hook, `.gitignore` and the matching lockfile; commit those), installs at the app root so npm
+  links it as a workspace member, and builds it. It is not added to the app's `dependencies` until
+  it is published. `--remote` or `--push` imply this location.
 
 Any of the three flags skips the question. With none of them and no terminal, it exits 1 and says
 which flag to pass. An existing target folder is refused. Outside an app nothing changes: the
@@ -261,42 +263,41 @@ linked app-doctor                 # in an app: check optimizeDeps.include and Re
 
 ### Developing a dependency from a git checkout
 
-`linked localize` clones an npm dependency, installs inside the checkout, builds it with
-`linked build` and symlinks it into `node_modules` — **without** touching `package.json` or
-`package-lock.json`, so the manifest still describes the released dependency and CI is unaffected.
-Full guide: [docs/localize.md](docs/localize.md).
+`linked localize` clones an npm dependency into `packages-local/`, which the app lists in its
+`workspaces` (`"packages-local/*"`), so npm links and dedupes the checkout like any workspace
+member. A hook the app's `postinstall` and `dependencies` scripts run (`hooks/lock-at-rest.cjs`
+in this package, called through a guard that does nothing where the cli is not installed) puts the
+committed `package-lock.json` back after every install, so the working tree stays clean and CI, which has no checkouts,
+installs from the registry as always. Full guide: [docs/localize.md](docs/localize.md).
 
 ```bash
-linked localize @_linked/rdfs     # clone, install, build, symlink into node_modules
-linked localize                   # report what is localized (same as --list)
-linked localize --list --check    # exit 1 when something recorded is not actually linked
-linked localize --relink          # recreate the recorded symlinks — run this from postinstall
-linked localize @_linked/rdfs --adopt  # link a checkout already in packages-local/_linked-rdfs, no clone
-linked localize --reinstall @_linked/rdfs  # npm install inside the checkout, then prune it
-linked localize --ensure          # remove checkouts' own copies of what the app provides; exit 0 (no names)
-linked delocalize @_linked/rdfs   # unlink and forget, keeping the checkout
-linked delocalize --purge         # undo everything and delete the checkouts
+linked localize @_linked/rdfs          # clone, npm install at the app root, build
+linked localize @_linked/rdfs --adopt  # the same for a checkout already in packages-local/_linked-rdfs
+linked localize                        # checkouts, parked checkouts and drift (same as --list)
+linked localize --list --check         # print only the drift; exit 1 when there is any
+linked delocalize @_linked/rdfs        # park it in .packages-local.parked/, back to the registry copy
+linked localize --parked               # take every parked checkout back
+linked delocalize @_linked/rdfs --purge  # delete it instead (exit 6 on unsaved work on any branch, a stash, or git failing)
 ```
 
-Checkouts go in `packages-local/` under the npm name with the scope flattened:
-`@_linked/rdfs` → `packages-local/_linked-rdfs`. `--list` also flags a directory there that
-`local-packages.json` does not record (`UNRECORDED`).
+The first `linked localize` in an app sets it up — `"packages-local/*"` in `workspaces`, the
+lock-at-rest hook in `postinstall` and `dependencies`, `packages-local/` and
+`.packages-local.parked/` in `.gitignore`, and the matching lockfile (made before anything is
+cloned) — so `git status` then shows exactly `package.json`, `package-lock.json` and `.gitignore`
+to commit ([details](docs/localize.md#set-up)). Run it anywhere in the app: it acts on the topmost
+directory whose `package.json` has `workspaces`. It also writes git hooks into the clone:
+`pre-commit` refuses a manifest that names a checkout, and `post-merge`/`post-checkout` run
+`npm install` when dependencies changed. They work for an app below the git top level; under
+`core.hooksPath` (husky) localize writes nothing and prints the line to add to each hook. Use
+`npm install`, not `npm ci`, while checkouts are present.
 
-**One copy of each package the app provides.** A checkout's own install leaves its own copies of
-what it depends on, and Node loads those instead of the app's. One rule says what the app provides:
-the localized packages, plus every runtime dependency (`dependencies`, `peerDependencies`,
-`optionalDependencies`) a localized checkout declares that the app has at a version satisfying
-every localized range, plus `react` and `react-dom`. After every install in a checkout and on every
-`--relink`, each checkout's own copies of its siblings, of react/react-dom and of its own runtime
-dependencies in that set are removed — unless a range that loads the copy misses the app's version,
-or removing it would change what its own dependencies resolve to (kept copies are summarised per
-checkout; `--list` says why). `linked start`, `script`, `call` and `build-all` re-check first (tens
-of milliseconds; one line on stderr when it removes something), and `createViteConfig` derives
-Vite's `resolve.dedupe` from the same rule. `--no-prune` at localize/adopt is recorded
-(`"prune": false`) and leaves that checkout's `node_modules` as npm left them from then on.
+**Drift.** npm links a checkout whatever its version. `--list` and the check before `linked start`,
+`script`, `call` and `build-all` report a range a checkout misses, a second copy of a localized
+package, a nested copy of `@_linked/core`/`react`/`server-utils`, and a checkout that is gone.
 
-Localize used to be the separate `@_linked/localize` package (binary `linked-localize`), which is
-being retired; `linked localize` replaces it.
+`--relink` and `--ensure` are deprecated no-ops that exit 0; `local-packages.json` is no longer
+read. Localize used to be the separate `@_linked/localize` package (binary `linked-localize`),
+which is being retired; `linked localize` replaces it.
 
 ### Registry / dev utilities
 
@@ -361,6 +362,17 @@ npm run build
 ```
 
 Dual ESM + CJS build via `tsconfig-to-dual-package`. Sources in `src/`, output in `lib/esm/` and `lib/cjs/`.
+
+### Windows
+
+The cli is written to run on Windows but nobody runs it there yet, so treat it as untested. It
+starts `npm`, `npx` and `node_modules/.bin` shims through one helper (`src/utils/spawn.ts`: npm's
+own `npm-cli.js` when npm started the cli, else the `.cmd` through `cmd.exe` with quoted
+arguments), links directories with junctions, imports files by `file:` URL and keeps CRLF in the
+files it edits. Known limits: commands given as one string (`linked all <cmd>`, a `--build`) run
+in `cmd.exe` as written, so they must not use POSIX shell syntax; and this package's own
+`test:template` script sets an environment variable the POSIX way.
+For `linked localize`, see [docs/localize.md](docs/localize.md#windows).
 
 ### Templates
 

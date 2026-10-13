@@ -1,12 +1,12 @@
 /**
- * The semver subset pruning decides with. A wrong `true` removes a
- * copy a checkout needed; a wrong `false` only keeps one. So every row here
- * that expects `true` is a claim worth checking against npm's own `semver`,
- * and anything outside the subset must come back `null`, never a guess.
+ * The range check drift makes (`hooks/drift.cjs`). A wrong `true` hides a
+ * range a checkout misses; a wrong `false` reports one that is met. So every
+ * row here is a claim worth checking against npm's own `semver`, and anything
+ * it cannot read must come back `null`, never a guess.
  */
 import assert from 'node:assert/strict';
 
-import {satisfies} from '../../../src/localize/prune.js';
+import {satisfies} from '../../../src/localize/drift.js';
 
 const rows = [
   // caret

@@ -6,8 +6,8 @@
 // Needs network and takes several minutes. Gated by RUN_TEMPLATE_FULL=1 (set by
 // `npm run test:template`) so it never runs by accident.
 //
-// The scaffold's `node_modules/@_linked/cli/lib` is replaced with this repo's
-// `lib`, so the scaffold's `linked build` is the CLI under test, not the pinned
+// The scaffold's `node_modules/@_linked/cli/lib` (and `hooks`) is replaced with this repo's
+// `lib` (and `hooks`), so the scaffold's `linked build` is the CLI under test, not the pinned
 // release.
 import {execFileSync, execSync} from 'child_process';
 import fs from 'fs';
@@ -74,6 +74,10 @@ describeFull('create-app --template react-native (full)', () => {
       {cwd: tmp, stdio: 'pipe', maxBuffer: 100 * 1024 * 1024},
     );
     overlayLib(app, '@_linked/cli', path.join(CLI_ROOT, 'lib'));
+    // lib loads the hooks/ beside it (drift, localize), which the pinned release may not have.
+    const hooks = path.join(app, 'node_modules', '@_linked', 'cli', 'hooks');
+    fs.rmSync(hooks, {recursive: true, force: true});
+    fs.cpSync(path.join(CLI_ROOT, 'hooks'), hooks, {recursive: true});
     fs.chmodSync(path.join(app, 'node_modules/@_linked/cli/lib/esm/launch.js'), 0o755);
   }, TEN_MINUTES);
 

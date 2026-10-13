@@ -58,41 +58,6 @@ export async function readInstalledPkg(
 }
 
 /**
- * {@link readInstalledPkg}, synchronously, for callers on a hot path that must
- * not go async (the one-copy check before every `linked start`). Same walk,
- * same stop at the workspace root.
- */
-export function readInstalledPkgSync(
-  name: string,
-  fromDir: string,
-): {root: string; json: any} | null {
-  let dir = path.resolve(fromDir);
-  while (true) {
-    const root = path.join(dir, 'node_modules', name);
-    const pkgJson = path.join(root, 'package.json');
-    if (fs.existsSync(pkgJson)) {
-      try {
-        return {root, json: JSON.parse(fs.readFileSync(pkgJson, 'utf8'))};
-      } catch {
-        return null;
-      }
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir || isWorkspaceRootSync(dir)) return null;
-    dir = parent;
-  }
-}
-
-function isWorkspaceRootSync(dir: string): boolean {
-  try {
-    return !!JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
-      .workspaces;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * THE definition of a linked package: its own `package.json` says
  * `"linkedPackage": true`. Not its npm scope — a linked package can be
  * published under any scope, and not everything under `@_linked/` is one
@@ -119,10 +84,11 @@ export interface InstalledLinkedPackage {
  *
  * Walked breadth-first and keyed on the installed directory, not the name, so
  * the app's own copy of a package is settled before any copy a dependency
- * installed for itself. A localized checkout's own `node_modules` holds a
- * published copy of any sibling it depends on; keyed on the name and walked
- * depth-first, reaching that copy first hid the app's localized checkout of
- * it. The same name can therefore appear more than once, once per copy.
+ * installed for itself. A checkout's own `node_modules` can hold a
+ * published copy of a sibling it depends on (npm nests one when the sibling's
+ * checkout misses its range); keyed on the name and walked depth-first,
+ * reaching that copy first hid the app's checkout of it. The same name can
+ * therefore appear more than once, once per copy.
  */
 export async function discoverInstalledLinkedPackages(
   cwd: string = process.cwd(),
