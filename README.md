@@ -268,7 +268,10 @@ linked app-doctor                 # in an app: check optimizeDeps.include and Re
 member. A hook the app's `postinstall` and `dependencies` scripts run (`hooks/lock-at-rest.cjs`
 in this package, called through a guard that does nothing where the cli is not installed) puts the
 committed `package-lock.json` back after every install, so the working tree stays clean and CI, which has no checkouts,
-installs from the registry as always. Full guide: [docs/localize.md](docs/localize.md).
+installs from the registry as always. Each new checkout is built with its own build command:
+`npm run build` when it has a `build` script, else `linked build-app` for a Linked app or `linked
+build` for a Linked package (`--build <cmd>` overrides it, `--build ''` builds nothing). Full
+guide: [docs/localize.md](docs/localize.md).
 
 ```bash
 linked localize @_linked/rdfs          # clone, npm install at the app root, build

@@ -24,12 +24,13 @@
  *      `core.hooksPath`;
  *   5. ONE `npm install` at the app root -- a checkout's dependencies arrive
  *      with it, so it comes before any build;
- *   6. build each new checkout: `--build`, else `linked build`, else for the
- *      cli its own `npm run build` (the cli is what `linked build` runs, and a
- *      fresh cli checkout has no `lib/` yet). The cli builds first and then
- *      gets its bin linked (`npm rebuild`), since the others' `linked build`
- *      runs it. A failing build warns: a package whose build is broken is
- *      usually what you localized it to fix.
+ *   6. build each new checkout: `--build`, else its own `npm run build` when
+ *      its package.json has a `build` script, else by kind -- `linked
+ *      build-app` for a `linkedApp`, `linked build` for a `linkedPackage`,
+ *      nothing for anything else (`defaultBuildCommand`). The cli builds
+ *      first and then gets its bin linked (`npm rebuild`), since the others'
+ *      builds run `linked`. A failing build warns: a package whose build is
+ *      broken is usually what you localized it to fix.
  *
  * `adopt` (adopt.ts) replaces step 3 with "the checkout is already there", and
  * `--parked` with "every parked checkout". Steps 1, 2 and 4-6 are `runLocalize`.
@@ -62,11 +63,14 @@ import {checkoutNameFor, resolvePackage} from './resolve.js';
 import type {Deps, RunResult} from './run.js';
 import {linkDirectory} from '../utils/platform.js';
 
-/** What a new checkout is built with when `--build` does not say. */
+/** A checkout's own build, when its package.json has a `build` script. */
+export const OWN_BUILD_COMMAND = 'npm run build';
+/** A `linkedPackage` with no `build` script. */
 export const DEFAULT_BUILD_COMMAND = 'linked build';
-/** The cli builds itself: `linked build` IS the cli, and a fresh checkout of it has no `lib/`. */
+/** A `linkedApp` with no `build` script. */
+export const APP_BUILD_COMMAND = 'linked build-app';
+/** Built first, then its bin linked: the others' builds run `linked`, which is the cli. */
 const CLI_PACKAGE = '@_linked/cli';
-const CLI_BUILD_COMMAND = 'npm run build';
 /** The one install a run makes, at the app root. */
 export const INSTALL_ARGS = ['install', '--no-audit', '--no-fund'];
 /** Where a cloned monorepo lives, inside `packages-local/` but outside its glob. */
@@ -206,7 +210,7 @@ export function installAndBuild(
   }
 
   let code = 0;
-  // The cli first: the other builds run `linked build`, which is the cli.
+  // The cli first: the other builds run `linked`, which is the cli.
   const ordered = [
     ...prepared.filter((p) => p.name === CLI_PACKAGE),
     ...prepared.filter((p) => p.name !== CLI_PACKAGE),
@@ -579,8 +583,7 @@ function reportHooks(hooks: HookInstall, deps: Deps): void {
 
 /**
  * Run the build for one new checkout. `opts.build` wins, including `''` for
- * no build; otherwise the cli builds itself and everything else gets
- * `linked build`.
+ * no build; otherwise `defaultBuildCommand` reads the checkout's package.json.
  */
 function runBuild(
   p: Prepared,
@@ -588,8 +591,17 @@ function runBuild(
   opts: Pick<LocalizeOptions, 'build'>,
   deps: Deps,
 ): 'skipped' | 'ok' | 'failed' {
-  const cmd = buildCommandFor(p.name, opts);
-  if (!cmd) return 'skipped';
+  if (opts.build === '') return 'skipped';
+  const cmd =
+    opts.build ??
+    defaultBuildCommand(readJson(path.join(pkgDir, 'package.json')));
+  if (!cmd) {
+    deps.log(
+      `[localize] ${p.dir}: no \`build\` script and not a Linked package or app, so nothing ` +
+        `is built; pass --build <cmd> to build it.`,
+    );
+    return 'skipped';
+  }
   deps.log(`[localize] ${p.dir}: ${cmd}`);
   const r = deps.run(cmd, [], {cwd: pkgDir, shell: true});
   if (r.status !== 0) {
@@ -603,12 +615,23 @@ function runBuild(
   return 'ok';
 }
 
-function buildCommandFor(
-  name: string,
-  opts: Pick<LocalizeOptions, 'build'>,
+/**
+ * What a checkout is built with when `--build` does not say: its own `build`
+ * script (`npm run build`, which also runs a `prebuild`), else by kind --
+ * `linked build-app` for a `linkedApp`, `linked build` for a `linkedPackage` --
+ * else `''`, nothing. `pkg` is the checkout's package.json, null when unreadable.
+ */
+export function defaultBuildCommand(
+  pkg: {
+    scripts?: Record<string, unknown>;
+    linkedApp?: unknown;
+    linkedPackage?: unknown;
+  } | null,
 ): string {
-  if (opts.build !== undefined) return opts.build;
-  return name === CLI_PACKAGE ? CLI_BUILD_COMMAND : DEFAULT_BUILD_COMMAND;
+  if (typeof pkg?.scripts?.build === 'string') return OWN_BUILD_COMMAND;
+  if (pkg?.linkedApp === true) return APP_BUILD_COMMAND;
+  if (pkg?.linkedPackage === true) return DEFAULT_BUILD_COMMAND;
+  return '';
 }
 
 export function reportError(e: unknown, deps: Pick<Deps, 'error'>): number {
