@@ -548,7 +548,7 @@ program
   )
   .option(
     '--build <cmd>',
-    'Run this in each new checkout after the install; a failure only warns. Defaults to `linked build` (`npm run build` for @_linked/cli); pass an empty string to build nothing.',
+    'Run this in each new checkout after the install; a failure only warns. Defaults to the checkout\'s own `npm run build` when it has a build script (packages and apps both define one); without one nothing is built. Pass an empty string to build nothing.',
   )
   .option(
     '--dir <path>',

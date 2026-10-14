@@ -15,7 +15,7 @@ jest.mock('../../src/localize/index', () => {
       return code;
     };
   return {
-    DEFAULT_BUILD_COMMAND: 'linked build',
+    DEFAULT_BUILD_COMMAND: 'npm run build',
     defaultDeps: (appRoot: string) => ({appRoot}),
     localize: record('localize'),
     adopt: record('adopt'),

@@ -7,7 +7,11 @@
  * caller can point it at another root or capture its output. `defaultDeps()`
  * builds the normal one.
  */
-export {localize, DEFAULT_BUILD_COMMAND} from './localize.js';
+export {
+  localize,
+  defaultBuildCommand,
+  DEFAULT_BUILD_COMMAND,
+} from './localize.js';
 export type {LocalizeOptions} from './localize.js';
 export {adopt, localizeParked} from './adopt.js';
 export {delocalize} from './delocalize.js';
