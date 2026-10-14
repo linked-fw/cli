@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.47.2
+
+### Patch Changes
+
+- [#270](https://github.com/linked-fw/cli/pull/270) [`18eadff`](https://github.com/linked-fw/cli/commit/18eadff4a8126cf71758a34cddd6f003f87aab35) Thanks [@flyon](https://github.com/flyon)! - `linked localize` now builds each new checkout with its own `npm run build` when its package.json has a `build` script, and builds nothing otherwise. Localizing an app no longer fails with "is a linkedApp, not a linkedPackage": an app's `build` script runs `linked build-app`.
+
 ## 1.47.1
 
 ### Patch Changes
