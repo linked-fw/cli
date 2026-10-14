@@ -272,18 +272,16 @@ other checkout, here or parked, links into it.
 After the install, each **new** checkout (a clone or an adopted one) is built in its own
 directory with **its own build command**: `npm run build` when its `package.json` has a `build`
 script (so a `prebuild` runs too, and a package whose script is more than `linked build` gets all
-of it). Without a `build` script the kind decides: `linked build-app` for a `linkedApp`, `linked
-build` for a `linkedPackage`, and nothing (with a note) for anything else. `--build "<cmd>"`
-overrides all of that, and `--build ""` builds nothing. A checkout taken back from parking is not
+of it). Linked packages define `build` as `linked build` and apps as `linked build-app`, so localize
+never needs to know which kind a checkout is. Without a `build` script nothing is built (with a
+note). `--build "<cmd>"` overrides that, and `--build ""` builds nothing. A checkout taken back from parking is not
 rebuilt. A failing build warns (exit 5) and the checkout stays linked: a package whose build is
 broken is usually what you localized it to fix.
 
 | checkout's package.json | built with |
 | --- | --- |
 | has a `build` script | `npm run build` |
-| no `build`, `linkedApp: true` | `linked build-app` |
-| no `build`, `linkedPackage: true` | `linked build` |
-| neither | nothing |
+| no `build` script | nothing |
 
 **The cli builds with its own `npm run build`** (its own `tsc`), never `linked build`: `linked
 build` *is* the cli, and a fresh checkout of it has no `lib/` yet. It builds before the other new

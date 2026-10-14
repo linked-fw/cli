@@ -53,6 +53,7 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
     name: '@scope/thing',
     version: '1.0.0',
     linkedPackage: true,
+    scripts: {build: 'linked build'},
   });
   let seenByLockOnly: boolean | null = null;
   let asideDuringLockOnly: boolean | null = null;
@@ -88,7 +89,7 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
       // The set-up's lockfile, made with the checkout moved aside.
       'npm install --package-lock-only --ignore-scripts --no-audit --no-fund@',
       'npm install --no-audit --no-fund@',
-      'linked build @packages-local/scope-thing',
+      'npm run build @packages-local/scope-thing',
     ],
   );
   assert.equal(

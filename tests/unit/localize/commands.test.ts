@@ -34,7 +34,7 @@ function seedCheckout(appRoot, rel, pkg) {
 
 /**
  * A runner whose `git clone -- <url> <dir>` leaves a checkout of `pkg` at
- * `<dir>`: a `linkedPackage` with no `build` script unless `pkgFor` says.
+ * `<dir>`: a Linked package with its `linked build` script unless `pkgFor` says.
  */
 function cloning(appRoot, pkgFor, handler?) {
   return stubbed(appRoot, (inv) => {
@@ -46,6 +46,7 @@ function cloning(appRoot, pkgFor, handler?) {
         {
           version: '1.0.0',
           linkedPackage: true,
+          scripts: {build: 'linked build'},
           ...pkgFor,
           name,
         },
@@ -89,7 +90,7 @@ test('localize clones, sets up, installs once at the root, then builds', (t) => 
     'npm install --package-lock-only --ignore-scripts --no-audit --no-fund @ .',
     'git clone -- https://example.invalid/a.git packages-local/x-a @ -',
     'npm install --no-audit --no-fund @ .',
-    'linked build @ packages-local/x-a',
+    'npm run build @ packages-local/x-a',
   ]);
   const pkg = JSON.parse(
     fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'),
@@ -263,11 +264,12 @@ test('one install for several names, and a failing build only warns (exit 5)', (
           name: ['@x/a', '@x/b'][n++],
           version: '1.0.0',
           linkedPackage: true,
+          scripts: {build: 'linked build'},
         },
       );
       return ok();
     }
-    if (inv.cmd === 'linked build' && inv.cwd.endsWith('x-b'))
+    if (inv.cmd === 'npm run build' && inv.cwd.endsWith('x-b'))
       return fail('tsc broke');
   });
 
@@ -279,7 +281,7 @@ test('one install for several names, and a failing build only warns (exit 5)', (
 
   assert.equal(code, 5, deps.output());
   assert.equal(deps.npmCalls().length, 1, 'one npm install for both');
-  assert.match(deps.output(), /x-b: `linked build` failed/);
+  assert.match(deps.output(), /x-b: `npm run build` failed/);
   assert.match(deps.output(), /tsc broke/);
 });
 
@@ -290,18 +292,9 @@ const CLI_PKG = {
   scripts: {build: 'tsc'},
 };
 
-test('a checkout is built with its own build script, else by kind, else not at all', (t) => {
+test('a checkout is built with its own build script, else not at all', (t) => {
   const cases: [object, string | null][] = [
-    [{name: '@x/a', linkedPackage: true}, 'linked build'],
-    [
-      {
-        name: '@x/a',
-        linkedPackage: true,
-        scripts: {build: 'linked build && x'},
-      },
-      'npm run build',
-    ],
-    [{name: '@x/a', linkedApp: true}, 'linked build-app'],
+    [{name: '@x/a', linkedPackage: true, scripts: {build: 'linked build'}}, 'npm run build'],
     [
       {
         name: '@x/a',
@@ -311,7 +304,9 @@ test('a checkout is built with its own build script, else by kind, else not at a
       'npm run build',
     ],
     [{name: '@x/a', scripts: {build: 'tsc'}}, 'npm run build'],
-    [{name: '@x/a', linkedPackage: false}, null],
+    // No build script: nothing, whatever kind of Linked package or app it is
+    [{name: '@x/a', linkedPackage: true, scripts: {}}, null],
+    [{name: '@x/a', linkedApp: true, scripts: {}}, null],
   ];
   for (const [pkg, expected] of cases) {
     const appRoot = consumer(t);
@@ -385,7 +380,7 @@ test('the cli builds before the others and then gets its bin linked', (t) => {
         appRoot,
         path.relative(appRoot, inv.args[inv.args.length - 1]),
         [
-          {name: '@x/a', linkedPackage: true},
+          {name: '@x/a', linkedPackage: true, scripts: {build: 'linked build'}},
           {name: '@_linked/cli', scripts: {build: 'tsc'}, linkedPackage: true},
         ][n++],
       );
@@ -404,7 +399,7 @@ test('the cli builds before the others and then gets its bin linked', (t) => {
     'npm install --no-audit --no-fund @ .',
     'npm run build @ packages-local/_linked-cli',
     'npm rebuild @_linked/cli --ignore-scripts @ .',
-    'linked build @ packages-local/x-a',
+    'npm run build @ packages-local/x-a',
   ]);
 });
 
@@ -563,7 +558,7 @@ test('a failed root install exits 7 and builds nothing', (t) => {
   assert.equal(code, 7);
   assert.match(deps.output(), /ERESOLVE/);
   assert.equal(
-    deps.calls.some((c) => c.cmd === 'linked build'),
+    deps.calls.some((c) => c.cmd === 'npm run build'),
     false,
   );
 });
@@ -720,7 +715,12 @@ test('a monorepo package is a link into packages-local/.repos, and parks and com
       fs.mkdirSync(path.join(clone, 'packages/a'), {recursive: true});
       fs.writeFileSync(
         path.join(clone, 'packages/a/package.json'),
-        JSON.stringify({name: '@x/a', version: '1.0.0', linkedPackage: true}),
+        JSON.stringify({
+          name: '@x/a',
+          version: '1.0.0',
+          linkedPackage: true,
+          scripts: {build: 'linked build'},
+        }),
       );
       return ok();
     }
@@ -738,7 +738,7 @@ test('a monorepo package is a link into packages-local/.repos, and parks and com
     fs.realpathSync(member),
     fs.realpathSync(path.join(appRoot, 'packages-local/.repos/x-a/packages/a')),
   );
-  assert.ok(trace(deps, appRoot).includes('linked build @ packages-local/x-a'));
+  assert.ok(trace(deps, appRoot).includes('npm run build @ packages-local/x-a'));
 
   assert.equal(delocalize(['@x/a'], {}, stubbed(appRoot)), 0);
   const parked = path.join(appRoot, '.packages-local.parked/x-a');

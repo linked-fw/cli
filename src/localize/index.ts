@@ -11,8 +11,6 @@ export {
   localize,
   defaultBuildCommand,
   DEFAULT_BUILD_COMMAND,
-  APP_BUILD_COMMAND,
-  OWN_BUILD_COMMAND,
 } from './localize.js';
 export type {LocalizeOptions} from './localize.js';
 export {adopt, localizeParked} from './adopt.js';
