@@ -56,6 +56,12 @@ never doubled: `create-ont-package foo-ont` creates `foo-ont`. Every package the
 writing an import of a package that does not exist: run them inside `packages/<name>`. An app that
 does have a `src/package.ts` at its root is served as before.
 
+The files a kind gets are also available as data, for a host that commits a package somewhere
+other than the local disk: `buildPackageFiles(packageName, kind, {uriBase?, baseUri?,
+dependencies?})` from `@_linked/cli/utils/packageFiles` returns package-relative path → content,
+dotfiles under their real names. It writes, asks and installs nothing; `create-package` writes
+exactly what it returns.
+
 A package's IRIs are minted under a root: `linkedPackage(name, {baseUri})`, shapes at
 `{baseUri}shape/<package>/<Name>`, an ontology package's terms at `{baseUri}ont/<slug>/<Term>`.
 The root is, first match wins: `--base-uri <uri>`; inside an app, `LINKED_BASE_URI` from the
