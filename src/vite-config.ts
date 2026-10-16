@@ -664,6 +664,26 @@ export function clientDefine(
   };
 }
 
+/**
+ * The app's direct dependencies (and devDependencies) that are linked packages
+ * by their own `linkedPackage` flag, not their scope. Best-effort: no
+ * `package.json` gives `[]`. See `optimizeDeps` in `createViteConfig`.
+ */
+export async function installedLinkedDeps(cwd: string): Promise<string[]> {
+  const out: string[] = [];
+  try {
+    const appPkg = await fsExtra.readJson(path.join(cwd, 'package.json'));
+    const allDeps = {...appPkg.dependencies, ...appPkg.devDependencies};
+    for (const name of Object.keys(allDeps)) {
+      const installed = await readInstalledPkg(name, cwd);
+      if (installed && isLinkedPackageJson(installed.json)) out.push(name);
+    }
+  } catch {
+    /* best-effort — no package.json is fine */
+  }
+  return out;
+}
+
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
   return defineConfig(async ({mode}) => {
     const isDev = mode === 'development';
@@ -677,29 +697,21 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     // of the standalone-gated branches below apply.
     const isStandalone = isDev && workspaces.length === 0;
 
-    // The app's published framework deps — excluded from Vite's dep-optimizer below
-    // (`optimizeDeps.exclude`) so the browser's native ESM graph loads ONE copy of each.
-    // Without the exclude, esbuild inlines a duplicate `@_linked/core` into each
+    // The app's installed framework deps (by their `linkedPackage` flag) —
+    // excluded from Vite's dep-optimizer below (`optimizeDeps.exclude`) in EVERY
+    // dev mode, so the browser's native ESM graph loads ONE copy of each. Without
+    // the exclude, esbuild inlines a duplicate `@_linked/core` into each
     // per-subpath chunk (`@_linked_schema_shapes_Person.js`,
-    // `@_linked_core_utils_LinkedStorage.js`, …), duplicating framework classes
-    // (`Person` → `Person2`/`3`), so their shapes register under mangled URIs that no
-    // longer match the backend's (one clean copy via Node). These packages are ESM with
-    // no bare CJS runtime deps (e.g. `classnames` is inlined in `@_linked/react`), so
-    // native-ESM serving needs no interop shim.
-    const linkedDeps: string[] = [];
-    if (isStandalone) {
-      try {
-        const appPkg = await fsExtra.readJson(path.join(process.cwd(), 'package.json'));
-        const allDeps = {...appPkg.dependencies, ...appPkg.devDependencies};
-        // A linked package by its own `linkedPackage` flag, not its scope.
-        for (const name of Object.keys(allDeps)) {
-          const installed = await readInstalledPkg(name, process.cwd());
-          if (installed && isLinkedPackageJson(installed.json)) linkedDeps.push(name);
-        }
-      } catch {
-        /* best-effort — no package.json is fine */
-      }
-    }
+    // `@_linked_core_utils_LinkedStorage.js`, …) and renames the colliding classes
+    // (`class Person` → `class Person3`), so their shapes register under mangled
+    // URIs (`…/shape/schema/Person3`) that the backend (one clean copy via Node)
+    // cannot resolve. An app with source workspaces (`packages/*-ont`) installs
+    // its framework packages from npm just like a standalone app, so this is not
+    // a standalone-only concern. These packages are ESM with no bare CJS runtime
+    // deps (e.g. `classnames` is inlined in `@_linked/react`), so native-ESM
+    // serving needs no interop shim; their own third-party imports are listed by
+    // the `linked:client-dep-includes` plugin.
+    const linkedDeps = isDev ? await installedLinkedDeps(process.cwd()) : [];
     const devPort = process.env.PORT ?? opts.port;
     const clientDepIncludes =
       isDev && opts.clientDepIncludes !== false && process.env.LINKED_CLIENT_DEP_INCLUDES !== '0';
@@ -1015,26 +1027,29 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
           define: clientDefine(opts),
         },
       },
-      // WORKSPACE mode: exclude the source-shipping workspace packages (@_linked/*,
-      // lincd-*) from esbuild's dep pre-bundler. They resolve to `src/` via the
-      // `linked:resolve-workspace-ts` plugin; in a workspace-member CLONE they'd
-      // otherwise resolve via `node_modules` SYMLINKS and esbuild fails on their
-      // subpath `exports` ("No known conditions for ./shapes/SHACL …").
-      // STANDALONE mode: exclude the app's published linked deps (by their
-      // `linkedPackage` flag; see `linkedDeps` above) from
-      // esbuild's pre-bundler so the browser's native ESM graph loads ONE copy of
-      // `@_linked/core` (no per-subpath duplication → stable class names → shape URIs
-      // match the backend — see `linkedDeps` above). These packages are ESM with no
-      // bare CJS runtime deps (e.g. `classnames` is inlined in `@_linked/react`), so
-      // serving them as native ESM needs no interop shim.
+      // Exclude from esbuild's dep pre-bundler, in every dev mode:
+      // - the source-shipping workspace packages (@_linked/*, lincd-*). They
+      //   resolve to `src/` via the `linked:resolve-workspace-ts` plugin; in a
+      //   workspace-member CLONE they'd otherwise resolve via `node_modules`
+      //   SYMLINKS and esbuild fails on their subpath `exports` ("No known
+      //   conditions for ./shapes/SHACL …").
+      // - the app's installed linked deps (`linkedDeps` above), so the browser
+      //   loads ONE copy of `@_linked/core` (no per-subpath duplication → stable
+      //   class names → shape URIs match the backend).
       // An excluded package is not crawled, so its OWN third-party imports (Radix,
       // vaul, js-cookie…) are listed in `optimizeDeps.include` by the
       // `linked:client-dep-includes` plugin above, once the app's excludes are final.
-      ...(workspaces.length > 0
-        ? {optimizeDeps: {exclude: workspaces.map((w) => w.name)}}
-        : isStandalone && linkedDeps.length > 0
-          ? {optimizeDeps: {exclude: linkedDeps}}
+      //
+      // `keepNames` is the second guard: should a linked package still end up in
+      // a pre-bundled chunk (a transitive one the app does not depend on directly,
+      // or one an app re-includes), esbuild keeps each class's `name` even when it
+      // renames the binding, and shape URIs are derived from that name.
+      optimizeDeps: {
+        ...(isDev && (workspaces.length > 0 || linkedDeps.length > 0)
+          ? {exclude: [...new Set([...workspaces.map((w) => w.name), ...linkedDeps])]}
           : {}),
+        esbuildOptions: {keepNames: true},
+      },
     };
 
     // Tailwind plugin (only if explicitly enabled — adds a heavy plugin).
