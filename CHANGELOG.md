@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.47.3
+
+### Patch Changes
+
+- [#272](https://github.com/linked-fw/cli/pull/272) [`a00de99`](https://github.com/linked-fw/cli/commit/a00de99d20d6f96042a9c375e4146862eeb3d31c) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now keeps the app's installed linked packages out of Vite's dependency pre-bundler in every dev mode, not only in standalone apps. An app with source workspaces (its own `packages/*-ont`) still installs the framework from npm; pre-bundling it duplicated `@_linked/core` per chunk and renamed shape classes (`Person` → `Person3`), so the server rejected every query with "Cannot resolve shape". The optimizer also runs esbuild with `keepNames: true` as a second guard.
+
 ## 1.47.2
 
 ### Patch Changes
