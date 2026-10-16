@@ -152,4 +152,43 @@ describe('resolve.dedupe', () => {
       '@acme/widgets',
     ]);
   });
+
+  it('with source workspaces, still keeps installed linked packages out of the dep optimizer', async () => {
+    // An app made from the template: its own ontology package is a source
+    // workspace, while the framework packages are installed from npm. Pre-bundling
+    // those duplicates `@_linked/core` per chunk and renames shape classes
+    // (`Person` → `Person3`), so they must be excluded here too.
+    editJson(
+      path.join(app, 'node_modules', '@_linked', 'core', 'package.json'),
+      (pkg) => {
+        pkg.linkedPackage = true;
+      },
+    );
+    const ont = path.join(app, 'packages', 'acme-ont');
+    writeJson(path.join(ont, 'package.json'), {
+      name: 'acme-ont',
+      version: '1.0.0',
+      linkedPackage: true,
+    });
+    fs.mkdirSync(path.join(ont, 'src'), {recursive: true});
+    fs.mkdirSync(path.join(app, 'node_modules'), {recursive: true});
+    fs.symlinkSync(ont, path.join(app, 'node_modules', 'acme-ont'));
+    editJson(path.join(app, 'package.json'), (pkg) => {
+      pkg.workspaces = ['packages/*'];
+      pkg.dependencies = {'@_linked/core': '^2.25.0', 'acme-ont': '^1.0.0'};
+    });
+
+    const config = await resolvedConfig('development');
+    expect(config.resolve.conditions).toBeUndefined();
+    expect(config.optimizeDeps.exclude).toEqual(['acme-ont', '@_linked/core']);
+    expect(config.optimizeDeps.esbuildOptions).toEqual({keepNames: true});
+  });
+
+  it('keeps class names in pre-bundled chunks in every mode', async () => {
+    for (const mode of ['development', 'production']) {
+      const config = await resolvedConfig(mode);
+      expect(config.optimizeDeps.esbuildOptions).toEqual({keepNames: true});
+    }
+    expect((await resolvedConfig('production')).optimizeDeps.exclude).toBeUndefined();
+  });
 });
