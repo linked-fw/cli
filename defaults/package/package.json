@@ -37,6 +37,11 @@
       "types": "./lib/esm/index.d.ts",
       "import": "./lib/esm/index.js"
     },
+    "./backend": {
+      "types": "./lib/esm/backend.d.ts",
+      "development": "./src/backend.ts",
+      "import": "./lib/esm/backend.js"
+    },
     "./*.js": {
       "types": "./lib/esm/*.d.ts",
       "import": "./lib/esm/*.js"

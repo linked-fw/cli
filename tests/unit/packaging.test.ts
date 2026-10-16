@@ -76,7 +76,12 @@ describe('packaging', () => {
       if (typeof node === 'string') targets.push(node);
       else if (node && typeof node === 'object') Object.values(node).forEach(collect);
     };
-    collect(pkg.exports);
+    // `./backend`'s `development` target is src, which is not published. Only the
+    // server applies that condition, and only to a workspace's source checkout
+    // (see shapesIndex.test.ts); every other target must be in the tarball.
+    const {development, ...publishedBackend} = pkg.exports['./backend'];
+    expect(development).toBe('./src/backend.ts');
+    collect({...pkg.exports, './backend': publishedBackend});
     for (const target of targets) {
       expect(target.replace(/^\.\//, '')).toMatch(/^lib\//);
     }

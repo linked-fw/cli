@@ -256,7 +256,8 @@ describe('the package template follows the standard', () => {
 
   // ESM-only, lib-only: a CJS build of anything importing @_linked/core cannot load
   // (core is ESM-only), and src/ is not published, so neither `require` nor a
-  // `development` -> src condition belongs in the map.
+  // `development` -> src condition belongs in the client-facing entries. The one
+  // exception is `./backend`; see the next test.
   test('package.json is ESM-only and points only at lib/esm', () => {
     const root = path.join(cliRoot, 'defaults', 'package');
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -267,6 +268,11 @@ describe('the package template follows the standard', () => {
     expect(pkg.typesVersions).toEqual({'*': {'*': ['lib/esm/*']}});
     expect(pkg.exports).toEqual({
       '.': {types: './lib/esm/index.d.ts', import: './lib/esm/index.js'},
+      './backend': {
+        types: './lib/esm/backend.d.ts',
+        development: './src/backend.ts',
+        import: './lib/esm/backend.js',
+      },
       './*.js': {types: './lib/esm/*.d.ts', import: './lib/esm/*.js'},
       './*': {types: './lib/esm/*.d.ts', import: './lib/esm/*.js'},
     });
@@ -279,5 +285,25 @@ describe('the package template follows the standard', () => {
     expect(JSON.stringify(pkg.scripts)).not.toMatch(/cjs|dual-package/);
     expect(pkg.devDependencies['tsconfig-to-dual-package']).toBeUndefined();
     expect(fs.existsSync(path.join(root, 'tsconfig-cjs.json'))).toBe(false);
+  });
+
+  // LinkedServer finds a workspace package's backend with
+  // resolveBackendEntry(dir, json, ['development', 'import', 'node', 'default'])
+  // and loads it only if that file exists, so an unbuilt workspace (no lib/) had
+  // its providers silently skipped. Only the server resolves `<pkg>/backend` with
+  // `development` (Node never applies it, and no browser imports a backend), and
+  // only for packages Vite's SSR bundles: source workspaces and installed packages
+  // that depend on one. So unlike a `./*` -> src condition, this entry does not
+  // send the browser or Node in a consumer app to src/, which is not published.
+  test('./backend resolves to source in development, and that source exists', () => {
+    const root = path.join(cliRoot, 'defaults', 'package');
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    const backend = pkg.exports['./backend'];
+    expect(Object.keys(backend)).toEqual(['types', 'development', 'import']);
+    expect(fs.existsSync(path.join(root, backend.development))).toBe(true);
+    for (const [key, entry] of Object.entries<any>(pkg.exports)) {
+      if (key === './backend') continue;
+      expect(entry.development).toBeUndefined();
+    }
   });
 });
