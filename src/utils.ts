@@ -195,6 +195,22 @@ export var getPackageJSON = function (root = process.cwd(), error = true) {
 };
 
 /**
+ * The dependencies a linked package is ordered after: its `dependencies` and `peerDependencies`.
+ * `devDependencies` are left out — they are only needed to build or test the package itself, and
+ * counting them finds cycles that do not exist at runtime (`@_linked/core` has `@_linked/cli` as
+ * a devDependency, and the cli depends on core).
+ */
+export function sortDependencyNames(packageJson: {
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+}): string[] {
+  return Object.keys({
+    ...packageJson.dependencies,
+    ...packageJson.peerDependencies,
+  });
+}
+
+/**
  * Scans package.json for dependencies that are LINCD packages
  * Also looks into dependencies of dependencies
  * If no packageJson is given, it will attempt to obtain it from the current working directory
@@ -225,12 +241,7 @@ export var getLINCDDependencies = function (
           lincdPackagePaths.push([
             modulePackageJson.name,
             modulePath,
-            [
-              ...Object.keys({
-                ...modulePackageJson.dependencies,
-                ...modulePackageJson.devDependencies,
-              }),
-            ],
+            sortDependencyNames(modulePackageJson),
           ]);
           //also check if this package has any dependencies that are lincd packages
           lincdPackagePaths = lincdPackagePaths.concat(
