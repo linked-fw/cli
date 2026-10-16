@@ -7,6 +7,11 @@ const SHIPPED_DOTFILES: Record<string, string> = {
   'env.example.template': '.env.example',
 };
 
+/** The name a shipped template file is written under: `gitignore.template` → `.gitignore`. */
+export function shippedDotfileName(name: string): string {
+  return SHIPPED_DOTFILES[name] ?? name;
+}
+
 // npm strips .gitignore files and honours nested .npmignore files when packing
 // the CLI, so templates ship dotfiles under neutral names and scaffolding
 // restores them, at any depth.

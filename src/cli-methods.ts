@@ -64,14 +64,13 @@ import {packagePublishesCjs} from './package-manifest.js';
 import {asNamespace, defaultOntologyNamespace} from './utils/ontologyNamespace.js';
 import {
   decidePackageKind,
-  ontologySlugFor,
   packageNameFor,
   scaffoldKinds,
-  PACKAGE_TEMPLATE_DIRS,
-  SHARED_TEMPLATE_FILES,
 } from './utils/packageKind.js';
 import type {PackageKind, ScaffoldKind} from './utils/packageKind.js';
-import {resolvePackageBaseUri, withBaseUri} from './utils/packageBaseUri.js';
+import {resolvePackageBaseUri} from './utils/packageBaseUri.js';
+import {buildPackageFiles, nameVariants} from './utils/packageFiles.js';
+import type {PackageFilesOptions} from './utils/packageFiles.js';
 import type {ResolvedBaseUri} from './utils/packageBaseUri.js';
 
 // This module's directory. fileURLToPath, not the URL with `file:/` cut off,
@@ -1394,16 +1393,6 @@ var replaceCurlyVariables = function (string) {
   return string;
 };
 
-const capitalize = (str) =>
-  str.charAt(0).toUpperCase() + str.toLowerCase().slice(1);
-const camelCase = (str) => {
-  let string = str.replace(/[^A-Za-z0-9]/g, ' ').split(' ');
-  if (string.length > 1) {
-    return string.reduce((result, word) => result + capitalize(word));
-  }
-  return str;
-};
-
 export const createOntology = async (
   prefix,
   uriBase?,
@@ -1657,10 +1646,7 @@ const ensureFolderExists = function (...folders: string[]) {
 };
 
 export const setNameVariables = function (name) {
-  let hyphenName = name.toLowerCase().replace(/[-_\s]+/g, '-');
-  let camelCaseName = camelCase(name); //some-package --> someModule
-  let underscoreName = name.replace(/[-\s]+/g, '_');
-  let plainName = name.replace(/[-\s]+/g, '');
+  let {hyphenName, camelCaseName, underscoreName, plainName} = nameVariants(name);
 
   //longer similar variables names should come before the shorter ones
   setVariable('underscore_name', underscoreName);
@@ -2480,19 +2466,15 @@ export const createPackage = async (
   );
   for (const [i, {kind, name: packageName}] of packages.entries()) {
     const targetFolder = targets[i];
-    await scaffoldPackage(packageName, kind, targetFolder, uriBase, root?.baseUri);
-    if (kind === 'assets' && packageKind === 'both') {
-      // The pair is one unit: the asset package's shapes use the ontology
-      // created with it. `ontology` comes first in `scaffoldKinds`, so its
-      // package.json is already written.
-      const ontIndex = packages.findIndex((p) => p.kind === 'ontology');
-      dependOnOntologyPackage(
-        targetFolder,
-        packages[ontIndex].name,
-        targets[ontIndex],
-        decision.kind === 'resolved' && decision.location === 'packages',
-      );
-    }
+    log(`Creating new linked ${kind} package '${packageName}'`);
+    scaffoldPackage(targetFolder, packageName, kind, {
+      uriBase,
+      baseUri: root?.baseUri,
+      dependencies:
+        kind === 'assets' && packageKind === 'both'
+          ? ontologyDependency(packages, targets, decision)
+          : undefined,
+    });
     const skipped = () =>
       log(`Prepared a new linked package in ${chalk.magenta(targetFolder)} (install skipped)`);
     if (decision.kind === 'outside') {
@@ -2512,32 +2494,33 @@ export const createPackage = async (
 };
 
 /**
- * Declare the ontology package as a regular dependency of the asset package,
- * at `^` its version — the same entry Create Now's project scaffold writes.
+ * The pair is one unit: the asset package of `--kind both` depends on the
+ * ontology package created with it, at `^` its version — the same entry Create
+ * Now's project scaffold writes. `ontology` comes first in `scaffoldKinds`, so
+ * its package.json is already written.
  *
  * Only where npm workspaces link the two (`--location packages`). Anywhere
  * else the `-ont` package is not published yet, so `npm install` in the asset
  * package would fail with E404: the entry is left out and one line says how to
  * add it once the ontology package is published.
  */
-function dependOnOntologyPackage(
-  assetsFolder: string,
-  ontName: string,
-  ontFolder: string,
-  linkedByWorkspace: boolean,
-) {
-  if (!linkedByWorkspace) {
+function ontologyDependency(
+  packages: {kind: ScaffoldKind; name: string}[],
+  targets: string[],
+  decision: TargetDecision,
+): Record<string, string> | undefined {
+  const ontIndex = packages.findIndex((p) => p.kind === 'ontology');
+  const assetsIndex = packages.findIndex((p) => p.kind === 'assets');
+  const ontName = packages[ontIndex].name;
+  if (!(decision.kind === 'resolved' && decision.location === 'packages')) {
     log(
       `The asset package does not depend on ${ontName} yet: once ${ontName} is published, ` +
-        `run npm install ${ontName} in ${assetsFolder}`,
+        `run npm install ${ontName} in ${targets[assetsIndex]}`,
     );
-    return;
+    return undefined;
   }
-  const {version} = fs.readJsonSync(path.join(ontFolder, 'package.json'));
-  const pkgPath = path.join(assetsFolder, 'package.json');
-  const pkg = fs.readJsonSync(pkgPath);
-  pkg.dependencies = {...pkg.dependencies, [ontName]: `^${version}`};
-  fs.writeJsonSync(pkgPath, pkg, {spaces: 2});
+  const {version} = fs.readJsonSync(path.join(targets[ontIndex], 'package.json'));
+  return {[ontName]: `^${version}`};
 }
 
 /** Where a package goes, given where create-package was told to put it. */
@@ -2571,93 +2554,19 @@ async function packageTargetFolder(
 }
 
 /**
- * Write one package of a kind. Every kind gets the shared files of
- * `defaults/package` (manifest, tsconfigs, dotfiles, `src/package.ts`); an asset
- * package gets the rest of that folder, an ontology package gets
- * `defaults/package-ontology` instead, with the example ontology named after
- * its ontology slug.
+ * Write one package of a kind: the files `buildPackageFiles` gives it.
  */
-async function scaffoldPackage(
+function scaffoldPackage(
+  targetFolder: string,
   name: string,
   kind: ScaffoldKind,
-  targetFolder: string,
-  uriBase?: string,
-  baseUri?: string,
+  options: PackageFilesOptions,
 ) {
-  // An ontology package `foo-ont` holds the ontology `foo`: that slug names its
-  // files and its prefix, and its terms mint `{root}ont/foo/{Term}`.
-  const ontologySlug = kind === 'ontology' ? ontologySlugFor(name) : undefined;
-  if (!uriBase) {
-    uriBase = baseUri
-      ? `${baseUri}ont/${ontologySlug ?? bareName(name)}/`
-      : defaultOntologyNamespace(ontologySlug ?? name);
-  }
-  setVariable('uri_base', asNamespace(uriBase));
-
-  //save the full scoped package name under ${package_name}
-  setVariable('package_name', name);
-
-  //extra variable for clarity (will be same as 'name')
-  setVariable('output_file_name', name);
-
-  const {hyphenName} = setNameVariables(ontologySlug ?? bareName(name));
-
-  log(`Creating new linked ${kind} package '${name}'`);
+  const files = buildPackageFiles(name, kind, options);
   fs.mkdirSync(targetFolder, {recursive: true});
-  const [shared, ...variants] = PACKAGE_TEMPLATE_DIRS[kind];
-  if (variants.length === 0) {
-    fs.copySync(defaultsDir(shared), targetFolder);
-  } else {
-    for (const file of SHARED_TEMPLATE_FILES) {
-      fs.copySync(defaultsDir(shared, file), path.join(targetFolder, file));
-    }
-    for (const variant of variants) {
-      fs.copySync(defaultsDir(variant), targetFolder);
-    }
+  for (const [file, content] of Object.entries(files)) {
+    fs.outputFileSync(path.join(targetFolder, ...file.split('/')), content);
   }
-  renameShippedDotfiles(targetFolder);
-
-  //replace variables in some of the copied files
-  await Promise.all(
-    ['src/index.ts', 'package.json', 'src/package.ts']
-      .concat(
-        kind === 'ontology'
-          ? [
-              'src/ontologies/example-ontology.ts',
-              'src/ontologies/example-ontology.register.ts',
-              'src/data/example-ontology.json',
-            ]
-          : [],
-      )
-      .map((f) => path.join(targetFolder, f))
-      .map((file) => replaceVariablesInFile(file)),
-  );
-
-  if (baseUri) {
-    const packageTs = path.join(targetFolder, 'src', 'package.ts');
-    fs.writeFileSync(packageTs, withBaseUri(fs.readFileSync(packageTs, 'utf8'), baseUri));
-  }
-
-  if (kind !== 'ontology') return;
-  //rename these to a file name similar to the ontology slug
-  [
-    'src/ontologies/example-ontology.ts',
-    // The register sibling is what index.ts imports; without it here the scaffold keeps a
-    // literal `example-ontology.register.ts` full of unsubstituted `${...}` placeholders and
-    // nothing ever calls linkedOntology().
-    'src/ontologies/example-ontology.register.ts',
-    'src/data/example-ontology.json',
-    'src/data/example-ontology.json.d.ts',
-  ].forEach((f) => {
-    let parts = f.split('/');
-    let newParts = [...parts];
-    let [, ...extensions] = newParts.pop().split('.');
-    let newName = hyphenName + '.' + extensions.join('.');
-    fs.renameSync(
-      path.join(targetFolder, f),
-      path.join(targetFolder, ...newParts, newName),
-    );
-  });
 }
 
 /**
