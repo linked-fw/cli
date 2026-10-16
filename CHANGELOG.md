@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.48.1
+
+### Patch Changes
+
+- [#277](https://github.com/linked-fw/cli/pull/277) [`d9ade60`](https://github.com/linked-fw/cli/commit/d9ade60c694f5a842216ffde985854dec5623900) Thanks [@flyon](https://github.com/flyon)! - The linked package sort no longer counts devDependencies, so `@_linked/core` (which has the cli as a devDependency) and `@_linked/cli` are no longer read as a cycle, and "Could not sort lincd packages, circular dependencies?" is no longer printed for them.
+
 ## 1.48.0
 
 ### Minor Changes
