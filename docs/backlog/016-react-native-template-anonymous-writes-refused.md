@@ -8,7 +8,7 @@ summary: >
 status: Open -- found while moving the template to @_linked/server 3; no fix chosen
 ---
 
-# 015 — React Native template: anonymous writes are refused
+# 016 — React Native template: anonymous writes are refused
 
 ## Symptom
 
