@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.50.0
+
+### Minor Changes
+
+- [#286](https://github.com/linked-fw/cli/pull/286) [`4d73f06`](https://github.com/linked-fw/cli/commit/4d73f0686b2d08f081bbdb387dc128627f8f9099) Thanks [@flyon](https://github.com/flyon)! - `linked start` warns when Node loads a file of a `@_linked/*` package the Vite SSR runner bundles, which leaves the app with two copies of that module (classes fail `instanceof`, module state exists twice). It prints one status line per boot (`[linked] dual-copy guard: on`, or `off` with the reason) and one `[linked] TWO COPIES: Node loaded <package>/<file> (imported as "<specifier>" from <importer>) …` line per file, once per process. Files in `node_modules` and in localized checkouts or workspaces (matched by their `package.json` name) both count; `@_linked/cli` is never reported. It only warns. `LINKED_DUAL_COPY_GUARD=0` turns it off; on a Node without `module.registerHooks` (before 22.15 / 23.5) it is off and says so.
+
 ## 1.49.0
 
 ### Minor Changes
