@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.48.2
+
+### Patch Changes
+
+- [#280](https://github.com/linked-fw/cli/pull/280) [`18ce419`](https://github.com/linked-fw/cli/commit/18ce41955a404475ff1326934426c021757a1a86) Thanks [@flyon](https://github.com/flyon)! - `create-app --template react-native`: the template moves to `@_linked/server` 3.0.0. `apps/mobile` sends its queries through `RemoteDataset` (`@_linked/server/shapes/quadstores/RemoteDataset`, the renamed `BackendAPIStore`) in its no-`url` form, so the API URL is still resolved once in `src/shell/env.ts` and reaches the API through `SITE_ROOT`. `services/api` pins the same server release and `@_linked/s3` 1.6.3, which no longer depends on `@_linked/server` 2, so the install has one server copy.
+
 ## 1.48.1
 
 ### Patch Changes
