@@ -48,6 +48,8 @@ RemoteDatasetUnreachableError`, each against the storage file's own import.
 | 2.33.0 as published (ignores the loader) | RemoteDataset | `[probe] instanceof RemoteDataset false, instanceof FusekiStore false`; `[probe] instanceof RemoteDatasetUnreachableError false (RemoteDatasetUnreachableError)` |
 | with the loader (D1a's change applied to `lib/esm/utils/loadStores.js`) | RemoteDataset | `[probe] instanceof RemoteDataset true, instanceof FusekiStore false`; `[probe] instanceof RemoteDatasetUnreachableError true (RemoteDatasetUnreachableError)` |
 | with the loader | FusekiStore (committed default) | `[probe] instanceof RemoteDataset false, instanceof FusekiStore true`; `[storage] appData: FusekiStore`; `GET /` 200 |
+| 2.34.0 from npm (core's half released) | RemoteDataset | `[probe] instanceof RemoteDataset true, instanceof FusekiStore false`; `[probe] instanceof RemoteDatasetUnreachableError true (RemoteDatasetUnreachableError)` |
+| 2.34.0 from npm | FusekiStore | `[probe] instanceof RemoteDataset false, instanceof FusekiStore true`; `[storage] appData: FusekiStore`; `GET /` 200 |
 
 The first row is today's behaviour and shows the CLI half is harmless with an older core.
 
