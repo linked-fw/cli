@@ -958,7 +958,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // second, Node copy of it, so classes fail `instanceof` across the two
         // and module state (the `Server` proxy, `AppContext`) exists twice. The
         // dual-copy guard measured 8 to 13 such files in a fresh template app
-        // (cli backlog 015, report 016). Packages are resolved with the SSR
+        // (cli reports 016 and 017). Packages are resolved with the SSR
         // conditions below (`import → lib/esm`), since installed packages have no
         // `src`. `server-utils` and `react` hold the React context LinkedServer's
         // `AppContextProvider` and the app's `AppRoot` must agree on; they are

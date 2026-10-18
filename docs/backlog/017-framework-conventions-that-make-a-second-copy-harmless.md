@@ -14,8 +14,8 @@ status: Open -- not scheduled
 ## Why
 
 Under `linked start` (dev) a framework module can be evaluated twice, once by Vite's SSR module
-runner and once by Node ([backlog 014](014-dev-loads-a-second-copy-of-datasets-file-stores.md),
-[backlog 015](015-one-copy-of-each-framework-package.md)). CN plan 068 phase 4 removes the copies
+runner and once by Node ([backlog 014](https://github.com/linked-fw/cli/blob/b013598/docs/backlog/014-dev-loads-a-second-copy-of-datasets-file-stores.md),
+[backlog 015](https://github.com/linked-fw/cli/blob/b013598/docs/backlog/015-one-copy-of-each-framework-package.md), both closed by [report 017](../reports/017-dual-copy-e2e.md)). CN plan 068 phase 4 removes the copies
 it knows of: core's `loadStores` imports through the loader `linked start` installs, a guard warns
 on every file Node loads from a bundled package, and standalone apps bundle every `@_linked/*`
 but core and the CLI. Each of those removes a copy. None of them makes a copy that still happens
