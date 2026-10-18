@@ -267,6 +267,26 @@ linked app-doctor                 # in an app: check optimizeDeps.include and Re
   prints them; `clientDepIncludes: {deny: [...]}` keeps entries out and
   `clientDepIncludes: false` (or `LINKED_CLIENT_DEP_INCLUDES=0`) turns it off.
 
+### Two copies of a framework package
+
+Under `linked start` a package in the dev `ssr.noExternal` list is evaluated by Vite's SSR module
+runner. If Node also loads one of its files (an external package importing a bundled one, or a
+native `import()` in Node-loaded code), the app holds two copies of that module: classes from it
+fail `instanceof` and its module state is set on one copy and read on the other. `linked start`
+watches for this and prints, once per boot and once per file:
+
+```
+[linked] dual-copy guard: on
+[linked] TWO COPIES: Node loaded @_linked/server-utils/lib/esm/utils/Server.js (imported as "@_linked/server-utils/utils/Server" from file:///…/node_modules/@_linked/schema/lib/esm/shapes/ImageObject.class.js), but @_linked/server-utils is bundled for the Vite SSR runner. Classes from it will fail `instanceof` and its module state exists twice.
+```
+
+The guard only warns, it never stops a boot. It sees Node's loads in the dev server process, not
+the browser or a built app. A file counts when it is under `node_modules/@_linked/<name>/`, or when
+the nearest named `package.json` above it is a bundled `@_linked/*` package (a localized checkout
+or a workspace); `@_linked/cli` itself is never reported. `LINKED_DUAL_COPY_GUARD=0` turns it off
+(`[linked] dual-copy guard: off (LINKED_DUAL_COPY_GUARD=0)`); it needs Node 22.15+ or 23.5+
+(`module.registerHooks`) and says `off` with the Node version otherwise.
+
 ### Developing a dependency from a git checkout
 
 `linked localize` clones an npm dependency into `packages-local/`, which the app lists in its
