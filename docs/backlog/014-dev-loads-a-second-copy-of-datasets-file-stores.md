@@ -7,7 +7,7 @@ summary: >
   `RemoteDatasetUnreachableError` fail across the boundary (app-template#26 matches errors by
   `name` + `url` as a workaround), and `server-utils`' module state (`Server`'s local server, the
   proxy's default headers) exists twice. Core itself is one copy. A built app has one copy of each.
-status: Open -- found in app-template#26; no fix chosen
+status: Open -- fix in progress, CN plan 068 phase 4
 ---
 
 # 014 — Dev loads a second copy of datasets-file stores
