@@ -6,7 +6,7 @@ summary: >
   guard: a fresh template app goes from 8 / 13 `TWO COPIES` lines (RemoteDataset / FusekiStore
   datasets file) to 0 / 0, renders and passes its own e2e; webid.email standalone goes from 17
   lines and a failing `email.spec.ts` (case 17 (a), `LinkedEmail` provider lost) to 0 lines and
-  5 passed, given core 2.34.0+; CN (worktree) stays at 0 and its sign-in proof passes. Boot time
+  5 passed, given core 2.34.0+; CN stays at 0 (worktree and localized layout) and its sign-in proof passes. Boot time
   unchanged. Minor release.
 ---
 
@@ -134,12 +134,25 @@ A CN worktree of `main` (`c316c33da`), `npm ci`, the CLI under test installed, t
 [CN] [linked] dual-copy guard: on
 ```
 
-**Localized layout not measured, owner's CN was running.** The owner's layout (every framework
-package a `packages-local/` checkout, so every one a bundled source workspace) is measured with
-the `lib/` overlay into `packages-local/_linked-cli`, which is only run while nothing listens on
-:4040; the owner's CN was listening throughout this step. Since this change touches only the
-standalone branch of `ssrNoExternal`, and the workspace branch is pinned by the unchanged unit
-cases, the localized count is expected to be D2's, which was not measured either.
+**Localized layout** (the owner's CN: every framework package a `packages-local/` checkout, so a
+bundled source workspace), measured once nothing listened on :4040. From CN's main checkout,
+`CN_TEST_PORT=4079 npx playwright test tests/e2e/signin.spec.ts`, first with the checkout's own
+build (1.50.0), then with this build's `lib/` rsynced over `packages-local/_linked-cli/lib/`, then
+`npx linked build` in the checkout to put main's build back (`git status`: `## main...origin/main`,
+clean):
+
+| CLI `lib/` | Result | `TWO COPIES` |
+|---|---|---|
+| checkout's 1.50.0 (before) | `5 passed (34.6s)` | 0 |
+| this build | `5 passed (33.6s)` | 0 |
+
+```
+[globalSetup] CN is healthy on :4079 after 17.2 s
+  5 passed (33.6s)
+[CN] [linked] dual-copy guard: on
+```
+
+This is also the first measurement of D2's guard in the localized layout: 0 lines.
 
 ## Not done here
 
