@@ -579,6 +579,50 @@ export async function resolveWorkspaceSpecifier(
 }
 
 /**
+ * Resolve a relative `./Sibling.js` / `./Sibling.jsx` import made from source
+ * (the published-output convention) to the `.tsx` or `.ts` file beside it or,
+ * in a registered src, to the literal file when neither exists. Returns null
+ * when the importer is not source, the import is not relative (or absolute)
+ * `.js`/`.jsx`, or no candidate exists, so Vite resolves it.
+ *
+ * Source is a file under `/packages/` (a workspace clone) or under the `src/`
+ * of any registered workspace (`workspaces`), which includes a linked package
+ * installed from npm that ships `src/` (`node_modules/@_linked/shape-ui/src/`).
+ *
+ * The installed case must not be left to Vite: in the browser, Vite adds
+ * `?v=<hash>` to a node_modules file it resolves only when that file is
+ * `.[cm]?[jt]s` (`ensureVersionQuery`/`isOptimizable`), never `.tsx`/`.jsx`,
+ * and a relative import inherits its importer's `?v`. So a `.tsx` module is
+ * requested plain from a `.tsx` importer and with `?v` from a `.ts` one: two
+ * URLs, two instances (shape-ui's `hostContext.tsx` and its React context,
+ * report 018). Resolving every such import here gives every file under that
+ * `src/` one id with no `?v`.
+ */
+export async function resolveSourceSibling(
+  id: string,
+  importer: string | undefined,
+  workspaces: WorkspaceEntry[],
+): Promise<string | null> {
+  if (!importer || !/\.jsx?$/.test(id)) return null;
+  if (!(id.startsWith('.') || path.isAbsolute(id))) return null;
+  // Vite's ids use `/`, on Windows too.
+  const importerPath = importer.replace(/[?#].*$/, '');
+  const inRegisteredSrc = workspaces.some((ws) => {
+    const rel = path.relative(ws.srcDir, importerPath);
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  });
+  if (!inRegisteredSrc && !/[\\/]packages[\\/]/.test(importerPath)) return null;
+  const base = path.resolve(path.dirname(importerPath), id);
+  for (const ext of ['.tsx', '.ts']) {
+    const candidate = base.replace(/\.jsx?$/, ext);
+    if (await isFile(candidate)) return candidate;
+  }
+  // A literal `.js` in a registered src would get `?v` from Vite and pass it
+  // on to its own relative imports; outside one, Vite resolves it as before.
+  return inRegisteredSrc && (await isFile(base)) ? base : null;
+}
+
+/**
  * Packages whose entry `linked start` hands to `vite.ssrLoadModule` by name
  * (`@_linked/server/shapes/LinkedServer`, see `commands/start.ts`).
  *
@@ -773,21 +817,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
               async resolveId(id, importer) {
                 if (id.startsWith('\0')) return null;
 
-                // Workspace-internal `./Sibling.js` → `.tsx` / `.ts` rewrite.
-                if (
-                  importer &&
-                  // Vite's ids use `/`, on Windows too.
-                  /[\\/]packages[\\/]/.test(importer) &&
-                  /\.(jsx?)$/.test(id) &&
-                  (id.startsWith('.') || path.isAbsolute(id))
-                ) {
-                  const importerDir = path.dirname(importer);
-                  const base = path.resolve(importerDir, id);
-                  for (const ext of ['.tsx', '.ts']) {
-                    const candidate = base.replace(/\.jsx?$/, ext);
-                    if (await fsExtra.pathExists(candidate)) return candidate;
-                  }
-                }
+                // `./Sibling.js` → `.tsx` / `.ts` from source, workspace or
+                // installed (see resolveSourceSibling).
+                const sibling = await resolveSourceSibling(id, importer, workspaces);
+                if (sibling) return sibling;
 
                 // Bare workspace specifier — resolve directly to src/.
                 if (

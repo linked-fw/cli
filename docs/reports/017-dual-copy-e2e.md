@@ -129,6 +129,10 @@ webid.email `LinkedEmail` provider, is gone with C and a core 2.34.0+ floor (rep
 
 What the guard and this e2e do not see: the browser, a built app, and the optimizer's copies.
 
+Case 20, 2026-10-18, browser (CN plan 068 S5): an installed linked package's `src/` `.tsx` loaded
+plain and with `?v`, two React contexts in shape-ui. Fixed in report 018; a browser check is
+backlog 019.
+
 ## Follow-ups
 
 - Backlog 017, framework conventions (option D): not scheduled.
