@@ -117,7 +117,54 @@ store should come from Vite's copy. Not measured.
    classes (or a specifier → module map). Keeps the datasets-file format, needs `loadStores` to
    accept pre-resolved modules.
 
-Option 1 or 3 keeps today's bundling decisions. Whichever is chosen, app-template's `name` + `url`
+Option 1 or 3 keeps today's bundling decisions.
+
+## Measured on a spike
+
+Branch [`spike/dual-copies`](https://github.com/linked-fw/cli/tree/spike/dual-copies) (not for
+merge). Test app: `linked create-app` from that branch's build, `npm install` from npm, then the
+branch's `lib/` copied over `node_modules/@_linked/cli/lib` and the core half
+(`spike/core-loadStores.patch`) applied to `node_modules/@_linked/core/lib/esm/utils/loadStores.js`.
+The storage file prints `appData instanceof RemoteDataset` and, after `appData.init()` against
+`http://127.0.0.1:9`, `err instanceof RemoteDatasetUnreachableError`, both against its own import.
+
+| Build | `instanceof RemoteDataset` | `instanceof RemoteDatasetUnreachableError` | FusekiStore datasets file: `instanceof FusekiStore`, `GET /` |
+|---|---|---|---|
+| CLI 1.48.1 and core as published | `false` | `false` | `true`, 200 |
+| Spike (loader hook) | `true` | `true` | `true`, 200 |
+| Spike, loader = `vite.ssrLoadModule` for every store | `true` | `true` | **`false`**, 200 |
+
+The last row is why the loader has two branches. Vite transforms an entry handed to
+`ssrLoadModule` even when its package is external (the `SSR_ENTRY_PACKAGES` comment says the same),
+so `ssrLoadModule('@_linked/fuseki/shapes/FusekiStore')` made a Vite copy of FusekiStore next to the
+app's Node copy.
+
+Two other routes were tried and do not work:
+
+- **Bundling only `@_linked/core/utils/loadStores`** through `ssr.noExternal`: Vite 6 tests
+  `noExternal` against the package name (`getNpmPackageName(id)` in `createIsConfiguredAsExternal`),
+  so a subpath pattern never matches and the file stays external.
+- **An alias for that subpath** does get the file inlined (Vite skips externalization for an
+  import that matches an alias), but the runner's dynamic import of a bare specifier is always
+  externalized at run time (`fetchModule`), so `import(entry.store)` still reached Node's copy.
+
+## Recommended fix
+
+Option 1, in two small changes that can ship in either order (each is a no-op without the other):
+
+- **core** (`src/utils/loadStores.ts`): import through
+  `globalThis[Symbol.for('@_linked/core:importModule')]` when it is a function, else `import()`.
+  The diff is `spike/core-loadStores.patch` on the spike branch. About 1 hour with a unit test.
+- **cli** (`src/commands/start.ts`): before the storage file loads, set that symbol to a loader
+  that calls `vite.ssrLoadModule(specifier)` when the specifier's package is in the dev
+  `ssr.noExternal` list, and otherwise imports the file Vite's SSR resolver returns for it
+  (`vite.environments.ssr.pluginContainer.resolveId`) through Node, which is the copy the app's own
+  import of an external package gets. About half a day with the CLI test below.
+
+This covers `loadStores` only. The guard in backlog 015 finds the other paths: on the same spike it
+reported eight more files Node loads from bundled packages in a template app, for example
+`@_linked/server-utils/utils/Server` imported by `@_linked/schema/shapes/ImageObject.class`.
+Those are fixed by 015's bundling change, not here. Whichever is chosen, app-template's `name` + `url`
 fallback in `storageErrors.ts` and its `[storage]` log can go back to `instanceof` afterwards.
 
 ## Done when
@@ -129,3 +176,5 @@ fallback in `storageErrors.ts` and its `[storage]` log can go back to `instanceo
 - The same test, or a second one, asserts one copy of `@_linked/server-utils/utils/Server` (the
   local server `LinkedServer` set is the one the store's `Server.call` sees).
 - app-template's `isError` fallback is removed in a follow-up there.
+- The `linked start` dual-copy warning (backlog 015) prints nothing for `@_linked/server` in that
+  test.
