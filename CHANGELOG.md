@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.51.0
+
+### Minor Changes
+
+- [#288](https://github.com/linked-fw/cli/pull/288) [`325b0bc`](https://github.com/linked-fw/cli/commit/325b0bc102db058926dd6b975a4aa29e744294df) Thanks [@flyon](https://github.com/flyon)! - Dev SSR bundles every `@_linked` package but core and the CLI in a standalone app. `linked start` in an app without workspaces now sets `ssr.noExternal` to `/^@_linked\/(?!(core|cli)$)/` (exported as `STANDALONE_SSR_BUNDLED`), so Vite's SSR runner evaluates each framework package once. Before, only `server`, `server-utils` and `react` were bundled, and an external package (`schema`, `primitives`, `auth`, `fuseki`) importing one of them loaded a second Node copy: a fresh template app had 8 to 13 files flagged by the dual-copy guard, now none. Workspace mode and release builds keep their lists. An app needs `@_linked/core` 2.34.0 or later, whose `loadStores` imports stores through `linked start`'s loader; with an older core a store named in the datasets file (such as `FusekiStore`) is loaded by Node next to the runner's copy, and the guard reports it.
+
 ## 1.50.0
 
 ### Minor Changes
