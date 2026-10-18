@@ -1,8 +1,9 @@
 # api
 
 The Linked backend: `@_linked/server` in API-only mode (`linked start --api-only`), with no web frontend. The
-mobile app's `BackendAPIStore` sends DSL queries here; the generic `BackendAPIStoreProvider` forwards them to
-Fuseki. Shapes come from `app-shapes`, which Vite loads from source in development.
+mobile app's `RemoteDataset` sends DSL queries here (`/call/@_linked/server/<method>`), and `@_linked/server`'s
+generic provider forwards them to Fuseki. Shapes come from `app-shapes`, which Vite loads from source in
+development.
 
 ## Run
 

@@ -5,7 +5,7 @@ React 19.2, with an API-only Linked backend on Fuseki.
 
 ```
 apps/mobile/          Expo app (continuous native generation: ios/ is generated, not committed)
-  src/shell/          env (API URL) and storage (BackendAPIStore) wiring
+  src/shell/          env (API URL) and storage (RemoteDataset) wiring
   src/components/     PersonOverview / PersonPreview: example add/edit/delete screen, safe to replace
   __tests__/          unit tests; __tests__/integration/ runs against a real API and Fuseki
 packages/app-shapes/  Linked shapes package, consumed as TypeScript source; `linked build` for Node
@@ -40,7 +40,7 @@ and `FUSEKI_BASE_URL` in `services/api/.env`.
 | `npm run typecheck` | `tsc --noEmit` in every workspace |
 | `npm run lint` | ESLint over every workspace, including the `@_linked/server` subpath rule for `apps/mobile` |
 | `npm test` | app Jest (shapes, render defaults, API URL) and the API's `node --test` unit tests |
-| `npm run fuseki:up && npm run test:integration` | the example screen lists, adds and deletes through `BackendAPIStore` → API → Fuseki (starts its own API on :4100 with the in-memory `app-test` dataset) |
+| `npm run fuseki:up && npm run test:integration` | the example screen lists, adds and deletes through `RemoteDataset` → API → Fuseki (starts its own API on :4100 with the in-memory `app-test` dataset) |
 | `npm run build -w packages/app-shapes` | `linked build` emits `lib/esm` with `.js` specifiers, loadable by Node |
 | `cd apps/mobile && npx expo export --platform ios --output-dir /tmp/export` | Metro resolves `@_linked/*` (including subpaths) and the workspace packages |
 
@@ -82,12 +82,12 @@ cd apps/mobile && npx expo export --platform ios --output-dir /tmp/export
 - **API URL.** `app.config.ts` passes `EXPO_PUBLIC_API_URL` (if set) and the API port (`defaultApiPort` in
   `src/shell/apiPort.json`, shared with `env.ts`) to `src/shell/env.ts`,
   which falls back to the dev machine's host from Expo's `hostUri`, then `localhost`, and sets
-  `process.env.SITE_ROOT` and `DATA_ROOT` for `BackendAPIStore`. The app identity (name, slug, bundle id) stays in
+  `process.env.SITE_ROOT` and `DATA_ROOT` for `RemoteDataset`. The app identity (name, slug, bundle id) stays in
   `app.json`.
 - **Load order is enforced by imports:** `App.tsx` imports `@_linked/react/native` first, and every module that
   needs the API store imports `src/shell/storage`, which imports `src/shell/env`.
 - **`@_linked/server` by subpath only** in `apps/mobile` (for example
-  `@_linked/server/shapes/quadstores/BackendAPIStore`): the root barrel pulls express, webpack and react-dom.
+  `@_linked/server/shapes/quadstores/RemoteDataset`): the root barrel pulls express, webpack and react-dom.
   ESLint `no-restricted-imports` enforces it.
 - **Shapes package imports are extensionless** (`./shapes/Example`, not `./shapes/Example.js`): Metro does not
   map `.js` specifiers to `.ts` source. No configuration is needed — `linked build` always adds `.js` to the

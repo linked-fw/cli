@@ -1,4 +1,4 @@
-// Resolves the API URL and exposes it to @_linked/server's BackendAPIStore, which reads process.env.SITE_ROOT and
+// Resolves the API URL and exposes it to @_linked/server's RemoteDataset, which reads process.env.SITE_ROOT and
 // DATA_ROOT at runtime. ./storage imports this module, so the variables are set before the store is constructed.
 import Constants from 'expo-constants';
 

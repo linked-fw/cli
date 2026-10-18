@@ -4,6 +4,6 @@ import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider';
 // queries for it ("Cannot resolve shape"). In the web app-template the page render imports it instead.
 import '@_linked/schema/shapes/Person';
 
-// No custom methods: the app's DSL queries reach Fuseki through @_linked/server's generic BackendAPIStoreProvider
+// No custom methods: the app's DSL queries reach Fuseki through @_linked/server's generic provider
 // (select/create/update/delete forwarded to LinkedStorage). LinkedServer loads this through exports["./backend"].
 export class Backend extends BackendProvider {}

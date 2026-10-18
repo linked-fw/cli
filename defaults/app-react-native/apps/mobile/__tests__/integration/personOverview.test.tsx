@@ -1,4 +1,4 @@
-// The example PersonOverview screen with the real BackendAPIStore and real fetch, against the API started by
+// The example PersonOverview screen with the real RemoteDataset and real fetch, against the API started by
 // globalSetup on the reset app-test dataset: list 0, add (1), edit (the name changes and persists), delete (0).
 import '@_linked/react/native';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';

@@ -34,7 +34,7 @@ module.exports = [
             {
               name: '@_linked/server',
               message:
-                'Import @_linked/server by subpath (e.g. @_linked/server/shapes/quadstores/BackendAPIStore); the root barrel pulls express, webpack and react-dom.',
+                'Import @_linked/server by subpath (e.g. @_linked/server/shapes/quadstores/RemoteDataset); the root barrel pulls express, webpack and react-dom.',
             },
           ],
           patterns: [{ group: ['@_linked/server/backend*'], message: 'Backend-only entry.' }],
