@@ -408,7 +408,7 @@ workspaces monorepo for Expo SDK 57 / React Native 0.86 / React 19.2 with an API
   apps/mobile/              Expo app (ios/ and android/ are generated, not committed)
     App.tsx                 imports ./src/shell/env, @_linked/react/native, ./src/shell/storage
     babel.config.js         registers babel/stripJsonImportAttributes.js
-    src/shell/              env.ts (API URL), storage.ts (BackendAPIStore)
+    src/shell/              env.ts (API URL), storage.ts (RemoteDataset)
     src/components/         PersonOverview / PersonPreview: example add/edit/delete screen
     __tests__/              unit tests; __tests__/integration/ runs against the API and Fuseki
   packages/<prefix>-shapes/ Linked shapes package: TypeScript source with extensionless imports; `linked build`
@@ -437,7 +437,7 @@ The generated app:
 - **Render defaults** come from `@_linked/react/native`, which replaces `@_linked/react`'s `<svg>` loader and
   error elements (they crash on React Native).
 - **Person example.** `PersonOverview` and `PersonPreview` list, add, edit and delete `@_linked/schema`'s
-  `Person` through `BackendAPIStore` → API → Fuseki. A Jest integration test covers it.
+  `Person` through `RemoteDataset` → API → Fuseki. A Jest integration test covers it.
 - **Babel plugin.** Metro rejects `import('x.json', { with: { type: 'json' } })`, which Linked ontology packages
   use; `apps/mobile/babel/stripJsonImportAttributes.js` drops that options argument.
 - **Before every PR.** The template ships no CI workflow. Its README has a checklist to run locally and paste
