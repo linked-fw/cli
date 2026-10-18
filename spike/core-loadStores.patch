@@ -1,0 +1,22 @@
+--- a/src/utils/loadStores.ts
++++ b/src/utils/loadStores.ts
+@@
+ import type {DatasetsConfig} from './parseDatasetsConfig.js';
+ 
++/**
++ * The module loader `loadStores` uses. A host that evaluates the app through
++ * another loader (`linked start` dev: Vite's SSR module runner) sets this, so a
++ * store comes from the same copy of its package as the app's own import of it
++ * (cli backlog 014). Unset, the native `import()`.
++ */
++const IMPORT_MODULE = Symbol.for('@_linked/core:importModule');
++function importModule(specifier: string): Promise<unknown> {
++  const hook = (globalThis as Record<symbol, unknown>)[IMPORT_MODULE];
++  return typeof hook === 'function'
++    ? (hook as (s: string) => Promise<unknown>)(specifier)
++    : import(specifier);
++}
++
+@@ export async function loadStores<T = unknown>(
+-    const mod = await import(entry.store);
++    const mod = await importModule(entry.store);

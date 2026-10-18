@@ -13,11 +13,15 @@
 //   - Server changes still need full process restart for now (server HMR
 //     deferred to vite-node migration)
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {importFile, isPathInside} from '../utils/platform.js';
 import fsExtra from 'fs-extra';
-import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
+import {
+  parseWorkspacePatterns,
+  isWorkspacePathNegated,
+} from '../workspace-globs.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
 
@@ -32,7 +36,11 @@ export interface StartOptions {
   apiOnly?: boolean;
 }
 
-export const VITE_CONFIG_FILES = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs'];
+export const VITE_CONFIG_FILES = [
+  'vite.config.ts',
+  'vite.config.js',
+  'vite.config.mjs',
+];
 
 /**
  * Names for the app's linked config, in priority order. `lincd.config.js` is
@@ -188,11 +196,15 @@ interface WorkspacePackage {
  * absolute root, and its `src/` directory for fast prefix matching. Dependency
  * roots are realpathed by the shared discovery, matching the ids Vite reports.
  */
-export async function discoverWorkspacePackages(cwd: string): Promise<WorkspacePackage[]> {
+export async function discoverWorkspacePackages(
+  cwd: string,
+): Promise<WorkspacePackage[]> {
   const pkgJsonPath = path.join(cwd, 'package.json');
   if (!(await fsExtra.pathExists(pkgJsonPath))) return [];
   const pkgJson = await fsExtra.readJson(pkgJsonPath);
-  const {patterns, negatedPatterns} = parseWorkspacePatterns(pkgJson.workspaces);
+  const {patterns, negatedPatterns} = parseWorkspacePatterns(
+    pkgJson.workspaces,
+  );
   const out: WorkspacePackage[] = [];
 
   // Include the root app itself so edits to <cwd>/src/* trigger HMR for
@@ -251,7 +263,11 @@ export async function discoverWorkspacePackages(cwd: string): Promise<WorkspaceP
     // an `npm link` all realpath to a directory outside `node_modules`.
     if (isInsideNodeModules(entry.srcDir)) continue;
     names.add(entry.name);
-    out.push({name: entry.name, root: path.dirname(entry.srcDir), srcDir: entry.srcDir});
+    out.push({
+      name: entry.name,
+      root: path.dirname(entry.srcDir),
+      srcDir: entry.srcDir,
+    });
   }
   return out;
 }
@@ -290,7 +306,9 @@ function openBrowser(url: string): void {
   const {command, args} = browserCommand(url);
   const child = spawn(command, args, {detached: true, stdio: 'ignore'});
   // A missing opener must not take the dev server down.
-  child.on('error', (e) => console.warn(`[linked] could not open ${url}: ${e.message}`));
+  child.on('error', (e) =>
+    console.warn(`[linked] could not open ${url}: ${e.message}`),
+  );
   child.unref();
 }
 
@@ -362,7 +380,8 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
     const envPath = path.join(cwd, '.env');
     if (
       (await fsExtra.pathExists(envPath)) &&
-      typeof (process as {loadEnvFile?: (p: string) => void}).loadEnvFile === 'function'
+      typeof (process as {loadEnvFile?: (p: string) => void}).loadEnvFile ===
+        'function'
     ) {
       (process as {loadEnvFile: (p: string) => void}).loadEnvFile(envPath);
     }
@@ -385,8 +404,47 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   const apiOnly = isApiOnly(opts, linkedConfig);
 
   const {createServer: createViteServer} = await import('vite');
-  const vite = await createViteServer(await resolveViteServerConfig(cwd, apiOnly));
+  const vite = await createViteServer(
+    await resolveViteServerConfig(cwd, apiOnly),
+  );
   configureLinkedServer(linkedConfig.server, vite, cwd, apiOnly);
+
+  // Core's `loadStores` imports each store a datasets file names. A native
+  // `import()` there is Node's, so a store from a package the SSR runner
+  // bundles (`@_linked/server/shapes/quadstores/RemoteDataset`) would be a
+  // second copy of the class the app imports (cli backlog 014). Hand core a
+  // loader that gives each store the copy the app's own import gets: the
+  // runner's for a bundled package, Node's for an external one. Not
+  // `ssrLoadModule` for both: Vite transforms an explicitly requested entry
+  // even when its package is external, which would make a Vite copy of an
+  // external store (`FusekiStore`) next to the app's Node copy.
+  const {isBundled, packageNameOf} =
+    await import('../utils/dual-copy-guard.js');
+  const ssrNoExternal = vite.config.ssr?.noExternal;
+  const bundledList = Array.isArray(ssrNoExternal) ? ssrNoExternal : [];
+  (globalThis as Record<symbol, unknown>)[
+    Symbol.for('@_linked/core:importModule')
+  ] = async (specifier: string) => {
+    if (
+      ssrNoExternal === true ||
+      isBundled(packageNameOf(specifier), bundledList)
+    ) {
+      return vite.ssrLoadModule(specifier);
+    }
+    const resolved = await vite.environments.ssr.pluginContainer.resolveId(
+      specifier,
+      path.join(cwd, 'index.js'),
+    );
+    return import(resolved ? pathToFileURL(resolved.id).href : specifier);
+  };
+
+  // Warn when Node loads a file of a package the SSR runner bundles: two copies
+  // (cli backlog 014). Registered before the storage config loads.
+  if (process.env.LINKED_DUAL_COPY_GUARD !== '0') {
+    const {installDualCopyGuard} = await import('../utils/dual-copy-guard.js');
+    const noExternal = vite.config.ssr?.noExternal;
+    if (Array.isArray(noExternal)) installDualCopyGuard(noExternal);
+  }
 
   // Load the storage config through Vite SSR so it
   // configures the SAME LinkedStorage instance the rest of the SSR graph

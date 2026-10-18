@@ -16,7 +16,10 @@ import fsExtra from 'fs-extra';
 import path from 'node:path';
 import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
-import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
+import {
+  parseWorkspacePatterns,
+  isWorkspacePathNegated,
+} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
 import {
   discoverInstalledLinkedPackages,
@@ -73,7 +76,9 @@ export const chunkForModuleId = (id: string): string | undefined => {
       id.includes('/packages/server-utils/') ||
       id.includes('/packages/primitives/') ||
       id.includes('/packages/css/') ||
-      /\/packages\/(auth|org|schema|fuseki|owl|xsd|dcat|dcmi|s3|sentry|ui)\//.test(id)
+      /\/packages\/(auth|org|schema|fuseki|owl|xsd|dcat|dcmi|s3|sentry|ui)\//.test(
+        id,
+      )
     ) {
       return 'linked';
     }
@@ -100,7 +105,7 @@ export const chunkForModuleId = (id: string): string | undefined => {
   // (reading 'createContext')".
   if (
     /[\\/]node_modules[\\/](react|react-dom|react-router-dom|react-router|@remix-run[\\/]router|scheduler)[\\/]/.test(
-      id
+      id,
     )
   ) {
     return 'react-vendor';
@@ -125,7 +130,10 @@ export const chunkForModuleId = (id: string): string | undefined => {
 export function hmrPortFor(devPort: unknown): number {
   const parsed = Number(devPort);
   const validDevPort =
-    Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535
+    Number.isFinite(parsed) &&
+    Number.isInteger(parsed) &&
+    parsed >= 1 &&
+    parsed <= 65535
       ? parsed
       : DEFAULT_DEV_PORT;
   const derived = DEFAULT_HMR_PORT + (validDevPort - DEFAULT_DEV_PORT);
@@ -146,7 +154,9 @@ export function isPortFree(port: number, host?: string): Promise<boolean> {
         const probe = net.createServer();
         probe.unref();
         probe.once('error', () => resolve(false));
-        probe.listen({port, host, exclusive: true}, () => probe.close(() => resolve(true)));
+        probe.listen({port, host, exclusive: true}, () =>
+          probe.close(() => resolve(true)),
+        );
       }),
   );
 }
@@ -157,8 +167,9 @@ export function isPortFree(port: number, host?: string): Promise<boolean> {
  * the old server still holds the port — probing again would see our own socket
  * and move to the next port on every restart.
  */
-const chosenHmrPorts: Map<number, number> = ((globalThis as any)[Symbol.for('@_linked/cli.hmrPorts')] ??=
-  new Map<number, number>());
+const chosenHmrPorts: Map<number, number> = ((globalThis as any)[
+  Symbol.for('@_linked/cli.hmrPorts')
+] ??= new Map<number, number>());
 
 export interface ResolveHmrPortOptions {
   /** The dev port the HMR port is derived from (`process.env.PORT ?? opts.port`). */
@@ -190,17 +201,24 @@ export async function resolveHmrPort({
   const override = env.LINKED_HMR_PORT;
   if (override !== undefined && override.trim() !== '') {
     const port = Number(override);
-    if (Number.isInteger(port) && port >= 1 && port <= MAX_HMR_PORT) return port;
+    if (Number.isInteger(port) && port >= 1 && port <= MAX_HMR_PORT)
+      return port;
     log(`[linked] ignoring LINKED_HMR_PORT=${override}: not a port number`);
   }
   const derived = hmrPortFor(devPort);
   const remembered = chosenHmrPorts.get(derived);
   if (remembered !== undefined) return remembered;
-  for (let port = derived; port <= Math.min(MAX_HMR_PORT, derived + HMR_PORT_SEARCH_RANGE); port++) {
+  for (
+    let port = derived;
+    port <= Math.min(MAX_HMR_PORT, derived + HMR_PORT_SEARCH_RANGE);
+    port++
+  ) {
     if (await isFree(port)) {
       chosenHmrPorts.set(derived, port);
       if (port !== derived) {
-        log(`[linked] HMR port ${derived} is in use; using ${port} (set LINKED_HMR_PORT to choose one)`);
+        log(
+          `[linked] HMR port ${derived} is in use; using ${port} (set LINKED_HMR_PORT to choose one)`,
+        );
       }
       return port;
     }
@@ -306,7 +324,10 @@ export async function workspaceDependents(
   // Seed: the app's direct deps, plus each workspace package's own deps.
   try {
     const appPkg = await fsExtra.readJson(path.join(cwd, 'package.json'));
-    for (const dep of Object.keys({...appPkg.dependencies, ...appPkg.devDependencies})) {
+    for (const dep of Object.keys({
+      ...appPkg.dependencies,
+      ...appPkg.devDependencies,
+    })) {
       const resolved = await readInstalledPkg(dep, cwd);
       if (resolved) await visit(resolved.root, resolved.json);
     }
@@ -315,7 +336,10 @@ export async function workspaceDependents(
     if (!ws.srcDir) continue;
     const root = path.dirname(ws.srcDir);
     try {
-      await visit(root, await fsExtra.readJson(path.join(root, 'package.json')));
+      await visit(
+        root,
+        await fsExtra.readJson(path.join(root, 'package.json')),
+      );
     } catch {}
   }
 
@@ -327,7 +351,9 @@ export async function workspaceDependents(
       dependentsOf.get(dep)!.push(key);
     }
   }
-  const queue = [...nodes].filter(([, n]) => wsNames.has(n.name)).map(([k]) => k);
+  const queue = [...nodes]
+    .filter(([, n]) => wsNames.has(n.name))
+    .map(([k]) => k);
   const marked = new Set(queue);
   while (queue.length) {
     for (const parent of dependentsOf.get(queue.pop()!) ?? []) {
@@ -446,7 +472,9 @@ export async function discoverWorkspaces(
     // are skipped below, so passing both nested + standalone layouts is safe.
     // Either list may carry negations, so they are parsed together.
     const {patterns, negatedPatterns} = parseWorkspacePatterns([
-      ...(Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces?.packages ?? []),
+      ...(Array.isArray(pkg.workspaces)
+        ? pkg.workspaces
+        : (pkg.workspaces?.packages ?? [])),
       ...extraGlobs,
     ]);
     const addUnlessNegated = async (root: string): Promise<void> => {
@@ -528,7 +556,9 @@ async function resolveViaWorkspaceExports(
 ): Promise<string | null> {
   let json: any;
   try {
-    json = await fsExtra.readJson(path.join(path.dirname(ws.srcDir), 'package.json'));
+    json = await fsExtra.readJson(
+      path.join(path.dirname(ws.srcDir), 'package.json'),
+    );
   } catch {
     return null;
   }
@@ -610,9 +640,24 @@ export function ssrNoExternal(
   dependents: string[] = [],
 ): (string | RegExp)[] {
   if (workspaces.length === 0) {
-    return [/^@_linked\/server-utils$/, /^@_linked\/react$/, ...SSR_ENTRY_PACKAGES];
+    // Spike (cli backlog 014): bundle every installed `@_linked/*` but core and
+    // the CLI, so no external package (schema, primitives, fuseki) reaches a
+    // bundled one through Node. Measured in a template app: no Node copies left.
+    if (process.env.LINKED_SSR_BUNDLE_ALL === '1')
+      return [/^@_linked\/(?!(core|cli)$)/];
+    return [
+      /^@_linked\/server-utils$/,
+      /^@_linked\/react$/,
+      ...SSR_ENTRY_PACKAGES,
+    ];
   }
-  return [...new Set([...workspaces.map((w) => w.name), ...dependents, ...SSR_ENTRY_PACKAGES])];
+  return [
+    ...new Set([
+      ...workspaces.map((w) => w.name),
+      ...dependents,
+      ...SSR_ENTRY_PACKAGES,
+    ]),
+  ];
 }
 
 /**
@@ -651,15 +696,20 @@ export function clientDefine(
   opts: Pick<LinkedViteConfigOptions, 'define' | 'port'> = {},
 ): Record<string, string> {
   return {
-    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
+    'process.env.NODE_ENV': JSON.stringify(
+      process.env.NODE_ENV ?? 'production',
+    ),
     'process.env.SITE_ROOT': JSON.stringify(
-      process.env.SITE_ROOT ?? `http://localhost:${process.env.PORT ?? opts.port ?? 4040}`,
+      process.env.SITE_ROOT ??
+        `http://localhost:${process.env.PORT ?? opts.port ?? 4040}`,
     ),
     // The app's display name, so client components (e.g. the header) can read it
     // like the SSR <title> does (server-utils Html reads process.env.APP_NAME). The
     // browser has no `process`, so inline it; falls back to a generic label when
     // unset so a bare checkout never renders `undefined`.
-    'process.env.APP_NAME': JSON.stringify(process.env.APP_NAME ?? 'Linked App'),
+    'process.env.APP_NAME': JSON.stringify(
+      process.env.APP_NAME ?? 'Linked App',
+    ),
     ...(opts.define ?? {}),
   };
 }
@@ -684,10 +734,14 @@ export async function installedLinkedDeps(cwd: string): Promise<string[]> {
   return out;
 }
 
-export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
+export function createViteConfig(
+  opts: LinkedViteConfigOptions = {},
+): ReturnType<typeof defineConfig> {
   return defineConfig(async ({mode}) => {
     const isDev = mode === 'development';
-    const workspaces = isDev ? await discoverWorkspaces(opts.workspaceGlobs) : [];
+    const workspaces = isDev
+      ? await discoverWorkspaces(opts.workspaceGlobs)
+      : [];
     // STANDALONE = dev mode with no source-shipping workspaces discovered
     // (an app installed from npm outside the monorepo — its `@_linked/*` /
     // `lincd-*` deps are lib-only). discoverWorkspaces() only registers
@@ -714,7 +768,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     const linkedDeps = isDev ? await installedLinkedDeps(process.cwd()) : [];
     const devPort = process.env.PORT ?? opts.port;
     const clientDepIncludes =
-      isDev && opts.clientDepIncludes !== false && process.env.LINKED_CLIENT_DEP_INCLUDES !== '0';
+      isDev &&
+      opts.clientDepIncludes !== false &&
+      process.env.LINKED_CLIENT_DEP_INCLUDES !== '0';
     const config: UserConfig = {
       server: {
         port: opts.port ?? 4040,
@@ -722,7 +778,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // Unique HMR websocket port per app/worktree, derived from the dev port
         // and moved to a free one when taken — see `resolveHmrPort`. Apps can
         // still override this with their own `server.hmr` in mergeConfig.
-        hmr: {port: isDev ? await resolveHmrPort({devPort}) : hmrPortFor(devPort)},
+        hmr: {
+          port: isDev ? await resolveHmrPort({devPort}) : hmrPortFor(devPort),
+        },
       },
       build: {
         outDir: opts.outDir ?? 'public/bundles',
@@ -787,7 +845,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
                   !path.isAbsolute(id) &&
                   workspaces.length > 0
                 ) {
-                  const resolved = await resolveWorkspaceSpecifier(id, workspaces);
+                  const resolved = await resolveWorkspaceSpecifier(
+                    id,
+                    workspaces,
+                  );
                   if (resolved) return resolved;
                 }
 
@@ -833,14 +894,19 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         clientDepIncludes
           ? linkedClientDepIncludesPlugin({
               sourceWorkspaces: workspaces,
-              deny: typeof opts.clientDepIncludes === 'object' ? opts.clientDepIncludes.deny : undefined,
+              deny:
+                typeof opts.clientDepIncludes === 'object'
+                  ? opts.clientDepIncludes.deny
+                  : undefined,
             })
           : null,
         ...(opts.plugins ?? []),
       ].filter(Boolean) as Plugin[],
       css: {
         modules: {
-          generateScopedName: isDev ? generateScopedName : generateScopedNameProduction,
+          generateScopedName: isDev
+            ? generateScopedName
+            : generateScopedNameProduction,
         },
         postcss: opts.postcssPlugins
           ? {plugins: opts.postcssPlugins as any}
@@ -972,16 +1038,16 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // standalone list — which compiled a private `server-utils` into `lib/`,
         // so no app provider was `instanceof` the server's `ShapeProvider` and
         // `LinkedServer` dropped them all ("exports two generic backend providers").
-        noExternal: isDev ? ssrNoExternal(workspaces, await workspaceDependents(workspaces)) : [],
+        noExternal: isDev
+          ? ssrNoExternal(workspaces, await workspaceDependents(workspaces))
+          : [],
         // STANDALONE: the SSR module runner (`vite.ssrLoadModule`, used to
         // load LinkedServer + the app graph in commands/start.ts) has its OWN
         // condition list, defaulting to `resolve.conditions`. Set it
         // explicitly so `development` is excluded there too and the lib-only
         // packages resolve via `import → lib/esm`. Omitted (defaults kept) in
         // workspace mode so monorepo SSR still resolves `development → src`.
-        ...(isStandalone
-          ? {resolve: {conditions: ['module', 'node']}}
-          : {}),
+        ...(isStandalone ? {resolve: {conditions: ['module', 'node']}} : {}),
       },
       // Client-only, deliberately: these go on the `client` environment, not the
       // top-level `define`, because a top-level `define` is inherited by the SSR
@@ -1046,7 +1112,11 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // renames the binding, and shape URIs are derived from that name.
       optimizeDeps: {
         ...(isDev && (workspaces.length > 0 || linkedDeps.length > 0)
-          ? {exclude: [...new Set([...workspaces.map((w) => w.name), ...linkedDeps])]}
+          ? {
+              exclude: [
+                ...new Set([...workspaces.map((w) => w.name), ...linkedDeps]),
+              ],
+            }
           : {}),
         esbuildOptions: {keepNames: true},
       },
@@ -1064,8 +1134,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       } catch (err) {
         console.warn(
           '[createViteConfig] cssMode=tailwind but @tailwindcss/vite ' +
-            'could not be loaded. Theme variables won\'t apply at runtime. ' +
-            'Add `@tailwindcss/vite` to your app\'s package.json.',
+            "could not be loaded. Theme variables won't apply at runtime. " +
+            "Add `@tailwindcss/vite` to your app's package.json.",
         );
       }
     }
