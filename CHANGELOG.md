@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.51.1
+
+### Patch Changes
+
+- [#291](https://github.com/linked-fw/cli/pull/291) [`00c229f`](https://github.com/linked-fw/cli/commit/00c229fa736d33d531eb6b14cf285b970a85ca7f) Thanks [@flyon](https://github.com/flyon)! - Dev: relative imports inside an installed linked package that ships `src/` (e.g. `@_linked/shape-ui`) now resolve through the CLI, so the browser loads each of its modules once. Before, Vite gave a `.tsx` module `?v=<hash>` when a `.ts` file imported it and none when a `.tsx` file did, which loaded shape-ui's `hostContext.tsx` (and its React context) twice.
+
 ## 1.51.0
 
 ### Minor Changes
