@@ -1,11 +1,12 @@
 // Playwright config for @_linked/cli end-to-end tests.
 //
-// The spec scaffolds a fresh app to a tmpdir, spins up a Fuseki container via
-// testcontainers, runs `npm install` and `npm start` against the scaffolded
-// app, then drives a Person CRUD flow in the browser. See
-// tests/e2e/create-app.spec.ts for the per-test setup.
-//
-// Requires Docker to be available locally / in CI.
+// Both specs scaffold a fresh app to a tmpdir with this build and install this
+// build into it (tests/e2e/helpers/app.ts; build first).
+// - create-app.spec.ts spins up a Fuseki container via testcontainers, runs
+//   `npm start` and drives a Person CRUD flow in the browser. Requires Docker.
+// - dual-copy.spec.ts boots the app without Fuseki and reads only its output
+//   (the dual-copy guard). No Docker, no browser; CI runs it
+//   (.github/workflows/dual-copy-e2e.yml).
 import {defineConfig} from '@playwright/test';
 
 export default defineConfig({

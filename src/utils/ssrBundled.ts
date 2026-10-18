@@ -1,7 +1,7 @@
 // Which packages the Vite SSR runner bundles. Vite tests `ssr.noExternal`
 // against the bare package name only (a subpath pattern never matches), so
 // these helpers do the same. Used by `linked start`'s store loader (cli
-// backlog 014).
+// report 014).
 
 export type SsrMatcher = string | RegExp;
 

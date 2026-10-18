@@ -3,7 +3,7 @@
 // the module runner; if Node also evaluates one of its files (an external
 // package importing a bundled one, or a native `import()` in Node-loaded
 // code), the app holds two copies of that module: classes fail `instanceof`
-// and module state is set on one copy and read on the other (cli backlog 015).
+// and module state is set on one copy and read on the other (cli report 017).
 //
 // Uses Node's in-thread `module.registerHooks` (Node 22.15+ / 23.5+). The hook
 // sees every resolution in the process, so it calls `next` first, skips

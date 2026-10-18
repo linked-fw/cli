@@ -1,0 +1,82 @@
+# The dual-copy e2e (tests/e2e/dual-copy.spec.ts, cli report 017): a template app run by this
+# CLI build must print `[linked] dual-copy guard: on` and no `[linked] TWO COPIES` line, on its
+# committed FusekiStore and with a RemoteDataset. No Docker, no Fuseki, no browser.
+#
+# It runs on every PR to main, nightly on main and on demand. On a PR it only does the work when
+# the PR touches what decides how `linked start` loads modules (the Vite config, `linked start`
+# and its store loader, the guard and its matcher, the lockfile) or this check itself; otherwise
+# the job passes at once. It always reports, so branch protection can require it: a skipped job
+# never reports and would leave a PR (the release PR included) unmergeable.
+name: Dual-copy e2e
+
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dual-copy-e2e:
+    name: Dual-copy e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether this run boots an app
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "$EVENT: always runs."
+            exit 0
+          fi
+          pattern='^(src/vite-config\.ts|src/commands/start\.ts|src/utils/(ssrBundled|dual-copy-guard)\.ts|package-lock\.json|tests/e2e/.*|playwright\.config\.ts|\.github/workflows/dual-copy-e2e\.yml)$'
+          touched=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -E "$pattern" || true)
+          if [ -n "$touched" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            printf 'Touched:\n%s\n' "$touched"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "This PR touches nothing that decides how linked start loads modules: passing without a boot."
+          fi
+
+      - name: Setup Node.js
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@v7
+        with:
+          # The guard needs module.registerHooks (Node 22.15+); the e2e fails on its `off` line.
+          node-version: '24.21.0'
+
+      - name: Use the npm named in packageManager
+        if: steps.scope.outputs.run == 'true'
+        run: npm i -g "$(node -p "require('./package.json').packageManager")"
+
+      - name: Install
+        if: steps.scope.outputs.run == 'true'
+        run: npm ci
+
+      - name: Build
+        if: steps.scope.outputs.run == 'true'
+        run: npm run build
+
+      - name: Dual-copy e2e
+        if: steps.scope.outputs.run == 'true'
+        run: npx playwright test --config playwright.config.ts tests/e2e/dual-copy.spec.ts

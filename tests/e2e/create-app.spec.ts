@@ -6,27 +6,32 @@
 // dependency on any parent monorepo. Companion `@_linked/*` packages
 // must be published to npm at compatible versions; if they aren't yet,
 // set SKIP_E2E=1 to skip this test.
+//
+// The app runs this CLI build, not npm's (helpers/app.ts, E2E_CLI to pick
+// another), and the round-trip fails on a missing `dual-copy guard: on` line
+// or any `TWO COPIES` line. tests/e2e/dual-copy.spec.ts checks the same
+// without Docker.
 import {test, expect, type Locator} from '@playwright/test';
 import {GenericContainer, Wait, StartedTestContainer} from 'testcontainers';
-import {spawn, ChildProcess, execSync} from 'node:child_process';
-import {rmSync, existsSync, mkdtempSync} from 'node:fs';
-import {tmpdir} from 'node:os';
-import {dirname, join, resolve} from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {
+  GUARD_ON,
+  guardLines,
+  installApp,
+  removeApp,
+  scaffoldApp,
+  startApp,
+  stopApp,
+  type AppRun,
+  type ScaffoldedApp,
+} from './helpers/app.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_LAUNCH = resolve(__dirname, '../../lib/esm/launch.js');
-
-// Deterministic-enough app name; salted so concurrent runs don't collide.
-const APP_NAME = `e2e-test-app-${process.pid}`;
-const SCAFFOLD_ROOT = mkdtempSync(join(tmpdir(), 'linked-cli-e2e-'));
-const APP_DIR = join(SCAFFOLD_ROOT, APP_NAME);
-const DATASET = `${APP_NAME}-main`;
 const APP_PORT = 4400 + (process.pid % 100); // avoid collision with a CN backend on 4040
 
 let fuseki: StartedTestContainer;
-let appProc: ChildProcess | null = null;
+let app: ScaffoldedApp | undefined;
+let appRun: AppRun | undefined;
 let fusekiUrl: string;
+let DATASET: string;
 
 test.beforeAll(async () => {
   if (process.env.SKIP_E2E === '1') test.skip();
@@ -42,15 +47,12 @@ test.beforeAll(async () => {
     .start();
   fusekiUrl = `http://${fuseki.getHost()}:${fuseki.getMappedPort(3030)}`;
 
-  // 2. Scaffold the app via the local CLI build.
-  if (existsSync(APP_DIR)) rmSync(APP_DIR, {recursive: true, force: true});
-  execSync(
-    `node ${CLI_LAUNCH} create-app ${APP_NAME} --app-name "E2E" --app-prefix e2e --app-domain e2e.local --skip-install`,
-    {cwd: SCAFFOLD_ROOT, stdio: 'inherit'},
-  );
+  // 2. Scaffold the app via the local CLI build (app name salted with the pid
+  // so concurrent runs don't collide).
+  app = scaffoldApp('e2e-test-app');
+  DATASET = `${app.name}-main`;
 
-  // 3. Create the matching dataset in Fuseki. Template default is
-  // `${hyphen_name}-main` → matches DATASET above.
+  // 3. Create the dataset the app is pointed at below.
   const adminAuth = Buffer.from('admin:admin').toString('base64');
   const resp = await fetch(`${fusekiUrl}/$/datasets`, {
     method: 'POST',
@@ -64,10 +66,9 @@ test.beforeAll(async () => {
     throw new Error(`Failed to create dataset: ${resp.status} ${await resp.text()}`);
   }
 
-  // 4. Install scaffolded app deps from npm. The scaffolded package.json
-  // pins @_linked/* versions; install resolves them straight from the
-  // registry (no workspace symlinks involved).
-  execSync('npm install', {cwd: APP_DIR, stdio: 'inherit'});
+  // 4. Install scaffolded app deps from npm (the template's lockfile), then
+  // this CLI build on top: `npm start` runs the app's installed CLI.
+  installApp(app);
 
   // 5. Boot the app with env overrides pointing at the testcontainer Fuseki.
   // The scaffolded `.env` pins PORT=4000 together with SITE_ROOT/DATA_ROOT on
@@ -76,17 +77,12 @@ test.beforeAll(async () => {
   // queries to :4000 — nothing answers, and the Add form fails silently. The
   // three move together, as they must for any host that injects PORT.
   const appOrigin = `http://localhost:${APP_PORT}`;
-  appProc = spawn('npm', ['start'], {
-    cwd: APP_DIR,
-    env: {
-      ...process.env,
-      FUSEKI_BASE_URL: fusekiUrl,
-      FUSEKI_DATASET: DATASET,
-      PORT: String(APP_PORT),
-      SITE_ROOT: appOrigin,
-      DATA_ROOT: `${appOrigin}/data`,
-    },
-    stdio: 'inherit',
+  appRun = startApp(app, {
+    FUSEKI_BASE_URL: fusekiUrl,
+    FUSEKI_DATASET: DATASET,
+    PORT: String(APP_PORT),
+    SITE_ROOT: appOrigin,
+    DATA_ROOT: `${appOrigin}/data`,
   });
 
   // 6. Wait for HTTP 200 on /.
@@ -94,12 +90,8 @@ test.beforeAll(async () => {
 }, /* timeout */ 4 * 60 * 1000);
 
 test.afterAll(async () => {
-  // Kill the app server.
-  if (appProc) {
-    appProc.kill('SIGTERM');
-    await new Promise((r) => setTimeout(r, 1000));
-    if (!appProc.killed) appProc.kill('SIGKILL');
-  }
+  // Stop the app server (its whole process group).
+  await stopApp(appRun);
 
   // Drop the Fuseki dataset (idempotent).
   try {
@@ -116,9 +108,7 @@ test.afterAll(async () => {
   await fuseki?.stop().catch(() => {});
 
   // Remove scaffolded app folder + its parent tmpdir.
-  if (existsSync(SCAFFOLD_ROOT)) {
-    rmSync(SCAFFOLD_ROOT, {recursive: true, force: true});
-  }
+  removeApp(app);
 }, /* timeout */ 2 * 60 * 1000);
 
 test('Person fixture: add → edit → delete round-trip', async ({page}) => {
@@ -157,6 +147,13 @@ test('Person fixture: add → edit → delete round-trip', async ({page}) => {
   await expect(
     page.getByTestId('person-name').filter({hasText: 'Alicia Anderson'}),
   ).toBeHidden();
+
+  // One copy of each framework package through the whole round-trip.
+  const {status, twoCopies} = guardLines(appRun!.output());
+  expect(status, appRun!.output()).toEqual([GUARD_ON]);
+  expect(twoCopies, `${twoCopies.length} TWO COPIES line(s):\n${twoCopies.join('\n')}`).toEqual(
+    [],
+  );
 });
 
 /**

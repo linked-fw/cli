@@ -339,7 +339,7 @@ function installShortcuts(opts: {url: string; onRestart: () => void}): void {
   );
 }
 
-/** The global core's `loadStores` reads its module loader from (cli backlog 014). */
+/** The global core's `loadStores` reads its module loader from (cli report 014). */
 export const STORE_LOADER_KEY = Symbol.for('@_linked/core:importModule');
 
 /** The parts of a Vite dev server the store loader uses. */
@@ -452,7 +452,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
     createStoreLoader(vite, cwd);
 
   // Warn when Node loads a file of a package the SSR runner bundles: two
-  // copies of it (cli backlog 015). Registered before the storage file loads,
+  // copies of it (cli report 017). Registered before the storage file loads,
   // so it sees `loadStores`' imports too. Warns only; never fails the boot.
   const {installDualCopyGuard} = await import('../utils/dual-copy-guard.js');
   installDualCopyGuard({noExternal: vite.config.ssr?.noExternal});

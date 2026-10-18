@@ -162,7 +162,7 @@ describe('ssr.noExternal', () => {
   });
 
   // Standalone: an external framework package (schema, primitives, auth) that
-  // imports a bundled one loaded a second, Node copy of it (cli backlog 015).
+  // imports a bundled one loaded a second, Node copy of it (cli report 016).
   it('standalone bundles every @_linked package but core and the CLI', () => {
     const noExternal = ssrNoExternal([]);
     expect(noExternal).toEqual([STANDALONE_SSR_BUNDLED]);

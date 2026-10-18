@@ -294,6 +294,12 @@ What the runner bundles: in a standalone app (no workspaces) every `@_linked/*` 
 `@_linked/core` 2.34.0 or later); the CLI is the Node process. With workspaces, only the source
 workspaces, the installed packages that depend on them and `@_linked/server` are bundled.
 
+`tests/e2e/dual-copy.spec.ts` keeps it that way: it installs this CLI build into an app made from
+the template, boots it on its FusekiStore and with a `RemoteDataset`, and fails on a missing `on`
+line or any `TWO COPIES` line (`npm run build && npx playwright test tests/e2e/dual-copy.spec.ts`;
+no Docker). CI runs it as the `Dual-copy e2e` check on PRs that touch the Vite config, `linked
+start`, the guard or the lockfile, and nightly on `main`.
+
 ### Developing a dependency from a git checkout
 
 `linked localize` clones an npm dependency into `packages-local/`, which the app lists in its
