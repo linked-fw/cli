@@ -8,7 +8,7 @@ summary: >
   measured 8 to 13 such files in a fresh template app today), a CLI e2e that fails on it, bundling
   every installed `@_linked/*` but core and the CLI in a standalone app (spike: 0 left), and two
   package conventions (module state on `globalThis`, errors checked by brand, not `instanceof`).
-status: Open -- fix in progress, CN plan 068 phase 4; option A (the guard) shipped (report 015), C and B to do
+status: Open -- fix in progress, CN plan 068 phase 4; option A (the guard) shipped (report 015), option C (standalone bundles every @_linked/* but core and the CLI) shipped (report 016: template 0 / 0, webid.email 0 with core 2.34.0+; CN localized layout not measured, owner's CN was running), B to do
 ---
 
 # 015 — One copy of each framework package

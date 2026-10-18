@@ -596,21 +596,29 @@ export async function resolveWorkspaceSpecifier(
 export const SSR_ENTRY_PACKAGES = ['@_linked/server'];
 
 /**
+ * Standalone dev SSR: every `@_linked/*` package except `@_linked/core` and
+ * `@_linked/cli`. The lookahead is anchored, so a name that only starts with
+ * `core` or `cli` (`@_linked/core-x`) is bundled.
+ */
+export const STANDALONE_SSR_BUNDLED = /^@_linked\/(?!(core|cli)$)/;
+
+/**
  * `ssr.noExternal` for the dev SSR runner. With source workspaces, only those
  * package names are bundled by Vite; everything else in node_modules (including
  * published `@_linked/*`) is externalized to Node. Vite matches these entries
  * against the bare package name, so subpath imports (`pkg/shapes/Foo`) match too.
  * Installed packages that depend on a workspace (`dependents`, from
- * `workspaceDependents`) are bundled too, so they share the Vite-loaded workspace.
- * Standalone (no workspaces): the context-holding framework packages are bundled.
- * In both modes, `SSR_ENTRY_PACKAGES` are bundled.
+ * `workspaceDependents`) are bundled too, so they share the Vite-loaded workspace,
+ * and `SSR_ENTRY_PACKAGES` are bundled.
+ * Standalone (no workspaces): every `@_linked/*` but core and the CLI
+ * (`STANDALONE_SSR_BUNDLED`; see the comment at `noExternal` in `createViteConfig`).
  */
 export function ssrNoExternal(
   workspaces: {name: string}[],
   dependents: string[] = [],
 ): (string | RegExp)[] {
   if (workspaces.length === 0) {
-    return [/^@_linked\/server-utils$/, /^@_linked\/react$/, ...SSR_ENTRY_PACKAGES];
+    return [STANDALONE_SSR_BUNDLED];
   }
   return [...new Set([...workspaces.map((w) => w.name), ...dependents, ...SSR_ENTRY_PACKAGES])];
 }
@@ -942,16 +950,24 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // Leaving them EXTERNAL lets Node resolve `import → lib/esm`. Single-
         // instance is not a concern standalone (one node_modules copy each) and
         // core's query dispatch is global-backed regardless.
-        // STANDALONE: force-bundle the framework packages that hold React context /
-        // shared singletons the SSR tree must agree on — `server-utils` (`AppContext`,
-        // read by `AppRoot`) and `react`. If left external, LinkedServer's
-        // `AppContextProvider` and the app's `AppRoot` (`useAppContext`) can resolve to
-        // DIFFERENT module instances → two `AppContext` objects → `useAppContext()` sees
-        // no provider (null) → "Cannot destructure 'isNativeApp'" and a blank "SSR timed
-        // out". Bundling makes them one instance in Vite's SSR module graph (matching how
-        // workspace mode bundles everything). `fuseki` stays external; `server` is bundled
-        // because `start` loads its entry through Vite (`SSR_ENTRY_PACKAGES`). Their native
-        // dependencies (e.g. `sharp`) are separate packages and stay external either way.
+        // STANDALONE: bundle every `@_linked/*` package except core and the CLI
+        // (`STANDALONE_SSR_BUNDLED`). The runner then evaluates each framework
+        // package once. Bundling only some of them left a split: an external
+        // package (`schema`, `primitives`, `auth`, `fuseki`) is loaded by Node,
+        // and its bare imports of a bundled one (`server-utils`, `react`) load a
+        // second, Node copy of it, so classes fail `instanceof` across the two
+        // and module state (the `Server` proxy, `AppContext`) exists twice. The
+        // dual-copy guard measured 8 to 13 such files in a fresh template app
+        // (cli backlog 015, report 016). Packages are resolved with the SSR
+        // conditions below (`import → lib/esm`), since installed packages have no
+        // `src`. `server-utils` and `react` hold the React context LinkedServer's
+        // `AppContextProvider` and the app's `AppRoot` must agree on; they are
+        // also deduped (`STANDALONE_DEDUPE`).
+        // Core stays external: Node loads it once, its registries are on
+        // `globalThis`, it depends only on `ulid` (it never imports a bundled
+        // package), and its one runtime `import()`, `loadStores`, goes through the
+        // store loader `start` installs. The CLI is the Node process itself.
+        // Native dependencies (e.g. `sharp`) are not `@_linked/*` and stay external.
         //
         // WORKSPACE: bundle ONLY the discovered source workspaces (they resolve to `src/`
         // for HMR). Published framework packages installed under node_modules (lib-only)

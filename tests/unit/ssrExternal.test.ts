@@ -6,6 +6,7 @@ import {
   discoverWorkspaces,
   ssrNoExternal,
   SSR_ENTRY_PACKAGES,
+  STANDALONE_SSR_BUNDLED,
   workspaceDependents,
 } from '../../src/vite-config';
 
@@ -160,11 +161,39 @@ describe('ssr.noExternal', () => {
     }
   });
 
-  it('standalone bundles only the context-holding framework packages', () => {
+  // Standalone: an external framework package (schema, primitives, auth) that
+  // imports a bundled one loaded a second, Node copy of it (cli backlog 015).
+  it('standalone bundles every @_linked package but core and the CLI', () => {
     const noExternal = ssrNoExternal([]);
-    expect(bundled(noExternal, '@_linked/server-utils')).toBe(true);
-    expect(bundled(noExternal, '@_linked/react')).toBe(true);
-    expect(bundled(noExternal, '@_linked/core')).toBe(false);
+    expect(noExternal).toEqual([STANDALONE_SSR_BUNDLED]);
+    expect(noExternal).toEqual([/^@_linked\/(?!(core|cli)$)/]);
+    for (const pkg of [
+      '@_linked/server',
+      '@_linked/server-utils',
+      '@_linked/react',
+      '@_linked/fuseki',
+      '@_linked/schema',
+      '@_linked/primitives',
+      '@_linked/auth',
+      // Only the exact names are excluded.
+      '@_linked/core-x',
+      '@_linked/cli-tools',
+      '@_linked/corex',
+    ]) {
+      expect(bundled(noExternal, pkg)).toBe(true);
+    }
+    for (const pkg of ['@_linked/core', '@_linked/cli', 'react', 'sharp', '@other/core', 'x-@_linked/react']) {
+      expect(bundled(noExternal, pkg)).toBe(false);
+    }
+  });
+
+  it('a standalone dev config uses the standalone list', async () => {
+    writeJson(path.join(tmp, 'package.json'), {name: 'app', dependencies: {'@_linked/core': '1'}});
+    process.chdir(tmp);
+    const factory = createViteConfig() as any;
+    const config = await factory({command: 'serve', mode: 'development'});
+    expect(config.ssr.noExternal).toEqual([STANDALONE_SSR_BUNDLED]);
+    expect(config.ssr.resolve).toEqual({conditions: ['module', 'node']});
   });
 
   // `start` loads LinkedServer through `vite.ssrLoadModule`, so Vite evaluates the

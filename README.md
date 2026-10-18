@@ -287,6 +287,13 @@ or a workspace); `@_linked/cli` itself is never reported. `LINKED_DUAL_COPY_GUAR
 (`[linked] dual-copy guard: off (LINKED_DUAL_COPY_GUARD=0)`); it needs Node 22.15+ or 23.5+
 (`module.registerHooks`) and says `off` with the Node version otherwise.
 
+What the runner bundles: in a standalone app (no workspaces) every `@_linked/*` package except
+`@_linked/core` and `@_linked/cli` (`STANDALONE_SSR_BUNDLED`), so a template app boots with no
+`TWO COPIES` line. Core stays a single Node copy (its registries are on `globalThis`, and
+`loadStores` imports stores through the loader `linked start` installs, which needs
+`@_linked/core` 2.34.0 or later); the CLI is the Node process. With workspaces, only the source
+workspaces, the installed packages that depend on them and `@_linked/server` are bundled.
+
 ### Developing a dependency from a git checkout
 
 `linked localize` clones an npm dependency into `packages-local/`, which the app lists in its
