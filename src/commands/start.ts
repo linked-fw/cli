@@ -451,6 +451,12 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   (globalThis as Record<symbol, unknown>)[STORE_LOADER_KEY] =
     createStoreLoader(vite, cwd);
 
+  // Warn when Node loads a file of a package the SSR runner bundles: two
+  // copies of it (cli backlog 015). Registered before the storage file loads,
+  // so it sees `loadStores`' imports too. Warns only; never fails the boot.
+  const {installDualCopyGuard} = await import('../utils/dual-copy-guard.js');
+  installDualCopyGuard({noExternal: vite.config.ssr?.noExternal});
+
   // Load the storage config through Vite SSR so it
   // configures the SAME LinkedStorage instance the rest of the SSR graph
   // (LinkedServer, CN providers) uses. Replaces the former Node-direct
