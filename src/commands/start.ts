@@ -13,11 +13,13 @@
 //   - Server changes still need full process restart for now (server HMR
 //     deferred to vite-node migration)
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {importFile, isPathInside} from '../utils/platform.js';
 import fsExtra from 'fs-extra';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
+import {isBundled, packageNameOf, type SsrMatcher} from '../utils/ssrBundled.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
 
@@ -337,6 +339,61 @@ function installShortcuts(opts: {url: string; onRestart: () => void}): void {
   );
 }
 
+/** The global core's `loadStores` reads its module loader from (cli backlog 014). */
+export const STORE_LOADER_KEY = Symbol.for('@_linked/core:importModule');
+
+/** The parts of a Vite dev server the store loader uses. */
+export type StoreLoaderVite = {
+  config: {ssr?: {noExternal?: true | SsrMatcher | SsrMatcher[]}};
+  ssrLoadModule: (url: string) => Promise<Record<string, any>>;
+  environments: {
+    ssr: {
+      pluginContainer: {
+        resolveId: (
+          id: string,
+          importer?: string,
+        ) => Promise<{id: string} | null>;
+      };
+    };
+  };
+};
+
+/**
+ * The loader `linked start` hands core's `loadStores` for the stores a datasets
+ * file names. A native `import()` in core is Node's, so a store from a package
+ * the SSR runner bundles (`@_linked/server/shapes/quadstores/RemoteDataset`)
+ * would be a second copy of the class the app imports. This gives each store
+ * the copy the app's own import gets: the runner's for a bundled package,
+ * Node's for an external one, at the file Vite's SSR resolver picks (its
+ * conditions can differ from Node's own resolution). Not `ssrLoadModule` for
+ * both: Vite transforms an entry it is handed even when its package is
+ * external, which would make a Vite copy of an external store (`FusekiStore`)
+ * next to the app's Node copy.
+ */
+export function createStoreLoader(
+  vite: StoreLoaderVite,
+  cwd: string,
+  nativeImport: (specifier: string) => Promise<unknown> = (specifier) =>
+    import(specifier),
+): (specifier: string) => Promise<unknown> {
+  return async (specifier: string) => {
+    const noExternal = vite.config.ssr?.noExternal;
+    const list = Array.isArray(noExternal)
+      ? noExternal
+      : typeof noExternal === 'string' || noExternal instanceof RegExp
+        ? [noExternal]
+        : [];
+    if (noExternal === true || isBundled(packageNameOf(specifier), list)) {
+      return vite.ssrLoadModule(specifier);
+    }
+    const resolved = await vite.environments.ssr.pluginContainer.resolveId(
+      specifier,
+      path.join(cwd, 'index.js'),
+    );
+    return nativeImport(resolved ? pathToFileURL(resolved.id).href : specifier);
+  };
+}
+
 function restartProcess(): void {
   // nodemon-style respawn: launch a fresh process from the same argv,
   // then exit. The new process inherits stdio so the dev experience is
@@ -387,6 +444,12 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   const {createServer: createViteServer} = await import('vite');
   const vite = await createViteServer(await resolveViteServerConfig(cwd, apiOnly));
   configureLinkedServer(linkedConfig.server, vite, cwd, apiOnly);
+
+  // Stores named in a datasets file load through this server's runner or
+  // Node, whichever gives the app's own copy (see createStoreLoader). Set
+  // before the storage file loads; a core without the hook ignores it.
+  (globalThis as Record<symbol, unknown>)[STORE_LOADER_KEY] =
+    createStoreLoader(vite, cwd);
 
   // Load the storage config through Vite SSR so it
   // configures the SAME LinkedStorage instance the rest of the SSR graph
