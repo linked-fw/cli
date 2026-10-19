@@ -85,8 +85,9 @@ context at all, and that is a resolution bug to fix, not to work around. `@_link
 
 `instanceof Shape`, `ShapeSet`, `QueryBuilder`, `PendingQueryContext` and the like fail the same way
 for a value made by another copy of core. `isLinkedError` covers errors only. The same brand,
-generalised to `isLinkedInstance(value, Cls)`, is core backlog
-[057](https://github.com/linked-fw/core/blob/main/docs/backlog/057-module-state-a-second-copy-does-not-see.md).
+generalised to `isLinkedInstance(value, Cls)`, is in core 2.36.2 (core
+[report 039](https://github.com/linked-fw/core/blob/main/docs/reports/039-module-state-shared-across-copies.md)). Brand a class with
+`brandLinkedClass(Cls, pkg, name)` right after its declaration.
 
 ## Where the packages stand
 
@@ -95,17 +96,17 @@ From a survey of every `@_linked/*` package's `src/` (2026-10). Counts are must-
 
 | Package | Must-share | Cross `instanceof` | Contexts | Status |
 |---|---|---|---|---|
-| core | 14 | ~75 sites, 9 classes | 0 | 2.36.0: helpers, own errors branded; rest in core backlog 057 |
-| server-utils | 7 | 2 files (`Shape`, `ShapeSet`, `CoreSet`) | 1 (already shared) | done in 1.13.0: state shared, `ServerCallError` branded |
+| core | 14 | ~75 sites, 9 classes | 0 | done in 2.36.2: state shared, classes branded, `isLinkedInstance` ([report 039](https://github.com/linked-fw/core/blob/main/docs/reports/039-module-state-shared-across-copies.md)) |
+| server-utils | 7 | 2 files (`Shape`, `ShapeSet`, `CoreSet`) | 1 (already shared) | done: state shared, `ServerCallError` branded (1.13.0); class checks use `isLinkedInstance` (1.14.1) |
 | server | 3 settings + 2 process side effects | 2 (with name fallback) | 0 | done in 3.2.0: state shared, process setup once, errors branded |
-| auth | 13 | 0 | 2 | auth backlog 009 |
-| translation | 3 | 0 | 1 | translation backlog 003 |
-| react | 1 | 9 | 0 | react backlog 001 |
-| shape-ui | 0 | 0 | 3 | shape-ui backlog 002 |
-| primitives | 1 (toast store) | 0 | 2 (compound, low risk) | primitives backlog 001 |
-| schema | 1 (`MediaUploadPolicy`) | 0 | 0 | schema backlog 002 |
-| sentry | 0 (writes core's `LinkedErrorLogging`, core 057) | 0 | 0 | — |
+| auth | 13 | 0 | 2 | done in 3.15.4 ([report 015](https://github.com/linked-fw/auth/blob/main/docs/reports/015-shared-state.md)) |
+| translation | 3 | 0 | 1 | done ([report 001](https://github.com/linked-fw/translation/blob/main/docs/reports/001-state-a-second-copy-sees.md)) |
+| react | 1 | 9 | 0 | done ([report 002](https://github.com/linked-fw/react/blob/main/docs/reports/002-class-checks-and-state-across-copies.md)) |
+| shape-ui | 0 | 0 | 3 | done ([report 001](https://github.com/linked-fw/shape-ui/blob/main/docs/reports/001-shared-host-contexts.md)) |
+| primitives | 1 (toast store) | 0 | 2 (compound, low risk) | done ([report 001](https://github.com/linked-fw/primitives/blob/main/docs/reports/001-toast-store-across-copies.md)) |
+| schema | 1 (`MediaUploadPolicy`) | 0 | 0 | done ([report 001](https://github.com/linked-fw/schema/blob/main/docs/reports/001-media-upload-policy-across-copies.md)) |
+| sentry | 0 (writes core's `LinkedErrorLogging`, shared since core 2.36.2) | 0 | 0 | — |
 | fuseki | 0 (`FusekiQueryError` unbranded) | 0 | 0 | brand when touched |
 | cli, s3, css, icons, dcat, dcmi, org, owl, rdfs, sioc, xsd | 0 | 0 | 0 | — |
 
-New code follows the conventions; existing code moves as its package's backlog item is done.
+Every package listed has moved. New code follows the conventions.
