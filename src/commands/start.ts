@@ -22,6 +22,7 @@ import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs
 import {isBundled, packageNameOf, type SsrMatcher} from '../utils/ssrBundled.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
+import {keepDevServerAlive} from '../plugins/keep-dev-server-alive.js';
 
 export interface StartOptions {
   env?: string;
@@ -82,6 +83,7 @@ export async function resolveViteServerConfig(
     root: cwd,
     server: {middlewareMode: true},
     appType: 'custom',
+    plugins: [keepDevServerAlive()],
   };
   if (VITE_CONFIG_FILES.some((c) => fsExtra.existsSync(path.join(cwd, c)))) {
     return base;
@@ -101,6 +103,7 @@ export async function resolveViteServerConfig(
     ...defaults,
     ...base,
     configFile: false,
+    plugins: [...(defaults.plugins ?? []), ...(base.plugins ?? [])],
     server: {...defaults.server, ...base.server},
     // No browser client: skip the client dependency scan, whose entry
     // (`src/index.tsx`) does not exist in a backend.
