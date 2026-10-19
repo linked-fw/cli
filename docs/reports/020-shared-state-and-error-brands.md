@@ -42,6 +42,9 @@ architecture doc. Two things the backlog did not anticipate:
 
 ## Filed
 
+Every item below is now done; the architecture doc's status table links each package's report
+(cli#301).
+
 | Repo | Backlog |
 |---|---|
 | core | 057 — 14 pieces of core state, cross-copy `instanceof` on core classes |
@@ -55,3 +58,8 @@ architecture doc. Two things the backlog did not anticipate:
 Not filed: `@_linked/fuseki`'s `FusekiQueryError` is unbranded (brand when touched); `@_linked/sentry`
 writes core's `LinkedErrorLogging`, covered by core 057; core's new `UnresolvedShapeError`
 (core#350, merged the same hour) is unbranded and belongs with 057.
+
+## PRs
+
+- https://github.com/linked-fw/cli/pull/298 (the convention and this report)
+- https://github.com/linked-fw/cli/pull/301 (the architecture doc's status table: every package's row done, linking its report)

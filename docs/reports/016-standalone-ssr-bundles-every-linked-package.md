@@ -160,3 +160,7 @@ This is also the first measurement of D2's guard in the localized layout: 0 line
   068 step D4), which closes backlog 014 and 015.
 - webid.email's core floor (`^2.34.0`), above; the webid-email backlog that tracks case 17 (a)
   is updated from this report (Semantu/webid-email).
+
+## PRs
+
+- https://github.com/linked-fw/cli/pull/288

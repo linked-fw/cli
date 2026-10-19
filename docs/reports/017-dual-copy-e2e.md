@@ -123,18 +123,24 @@ From backlog 015 (full table and ranking at `b013598`). The 19 cases had five re
 two loaders in dev SSR (Vite's runner and Node), Vite's dependency optimizer, a workspace or
 localized copy next to an installed one, inlining at build time, and HMR re-evaluation. Options:
 A the guard (report 015), B this e2e, C standalone bundling (report 016), D package conventions
-that make a copy harmless (backlog 017, not scheduled), E a per-package copy marker (not planned;
+that make a copy harmless (done, [report 020](020-shared-state-and-error-brands.md)), E a per-package copy marker (not planned;
 waits for a browser or production case that cli#272 and cli#177 do not catch). Case 17 (a), the
 webid.email `LinkedEmail` provider, is gone with C and a core 2.34.0+ floor (report 016).
 
 What the guard and this e2e do not see: the browser, a built app, and the optimizer's copies.
 
 Case 20, 2026-10-18, browser (CN plan 068 S5): an installed linked package's `src/` `.tsx` loaded
-plain and with `?v`, two React contexts in shape-ui. Fixed in report 018; a browser check is
-backlog 019.
+plain and with `?v`, two React contexts in shape-ui. Fixed in [report 018](018-one-browser-copy-of-installed-linked-src.md); the browser check is
+[report 021](021-browser-side-dual-copy-check.md).
 
 ## Follow-ups
 
-- Backlog 017, framework conventions (option D): not scheduled.
+- Backlog 017, framework conventions (option D): done, [report 020](020-shared-state-and-error-brands.md).
 - Backlog 018, `build-app` loads every store and needs the data server: done, [report 020](020-build-app-needs-no-data-server.md).
 - The `Dual-copy e2e` check is added to `main`'s required checks once it has passed on this PR.
+
+## PRs
+
+- https://github.com/linked-fw/cli/pull/279 (backlog 014, a second copy of datasets-file stores)
+- https://github.com/linked-fw/cli/pull/281 (backlog 014 fix chosen; backlog 015, one copy of each framework package)
+- https://github.com/linked-fw/cli/pull/290 (the e2e)

@@ -115,3 +115,7 @@ Apps without a files file take the fallback, so they load what they loaded befor
   without Fuseki; not needed today (both build with a dead Fuseki url). Not recorded as backlog.
 - app-template `blank`: the sync merge conflicts on the storage file's imports; resolved by hand
   (app-template readme, "The blank variant").
+
+## PRs
+
+- https://github.com/linked-fw/cli/pull/297

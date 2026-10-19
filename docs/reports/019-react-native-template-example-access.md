@@ -7,12 +7,36 @@ summary: >
   now attaches the same example rule as the web app-template: anonymous reads of `Person`, anonymous
   writes of `Person` only under `NODE_ENV=development`, a session for anything else. The template's
   integration test passes, and a new one proves a `NODE_ENV=production` API still refuses anonymous
-  writes. Patch release.
+  writes. Patch release (1.51.2). Also recorded here: the template's move to `@_linked/server` 3
+  (`RemoteDataset` in its no-`url` form, `@_linked/s3` 1.6.3 so the install has one server copy),
+  cli 1.48.2, during which the 401 was found.
 ---
 
-# 019 — React Native template: the example access rule
+# 019 — React Native template: server 3 and the example access rule
 
-## Why
+## Server 3 and `RemoteDataset` (cli#280, 1.48.2)
+
+`@_linked/server` 3.0.0 renamed `BackendAPIStore` to `RemoteDataset` with no alias, so
+`create-app --template react-native` moved:
+
+- `apps/mobile/src/shell/storage.ts` imports `RemoteDataset` from
+  `@_linked/server/shapes/quadstores/RemoteDataset` in its **no-`url` form**
+  (`new RemoteDataset({name: 'appData'})`). `services/api` is the app's own backend, not a separate
+  data server with a token: the API URL is resolved once in `src/shell/env.ts` and reaches `Server`
+  through `SITE_ROOT`, and the no-url form sends queries through the same `Server.call` path
+  (`/call/@_linked/server/<method>`). The `url` form bypasses `Server`, adds an un-awaited `ping`
+  from `init()`, and is meant for a remote server that takes a bearer token.
+- `apps/mobile` and `services/api` pin `@_linked/server` 3.0.0 (was 2.24.8); `services/api` pins
+  `@_linked/s3` 1.6.3 (1.6.2 depended on `@_linked/server ^2.5.1` and nested a second server,
+  2.25.0). `npm ls @_linked/server` in a fresh app shows only 3.0.0.
+- Comments, READMEs (template and CLI), the ESLint message and `__tests__/storage.test.ts` use the
+  new name.
+
+Verified with `npm run test:template` (`Tests: 22 passed`) and a fresh generated app (Jest 24
+passed, `node --test` 5 passed, typecheck, lint, `check:react`). Its integration test failed with
+`Authentication required` — identically on the previous template — which is the defect below.
+
+## Why the example access rule
 
 `FUSEKI_PORT=<compose port> npm run test:integration` in a generated React Native app failed on
 `lists 0, adds one (1), edits it, deletes it (0)` with `ServerCallError: Authentication required`.
@@ -73,3 +97,9 @@ own Compose Fuseki on port 3041:
 - The template still has no production start (`./backend` is exported under `development` only);
   the production check runs `linked start --api-only` with `NODE_ENV=production`, which is what the
   rule reads.
+
+## PRs
+
+- https://github.com/linked-fw/cli/pull/280 (server 3, filed the 401 as backlog 016)
+- https://github.com/linked-fw/cli/pull/283 (renumbered that backlog item to 016)
+- https://github.com/linked-fw/cli/pull/295 (the access rule)
