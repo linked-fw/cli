@@ -4,8 +4,9 @@
 // build into it (tests/e2e/helpers/app.ts; build first).
 // - create-app.spec.ts spins up a Fuseki container via testcontainers, runs
 //   `npm start` and drives a Person CRUD flow in the browser. Requires Docker.
-// - dual-copy.spec.ts boots the app without Fuseki and reads only its output
-//   (the dual-copy guard). No Docker, no browser; CI runs it
+// - dual-copy.spec.ts boots the app without Fuseki, reads its output (the
+//   dual-copy guard), then loads `/` in headless Chromium and checks no
+//   `@_linked/*` module is requested in two forms. No Docker; CI runs it
 //   (.github/workflows/dual-copy-e2e.yml).
 // - build-app.spec.ts builds the app with a RemoteDataset that answers
 //   nowhere. No Docker, no browser; CI runs it in the same job.

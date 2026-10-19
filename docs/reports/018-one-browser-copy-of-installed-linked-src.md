@@ -106,4 +106,4 @@ does not apply). Not changed here; the guard printed no `TWO COPIES` line in tha
 
 ## Follow-ups
 
-- Backlog 019: a browser-side check in the dual-copy e2e (report 017's e2e has no browser).
+- Backlog 019, a browser-side check in the dual-copy e2e: done, [report 021](021-browser-side-dual-copy-check.md).

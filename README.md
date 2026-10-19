@@ -304,8 +304,11 @@ workspaces, the installed packages that depend on them and `@_linked/server` are
 
 `tests/e2e/dual-copy.spec.ts` keeps it that way: it installs this CLI build into an app made from
 the template, boots it on its FusekiStore and with a `RemoteDataset`, and fails on a missing `on`
-line or any `TWO COPIES` line (`npm run build && npx playwright test tests/e2e/dual-copy.spec.ts`;
-no Docker). CI runs it as the `Dual-copy e2e` check on PRs that touch the Vite config, `linked
+line or any `TWO COPIES` line. It also covers the browser: with `@_linked/shape-ui` installed (it
+ships `src/`), headless Chromium loads `/` and the spec fails when any `@_linked/*` script module is
+requested in two forms (plain and `?v=`, from two paths, or from Vite's optimizer and file by file),
+naming each URL (`npm run build && npx playwright test tests/e2e/dual-copy.spec.ts`; no Docker,
+`npx playwright install chromium` once; `E2E_SHAPE_UI=<version>` pins shape-ui). CI runs it as the `Dual-copy e2e` check on PRs that touch the Vite config, `linked
 start`, the guard or the lockfile, and nightly on `main`.
 
 ### Developing a dependency from a git checkout
