@@ -296,6 +296,19 @@ function openBrowser(url: string): void {
   child.unref();
 }
 
+/**
+ * The URL the server listens on. The server binds `process.env.PORT`, so that
+ * wins (the app's `.env` is already loaded by now); the configured port is only
+ * the fallback for when PORT is unset.
+ */
+export function resolveAppUrl(
+  env: Record<string, string | undefined>,
+  configuredPort?: number,
+): string {
+  const port = parseInt(env.PORT ?? '', 10) || configuredPort || 4040;
+  return `http://localhost:${port}/`;
+}
+
 function installShortcuts(opts: {url: string; onRestart: () => void}): void {
   if (!process.stdin.isTTY) return;
   let buf = '';
@@ -564,9 +577,8 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   });
 
   // r/o keyboard shortcuts.
-  const port = (linkedConfig.server as any).port ?? opts.port ?? 4040;
   installShortcuts({
-    url: `http://localhost:${port}/`,
+    url: resolveAppUrl(process.env, (linkedConfig.server as any).port ?? opts.port),
     onRestart: restartProcess,
   });
 }
