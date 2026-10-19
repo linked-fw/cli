@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 
 export const API_PORT = 4100;
 export const API_URL = `http://localhost:${API_PORT}`;
+// productionWrites.test.ts starts a second API, with NODE_ENV=production, on this port.
+export const PRODUCTION_API_PORT = 4101;
+export const PRODUCTION_API_URL = `http://localhost:${PRODUCTION_API_PORT}`;
 // globalSetup deletes this dataset, so it must end in `-test` (checked there).
 export const FUSEKI_DATASET = 'app-test';
 

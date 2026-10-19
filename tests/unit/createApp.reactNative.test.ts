@@ -253,11 +253,15 @@ describe('scaffoldReactNativeApp', () => {
       'apps/mobile/babel/stripJsonImportAttributes.js',
       'apps/mobile/__tests__/nativeDefaults.test.tsx',
       'apps/mobile/__tests__/integration/personOverview.test.tsx',
+      'apps/mobile/__tests__/integration/productionWrites.test.ts',
+      'apps/mobile/__tests__/integration/startApi.ts',
       'apps/mobile/jest.integration.config.js',
       'packages/demo-shapes/src/shapes/Example.ts',
       'packages/demo-shapes/tsconfig-esm.json',
       'services/api/src/backend.ts',
       'services/api/linked.backend.storage.ts',
+      'services/api/src/exampleAccess.ts',
+      'services/api/test/exampleAccess.test.mjs',
       'services/api/linked.backend.datasets.json',
       'services/api/scripts/wait-for-fuseki.mjs',
       'services/api/test/waitForFuseki.test.mjs',
@@ -299,8 +303,24 @@ describe('scaffoldReactNativeApp', () => {
       'utf8',
     );
     expect(globalSetup).toContain("['compose', 'port', 'fuseki', '3030']");
-    expect(globalSetup).toContain('delete env.AWS_REGION');
-    expect(globalSetup).toContain('INTEGRATION_API_BIN');
+    const startApi = fs.readFileSync(
+      path.join(target, 'apps/mobile/__tests__/integration/startApi.ts'),
+      'utf8',
+    );
+    expect(startApi).toContain('delete env.AWS_REGION');
+    expect(startApi).toContain('INTEGRATION_API_BIN');
+
+    // The example's access rule: anonymous writes only under NODE_ENV=development.
+    const storage = fs.readFileSync(
+      path.join(target, 'services/api/linked.backend.storage.ts'),
+      'utf8',
+    );
+    expect(storage).toContain(
+      'withAccess(appData, exampleAccess(exampleShapes, allowsAnonymousExampleWrites(env.NODE_ENV)));',
+    );
+    expect(
+      fs.readFileSync(path.join(target, 'services/api/src/exampleAccess.ts'), 'utf8'),
+    ).toContain("return nodeEnv === 'development';");
 
     const shapes = readJSON(path.join(target, 'packages/demo-shapes/package.json'));
     expect(shapes.linkedPackage).toBe(true);
