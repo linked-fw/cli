@@ -40,7 +40,7 @@ and `FUSEKI_BASE_URL` in `services/api/.env`.
 | `npm run typecheck` | `tsc --noEmit` in every workspace |
 | `npm run lint` | ESLint over every workspace, including the `@_linked/server` subpath rule for `apps/mobile` |
 | `npm test` | app Jest (shapes, render defaults, API URL) and the API's `node --test` unit tests |
-| `npm run fuseki:up && npm run test:integration` | the example screen lists, adds and deletes through `RemoteDataset` → API → Fuseki (starts its own API on :4100 with the in-memory `app-test` dataset) |
+| `npm run fuseki:up && npm run test:integration` | the example screen lists, adds and deletes through `RemoteDataset` → API → Fuseki (starts its own API on :4100 with the in-memory `app-test` dataset), and a second API with `NODE_ENV=production` on :4101 refuses anonymous writes |
 | `npm run build -w packages/app-shapes` | `linked build` emits `lib/esm` with `.js` specifiers, loadable by Node |
 | `cd apps/mobile && npx expo export --platform ios --output-dir /tmp/export` | Metro resolves `@_linked/*` (including subpaths) and the workspace packages |
 

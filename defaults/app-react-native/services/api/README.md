@@ -38,6 +38,15 @@ that port is the one Docker Compose publishes for this repo's `fuseki` service.
   `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_ENDPOINT` and `S3_FILES_BUCKET_NAME` are set, an `S3FileStore`
   (S3, or an S3-compatible service such as DigitalOcean Spaces) is used instead. The S3 branch is not yet verified against a real bucket.
 
+## Access
+
+The template has no sign-in, and a store without an access rule needs a signed-in session for every write, so
+`linked.backend.storage.ts` attaches an example rule to `appData` with `withAccess` (`src/exampleAccess.ts`, the
+same rule as the web app-template's): anonymous queries may read `Person`, and may write `Person` only when
+`NODE_ENV` is exactly `development` (what `.env.example` sets). With any other `NODE_ENV`, or none, an anonymous write
+gets `401 Authentication required`; a query that touches any other shape needs a session. Remove the rule with the
+example, or replace it with your own once the app has sign-in.
+
 ## Dependencies
 
 `react` and `react-dom` are direct dependencies although the API renders no pages: `LinkedServer` imports
