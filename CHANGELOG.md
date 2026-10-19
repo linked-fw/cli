@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.52.0
+
+### Minor Changes
+
+- [#297](https://github.com/linked-fw/cli/pull/297) [`686a571`](https://github.com/linked-fw/cli/commit/686a57155bb7c7681208835918eea946ef822548) Thanks [@flyon](https://github.com/flyon)! - `build-app` and `publish-app` load only the app's `linked.backend.files.{ts,js}` to find the `appAssets` store when the app has one, so a build no longer builds the dataset stores or needs the data server or Fuseki. An app without the file loads the whole storage file as before. The app template ships the file (app-template#34).
+
 ## 1.51.2
 
 ### Patch Changes
