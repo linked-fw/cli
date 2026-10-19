@@ -52,7 +52,17 @@ try {
     await sleep(100);
     after = await lazyImport(before);
   }
-  const reloaded = await server.ssrLoadModule('/lazy.js');
+  // The runner closes before the restart finishes, so a load right after the
+  // failure can still meet the closed one: retry until the new server answers.
+  let reloaded;
+  for (let i = 0; !reloaded; i++) {
+    try {
+      reloaded = await server.ssrLoadModule('/lazy.js');
+    } catch (err) {
+      if (i >= 50) throw err;
+      await sleep(100);
+    }
+  }
   process.stdout.write(
     JSON.stringify({lazyImport: after, sameInstance: reloaded.instance === before.instance, warnings}),
   );
