@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.52.1
+
+### Patch Changes
+
+- [#302](https://github.com/linked-fw/cli/pull/302) [`21e1f81`](https://github.com/linked-fw/cli/commit/21e1f8118e488012020d834daa449ba41c750300) Thanks [@flyon](https://github.com/flyon)! - `linked start`: the `o<enter>` hint and action open the URL the server listens on (`PORT`), not the configured default port.
+
 ## 1.52.0
 
 ### Minor Changes
