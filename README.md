@@ -260,6 +260,12 @@ linked start --api-only           # run only the backend API (no page rendering,
 linked dev                        # file-watch rebuild (package)
 ```
 
+`linked start` keeps one Vite dev server for the life of the process. A change to `.env`,
+`.env.local`, `.env.<mode>` or `vite.config.*` takes effect at the next `linked start`: Vite
+would restart its server for it, which closes the SSR module runner the backend was loaded by, and
+every later `import()` in the backend would fail with "Vite module runner has been closed.".
+Source changes are reloaded in place as before.
+
 ```bash
 linked app-doctor                 # in an app: check optimizeDeps.include and React peer ranges of linked packages' deps
 ```

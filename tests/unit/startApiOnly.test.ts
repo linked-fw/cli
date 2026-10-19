@@ -85,6 +85,7 @@ describe('resolveViteServerConfig', () => {
         root: cwd,
         server: {middlewareMode: true},
         appType: 'custom',
+        plugins: [expect.objectContaining({name: 'linked:keep-dev-server-alive'})],
       });
     }
   });
@@ -108,6 +109,10 @@ describe('resolveViteServerConfig', () => {
     expect(config.ssr?.noExternal).toBeDefined();
     // There is no client entry to scan for browser dependencies.
     expect(config.optimizeDeps?.noDiscovery).toBe(true);
+    // The linked plugins and the one that keeps the dev server alive.
+    const names = (config.plugins as any[]).flat().filter(Boolean).map((p) => p.name);
+    expect(names).toContain('linked:keep-dev-server-alive');
+    expect(names).toContain('linked:pin-compiled-class-names');
     // 60s, not jest's default 5s: this is the first thing in the suite to touch
     // ../vite-config.js, whose cold load pulls in vite, @vitejs/plugin-react and
     // tailwind — well over 5s on a cold module cache.
