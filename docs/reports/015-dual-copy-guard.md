@@ -119,3 +119,7 @@ and are not the CLI's.
   CN plan 068 step D3), which is expected to take the template's counts to 0.
 - The CLI e2e that fails on a `TWO COPIES` line or a guard that is not `on` (option B, step D4).
 - CN's count in the localized layout, at D3's CN measurement.
+
+## PRs
+
+- https://github.com/linked-fw/cli/pull/286

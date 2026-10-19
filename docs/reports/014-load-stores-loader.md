@@ -73,3 +73,7 @@ ECONNRESET` lines during the iframe sign-in redirect (a browser-side socket rese
 - A CLI e2e asserting `instanceof` with a `RemoteDataset` datasets file (CN plan 068 step D4).
 - App-template's `name` + `url` fallback goes back to `instanceof` once core's half is released
   (step D5).
+
+## PRs
+
+- https://github.com/linked-fw/cli/pull/284

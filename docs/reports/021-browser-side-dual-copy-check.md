@@ -83,3 +83,7 @@ Outcome.
 ## Follow-ups
 
 - None. A built app (production bundle) is still not checked in a browser; no case there yet.
+
+## PRs
+
+- https://github.com/linked-fw/cli/pull/300
