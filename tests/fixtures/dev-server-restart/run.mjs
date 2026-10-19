@@ -63,6 +63,9 @@ try {
       await sleep(100);
     }
   }
+  // Mid-restart the failure can read "transport was disconnected"; once the
+  // restart is done, ask again for the settled answer.
+  if (!after.ok) after = await lazyImport(before);
   process.stdout.write(
     JSON.stringify({lazyImport: after, sameInstance: reloaded.instance === before.instance, warnings}),
   );
