@@ -1,6 +1,8 @@
 # The dual-copy e2e (tests/e2e/dual-copy.spec.ts, cli report 017): a template app run by this
 # CLI build must print `[linked] dual-copy guard: on` and no `[linked] TWO COPIES` line, on its
-# committed FusekiStore and with a RemoteDataset. No Docker, no Fuseki, no browser.
+# committed FusekiStore and with a RemoteDataset. Then, with `@_linked/shape-ui` installed (it ships
+# `src/`), headless Chromium loads `/` and no `@_linked/*` script module may be requested in two
+# forms (cli report 021). No Docker, no Fuseki.
 # It also runs tests/e2e/build-app.spec.ts (cli report 020): `linked build-app` of a template app
 # whose RemoteDataset answers nowhere must finish, since a build needs no data server.
 #
@@ -78,6 +80,10 @@ jobs:
       - name: Build
         if: steps.scope.outputs.run == 'true'
         run: npm run build
+
+      - name: Install Chromium
+        if: steps.scope.outputs.run == 'true'
+        run: npx playwright install --with-deps chromium
 
       - name: Dual-copy e2e
         if: steps.scope.outputs.run == 'true'

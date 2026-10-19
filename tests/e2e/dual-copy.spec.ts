@@ -5,11 +5,17 @@
 // build into it (helpers/app.ts, E2E_CLI to pick another) and boots it twice:
 // on its committed FusekiStore with nothing answering, and with `appData` a
 // RemoteDataset at a dead url. Each boot must print the guard's `on` line and
-// no `TWO COPIES` line. No Docker, no Fuseki and no browser: only the boot's
-// output is read, so CI runs this spec (.github/workflows/dual-copy-e2e.yml).
+// no `TWO COPIES` line. Then the browser side (report 021): with
+// `@_linked/shape-ui` installed (it ships `src/` with `.tsx` imported from `.ts`
+// and `.tsx`), headless Chromium loads `/` and no `@_linked/*` script module may
+// be requested in two forms (plain and `?v=`, two paths, or the optimizer and
+// its files). No Docker and no Fuseki, so CI runs this spec
+// (.github/workflows/dual-copy-e2e.yml).
 import {test, expect} from '@playwright/test';
+import {execFileSync} from 'node:child_process';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {linkedModuleCopies} from './helpers/moduleCopies.js';
 import {
   GUARD_ON,
   exited,
@@ -35,9 +41,15 @@ let app: ScaffoldedApp | undefined;
 // run in file order on one worker (the RemoteDataset one rewrites the app).
 test.describe.configure({timeout: 4 * 60 * 1000});
 
+// The files the RemoteDataset test rewrites, as the template has them.
+const pristine: Record<string, string> = {};
+
 test.beforeAll(async () => {
   app = scaffoldApp('e2e-dual-copy');
   installApp(app);
+  for (const file of ['linked.backend.datasets.json', 'linked.backend.storage.ts']) {
+    pristine[file] = readFileSync(join(app.dir, file), 'utf8');
+  }
 }, /* timeout */ 6 * 60 * 1000);
 
 test.afterAll(() => removeApp(app));
@@ -134,6 +146,56 @@ test('a RemoteDataset appData is the class the app imports, and so is its error'
     // The template's message, not the error's stack.
     expect(output).not.toMatch(/RemoteDatasetUnreachableError[^\n]*\n\s+at /);
     expectOneCopy(output);
+  } finally {
+    await stopApp(run);
+  }
+});
+
+// shape-ui's `src/hostContext.tsx` is imported from `.ts` and `.tsx` files; on
+// cli 1.51.0 the browser requested it plain and as `?v=<hash>`, two React
+// contexts (report 018). The latest shape-ui by default, so a new `src/` layout
+// is seen; E2E_SHAPE_UI pins one (e.g. 2.8.0, the version report 018 measured).
+test('the browser loads one copy of each @_linked module, with a package that ships src/', async ({
+  page,
+}) => {
+  const dir = app!.dir;
+  for (const [file, text] of Object.entries(pristine)) writeFileSync(join(dir, file), text);
+  const shapeUi = `@_linked/shape-ui@${process.env.E2E_SHAPE_UI || 'latest'}`;
+  execFileSync('npm', ['install', '--no-audit', '--no-fund', shapeUi], {
+    cwd: dir,
+    stdio: 'inherit',
+  });
+  const appFile = join(dir, 'src/App.tsx');
+  writeFileSync(
+    appFile,
+    "import '@_linked/shape-ui';\nimport '@_linked/shape-ui/components/InstanceView';\n" +
+      readFileSync(appFile, 'utf8'),
+  );
+
+  const urls: string[] = [];
+  page.on('request', (request) => urls.push(request.url()));
+  let run: AppRun | undefined;
+  try {
+    run = startApp(app!, bootEnv());
+    const status = await waitForHttp(`${ORIGIN}/`, run, 150_000);
+    expect(status, run.output()).not.toBe(0);
+    await page.goto(`${ORIGIN}/`, {waitUntil: 'networkidle', timeout: 120_000});
+
+    const shapeUiSource = urls.filter((url) => url.includes('/@_linked/shape-ui/src/'));
+    console.log(
+      `[e2e] ${urls.length} requests, ${shapeUiSource.length} from shape-ui's src/ (${shapeUi})`,
+    );
+    expect(
+      shapeUiSource.length,
+      "the page loaded nothing from shape-ui's src/: the check has nothing to look at",
+    ).toBeGreaterThan(0);
+    const copies = linkedModuleCopies(urls);
+    expect(
+      copies,
+      `${copies.length} @_linked module(s) loaded in more than one form:\n` +
+        copies.map((c) => `${c.module}\n  ${c.urls.join('\n  ')}`).join('\n'),
+    ).toEqual([]);
+    expectOneCopy(run.output());
   } finally {
     await stopApp(run);
   }
