@@ -154,6 +154,14 @@ relative to the app root and must stay inside it).
 `setDefaultStore(store)` publishes to that store through the purpose fallback, which needs no extra
 configuration.
 
+**A build needs no data server.** To find that store, `build-app` and `publish-app` load the app's
+`linked.backend.files.{ts,js}` when it has one: a file that registers the file stores and nothing
+else, which `linked.backend.storage.ts` imports so the server gets them too. The storage file is
+not loaded, so no dataset store is built and a `RemoteDataset`'s `init()` never pings its data
+server during a build. An app without the file falls back to loading the whole storage file, which
+then has to boot without a data server or Fuseki for the build to finish. The app template ships
+the file.
+
 **Every release gets its own prefix.** Object keys are
 `releases/<appVersion>-<revision>/<path>`, so publishing a new release cannot overwrite the
 previous one and a rollback means pointing at an older prefix. Set `publish.releasePrefix` in

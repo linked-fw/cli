@@ -136,5 +136,5 @@ backlog 019.
 ## Follow-ups
 
 - Backlog 017, framework conventions (option D): not scheduled.
-- Backlog 018, `build-app` loads every store and needs the data server: not scheduled.
+- Backlog 018, `build-app` loads every store and needs the data server: done, [report 020](020-build-app-needs-no-data-server.md).
 - The `Dual-copy e2e` check is added to `main`'s required checks once it has passed on this PR.

@@ -180,6 +180,47 @@ export async function loadBackendStorageConfig(): Promise<any> {
 }
 
 /**
+ * The app's file-storage file, `linked.backend.files.{ts,js}` at the app root,
+ * or undefined when it has none.
+ *
+ * It registers the file stores (`LinkedFileStorage`) and nothing else, and the
+ * storage file imports it, so a server still gets them. `build-app` and
+ * `publish-app` need only the `appAssets` store, so they load this file instead
+ * of the storage file: the storage file builds every dataset store and may
+ * await one (a `RemoteDataset`'s `init()` pings its data server), and a build
+ * must not need the data server or Fuseki (cli report 020).
+ */
+export function findBackendFilesConfig(
+  cwd: string = process.cwd(),
+  exists: (p: string) => boolean = fs.existsSync,
+): string | undefined {
+  return ['linked.backend.files.ts', 'linked.backend.files.js']
+    .map((name) => path.join(cwd, name))
+    .find((candidate) => exists(candidate));
+}
+
+/**
+ * Load only the app's file stores: `linked.backend.files.{ts,js}` when the app
+ * has one, else the whole storage file ({@link loadBackendStorageConfig}), which
+ * is where an app without it registers them.
+ */
+export async function loadBackendFileStorage(
+  dependencies: {
+    find?: () => string | undefined;
+    importFile?: (file: string) => Promise<unknown>;
+    loadStorageConfig?: () => Promise<unknown>;
+  } = {},
+): Promise<void> {
+  const file = (dependencies.find || findBackendFilesConfig)();
+  if (file) {
+    console.log(`Loading file storage from ${path.basename(file)}`);
+    await (dependencies.importFile || importFile)(file);
+    return;
+  }
+  await (dependencies.loadStorageConfig || loadBackendStorageConfig)();
+}
+
+/**
  * A local package directory found by {@link discoverLocalPackages}, together
  * with the facts that decide what can be done with it.
  *

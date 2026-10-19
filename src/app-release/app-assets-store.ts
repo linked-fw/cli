@@ -6,8 +6,9 @@ import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
 
 export interface ResolveAppAssetsStoreDependencies {
   /**
-   * Loads the app's storage bootstrap file. Importing it is what registers the
-   * stores on `LinkedFileStorage`; the module's own exports are not inspected.
+   * Registers the app's file stores on `LinkedFileStorage`: its
+   * `linked.backend.files.{ts,js}`, or the whole storage file when it has none
+   * (`loadBackendFileStorage`). The module's own exports are not inspected.
    */
   loadStorageConfig?: () => Promise<unknown>;
   /** Injection point for tests. Defaults to `LinkedFileStorage.getStore`. */
@@ -29,8 +30,8 @@ export const resolveAppAssetsStore = async (
   const loadStorageConfig =
     dependencies.loadStorageConfig ||
     (async () => {
-      const {loadBackendStorageConfig} = await import('../lifecycle.js');
-      return loadBackendStorageConfig();
+      const {loadBackendFileStorage} = await import('../lifecycle.js');
+      return loadBackendFileStorage();
     });
   await loadStorageConfig();
 
