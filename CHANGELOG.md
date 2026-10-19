@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.52.2
+
+### Patch Changes
+
+- [#305](https://github.com/linked-fw/cli/pull/305) [`60afe3b`](https://github.com/linked-fw/cli/commit/60afe3bd0970fed870289665771247307ab21432) Thanks [@flyon](https://github.com/flyon)! - `linked start` no longer lets Vite restart its dev server when `.env` (or another env file, or `vite.config.*`) changes. The restart closed the SSR module runner the backend was loaded by, so every later `import()` in it failed with "Vite module runner has been closed." — `POST /admin/sync-shapes` among them — until the app was restarted. A change to those files now takes effect at the next `linked start`; a restart that happens regardless logs that the process must be restarted.
+
 ## 1.52.1
 
 ### Patch Changes
