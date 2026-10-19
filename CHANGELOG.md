@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.51.2
+
+### Patch Changes
+
+- [#295](https://github.com/linked-fw/cli/pull/295) [`9892459`](https://github.com/linked-fw/cli/commit/98924590667ad680ef660813f35f7ea45ee9d1bc) Thanks [@flyon](https://github.com/flyon)! - React Native template: the example screen can add, edit and delete a Person again. `services/api` now attaches the web app-template's example access rule to its `appData` store (`withAccess`, `services/api/src/exampleAccess.ts`): anonymous reads of `Person` in every environment, anonymous writes of `Person` only under `NODE_ENV=development`, and a session for everything else. A new integration test starts a second API with `NODE_ENV=production` and checks that it refuses anonymous create, update and delete with 401.
+
 ## 1.51.1
 
 ### Patch Changes
