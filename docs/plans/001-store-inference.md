@@ -138,6 +138,9 @@ Ontology data registers through each package's `ontologies/*.register.js`, not i
 therefore imports the register modules of the package **and of every `@_linked/*` dependency**,
 as an app's boot does; without them every term of a dependency's namespace reads as
 `mirror-undefined-term` (N2 measured 66 such findings for org with schema's data unregistered).
+It does so through core's `registerInstalledOntologies(packageDirs)`
+(`@_linked/core/ontology/registerInstalled`, master §Installed packages' ontologies), called with
+the package's own directory and its `@_linked/*` dependencies' (transitive).
 
 ## Which CLI runs in the layout
 
@@ -359,10 +362,9 @@ explicit way out.
 1. A build step **'Checking shape hierarchy'** right after 'Checking shapes/index': in one child
    `node` (cwd the package, the shape-references asset hook registered), import the package's
    `lib/esm/package.js`, its `lib/esm/shapes/index.js` (or, without one, every shape module
-   `findShapeModules` lists), its `lib/esm/ontologies/*.register.js`, then the
-   `ontologies/*.register.js` of every `@_linked/*` dependency (dependencies and
-   peerDependencies, transitively, each resolved from the package the way Node resolves it and
-   imported by real path); then `checkShapeHierarchy({dependencies})` from the `@_linked/core`
+   `findShapeModules` lists), then core's `registerInstalledOntologies` with the package's
+   directory and every `@_linked/*` dependency's (dependencies and peerDependencies,
+   transitively, each resolved from the package the way Node resolves it, by real path); then `checkShapeHierarchy({dependencies})` from the `@_linked/core`
    the package resolves (its own `lib/esm` when the package is core), with `dependencies` mapping
    the package and each visited dependency to its `dependencies` + `peerDependencies` names.
 2. Every finding printed (severity, kind, shape, message); any `error` fails the build
@@ -436,6 +438,21 @@ landing.
 
 **Changeset:** minor. **Record:** report 025.
 
+**Outcome.** `linked build` runs **Checking shape hierarchy** after 'Checking shapes/index'
+(`src/utils/shapeHierarchy.ts`): one child `node` imports the package's `package.js` and
+`shapes/index.js`, registers the ontology data of the package and of its linked dependencies
+through core's `registerInstalledOntologies` (V2, core c3a5ef4), and runs
+`checkShapeHierarchy({dependencies})`; every finding is printed, an error fails the build.
+`--skip-shape-check "<reason>"` skips it. `depCheck` keeps the last missing entry. Deviations:
+dependencies are followed when they are `@_linked/*` **or** `linkedPackage: true` (a CN or app
+package depending on another linked package needs its data too); a register module that throws
+(core only warns) fails the check with that warning; a core without `shapes/checkShapeHierarchy`
+or `ontology/registerInstalled` warns and skips. The `depCheck` fix surfaces one formerly hidden
+missing dependency in five packages' builds (warnings: cli `rollup` in a test, dcmi
+`@types/react`, schema `@types/node`, auth `cookie`, server-utils `react-dom`). Gate: build 12.5 s;
+the quick jest line 5 suites / 111 tests, 14.5 s; `npm run test:unit` 82 suites / 890 tests,
+65.8 s. Verify: all 13 packages build clean with the check, `git status` clean (report 025).
+
 ## Progress
 
 - [ ] Sub-plan reviewed by the master; contradictions routed into the master's §Contracts
@@ -444,9 +461,12 @@ landing.
 - [x] L1 phase 3 — CLI e2e on the image
 - [ ] L1 landed on `store-inference` (commit: )
 - [x] L2 detail written (wave 4)
-- [ ] L2 landed (report 025, commit: )
+- [x] L2 landed (report 025, commit: see report 025)
 - [ ] Release PR (R): link
 - [ ] R: `create-app.spec.ts`'s default `FUSEKI_IMAGE` becomes the published
   `ghcr.io/linked-fw/fuseki:6.2.0-1` (report 024)
+- [ ] R: the dependency warnings the `depCheck` fix made visible (dcmi `@types/react`, schema
+  `@types/node`, auth `cookie`, server-utils `react-dom`, cli `rollup`) declared in each
+  repository's release PR (report 025)
 - [ ] R: raise `defaults/package/package.json`'s `@_linked/core` range to the release exporting
   `ontology/loadOntologyFiles`; run `tests/template/package.full.test.ts` (report 024)
