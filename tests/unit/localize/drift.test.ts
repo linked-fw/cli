@@ -163,3 +163,32 @@ test('a lock entry for a checkout that is gone is a missing dir', (t) => {
   assert.deepEqual(drift, [{kind: 'missing-dir', dir: 'packages-local/gone'}]);
   assert.match(describeDrift(drift[0]), /packages-local\/gone .*npm install/);
 });
+
+test('worktree with symlinked node_modules reports no missing-dir', (t) => {
+  // The main checkout holds the real node_modules and the checkout; the
+  // worktree's node_modules is a symlink to it and its packages-local is empty.
+  const main = consumer(t);
+  const lock = linkedPair(main);
+  hiddenLock(main, lock);
+  const worktree = consumer(t);
+  fs.rmSync(path.join(worktree, 'node_modules'), {recursive: true});
+  fs.symlinkSync(
+    path.join(main, 'node_modules'),
+    path.join(worktree, 'node_modules'),
+  );
+  assert.deepEqual(driftProblems(worktree), []);
+});
+
+test('real missing checkout still reported', (t) => {
+  const appRoot = consumer(t);
+  hiddenLock(appRoot, {
+    'packages-local/_linked-core': {name: '@_linked/core', version: '2.28.4'},
+    'node_modules/@_linked/core': {
+      resolved: 'packages-local/_linked-core',
+      link: true,
+    },
+  });
+  assert.deepEqual(driftProblems(appRoot), [
+    {kind: 'missing-dir', dir: 'packages-local/_linked-core'},
+  ]);
+});

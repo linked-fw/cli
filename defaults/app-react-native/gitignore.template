@@ -1,4 +1,6 @@
 node_modules/
+# Vite's dependency cache when node_modules is a symlink (a git worktree).
+.vite-cache/
 # Workspace packages are enumerated; `packages/*` (not `packages/`) so the negation below works.
 packages/*
 !packages/app-shapes/

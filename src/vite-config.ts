@@ -784,6 +784,25 @@ export async function installedLinkedDeps(cwd: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * Vite's dependency cache for the app at `appRoot`. Vite's default is
+ * `node_modules/.vite`; when `node_modules` is a symlink -- a git worktree
+ * sharing the main checkout's install -- that is the main checkout's cache, and
+ * a worktree's dev server would re-optimize it from under the main one's. Such
+ * an app gets `<appRoot>/.vite-cache` instead; otherwise `undefined` keeps the
+ * default.
+ */
+export function viteCacheDir(appRoot: string): string | undefined {
+  try {
+    if (fsExtra.lstatSync(path.join(appRoot, 'node_modules')).isSymbolicLink()) {
+      return path.join(appRoot, '.vite-cache');
+    }
+  } catch {
+    /* no node_modules: the default */
+  }
+  return undefined;
+}
+
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
   return defineConfig(async ({mode}) => {
     const isDev = mode === 'development';
@@ -815,7 +834,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     const devPort = process.env.PORT ?? opts.port;
     const clientDepIncludes =
       isDev && opts.clientDepIncludes !== false && process.env.LINKED_CLIENT_DEP_INCLUDES !== '0';
+    const cacheDir = viteCacheDir(process.cwd());
     const config: UserConfig = {
+      ...(cacheDir ? {cacheDir} : {}),
       server: {
         port: opts.port ?? 4040,
         middlewareMode: true,
