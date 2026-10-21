@@ -682,6 +682,21 @@ worktree
     return runWorktreeRemove(agent, options);
   });
 
+const release = program
+  .command('release')
+  .description('Releasing an integration branch.');
+
+release
+  .command('plan')
+  .description(
+    "Run in the integration set. Per repository on the integration branch, in dependency order with the app last: the commits, reports and changesets its target lacks, the release PRs (head <integration>--*, in stack order, via gh), the ## PR section of each new report, and the next action (open PRs, waiting, merge target back, done).",
+  )
+  .option('--json', 'Print the plan as JSON.')
+  .action(async (options) => {
+    const {runReleasePlan} = await import('./commands/release.js');
+    return runReleasePlan(options);
+  });
+
 program
   .command('setup-publish')
   .description(
