@@ -595,6 +595,23 @@ program
     return runAppDoctor();
   });
 
+const doctor = program
+  .command('doctor')
+  .description(
+    'Diagnostics for how the dev server loads packages. For checks on how an app uses linked packages, see app-doctor.',
+  );
+
+doctor
+  .command('resolve')
+  .description(
+    'Run in an app. For every source workspace and installed @_linked package: the directory Vite\'s dev SSR runner loads it from (or "external" when Vite leaves it to Node), the directory Node resolves it to, and whether Vite bundles it. Flags "overlay" when the two differ (a worktree\'s own checkout) and "two-copies" when they differ for a package Node also loads during linked start (@_linked/cli, @_linked/auth). Exits 1 on "two-copies".',
+  )
+  .option('--json', 'Print the rows as JSON: name, vite, node, bundled, flag.')
+  .action(async (options) => {
+    const {runDoctorResolve} = await import('./commands/doctor.js');
+    return runDoctorResolve(options);
+  });
+
 program
   .command('setup-publish')
   .description(
