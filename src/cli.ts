@@ -612,6 +612,34 @@ doctor
     return runDoctorResolve(options);
   });
 
+const branch = program
+  .command('branch')
+  .description(
+    'One integration branch across the app and its packages-local/ checkouts. The target it lands in is recorded per repo as git config branch.<name>.linked-target.',
+  );
+
+branch
+  .command('status')
+  .description(
+    'Run in an app. Per repo (the root and each packages-local/ checkout): branch, its target, dirty, commits ahead/behind the target and the root\'s integration branch. Flags "off-branch" for a repo on neither the integration branch nor its target.',
+  )
+  .option('--json', 'Print the integration branch and the rows as JSON.')
+  .action(async (options) => {
+    const {runBranchStatus} = await import('./commands/branch.js');
+    return runBranchStatus(options);
+  });
+
+branch
+  .command('start <name> [packages...]')
+  .description(
+    'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when any of them has uncommitted or untracked changes. The name must not contain "--" (it separates agent branches).',
+  )
+  .requiredOption('--target <branch>', 'The branch the work lands in, e.g. main or dev.')
+  .action(async (name: string, packages: string[], options) => {
+    const {runBranchStart} = await import('./commands/branch.js');
+    return runBranchStart(name, packages, options);
+  });
+
 program
   .command('setup-publish')
   .description(
