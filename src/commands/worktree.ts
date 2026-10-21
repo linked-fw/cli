@@ -13,7 +13,7 @@
  *
  * The base is the root's integration branch, or the root's current branch
  * when it has none. Agents land by fast-forwarding the base to their branch;
- * `remove` refuses until every agent branch has landed.
+ * `remove` refuses until every agent branch has landed, unless told otherwise.
  *
  * The core functions take the app root, options and an optional `run`, and
  * return data and an exit code; printing is separate, so tests drive them
@@ -146,6 +146,10 @@ export async function worktreeAdd(
     return refuse((error as Error).message);
   }
   result.agentBranch = branch;
+  // agentBranch only rules out "/" and "--"; git has more rules (spaces, "..", "~", ...).
+  if (run('git', ['check-ref-format', '--branch', branch], {cwd: root}).status !== 0) {
+    return refuse(`invalid agent name "${agent}": ${branch} is not a valid branch name.`);
+  }
 
   const repos = await listRepos(root, run);
   const chosen = selectCheckouts(repos.slice(1), options.with ?? []);
@@ -174,6 +178,9 @@ export async function worktreeAdd(
 
   // Each step that changes something pushes how to undo it.
   const undo: (() => void)[] = [];
+  // Set once this run's `git worktree add` has made the dir: a dir that
+  // appeared some other way is never removed.
+  let createdDir = false;
   const step = (args: string[], cwd: string): boolean => {
     const r = run('git', args, {cwd});
     if (r.status !== 0) {
@@ -190,80 +197,107 @@ export async function worktreeAdd(
         result.messages.push(`undo failed: ${(error as Error).message}`);
       }
     }
-    if (fs.existsSync(dir)) fs.rmSync(dir, {recursive: true, force: true});
+    if (createdDir && fs.existsSync(dir)) fs.rmSync(dir, {recursive: true, force: true});
     run('git', ['worktree', 'prune'], {cwd: root});
     result.messages.push('Undid what this run had created.');
     return result;
   };
 
-  // A checkout that is not on the base yet joins the work now.
-  for (const {repo, exists} of joins) {
-    const args = exists ? ['switch', base] : ['switch', '-c', base, target];
-    if (!step(args, repo.dir)) return rollback();
-    const back = repo.branch ? ['switch', repo.branch] : ['switch', '--detach', repo.head];
-    undo.push(() => {
-      run('git', back, {cwd: repo.dir});
-      if (!exists) run('git', ['branch', '-D', base], {cwd: repo.dir});
-    });
-    // Without an integration branch the base is its own target: nothing to record.
-    if (target !== base) {
-      const previous = await getTarget(repo.dir, base, run);
-      await setTarget(repo.dir, base, target, run);
-      undo.push(() => {
-        const key = `branch.${base}.linked-target`;
-        run('git', previous ? ['config', key, previous] : ['config', '--unset', key], {cwd: repo.dir});
-      });
-    }
-    result.messages.push(`${repo.rel}: ${exists ? 'switched to' : 'created'} ${base}${target !== base ? ` (target ${target})` : ''}`);
-  }
-
-  const appArgs = options.appDetached
-    ? ['worktree', 'add', '--detach', dir, base]
-    : ['worktree', 'add', '-b', branch, dir, base];
-  if (!step(appArgs, root)) return rollback();
-  undo.push(() => {
-    run('git', ['worktree', 'remove', '--force', dir], {cwd: root});
-    if (!options.appDetached) run('git', ['branch', '-D', branch], {cwd: root});
-  });
-  result.messages.push(
-    options.appDetached
-      ? `${dir}: app worktree, detached at ${base}`
-      : `${dir}: app worktree on ${branch}`,
-  );
-
   try {
-    fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'));
-    for (const name of fs.readdirSync(root).filter((n) => ENV_FILE.test(n)).sort()) {
-      // Only an untracked, gitignored file: a tracked one is in the worktree already.
-      if (run('git', ['check-ignore', '-q', name], {cwd: root}).status !== 0) continue;
-      fs.symlinkSync(path.join(root, name), path.join(dir, name));
-      result.messages.push(`${dir}/${name} -> ${path.join(root, name)}`);
+    // A checkout that is not on the base yet joins the work now.
+    for (const {repo, exists} of joins) {
+      const args = exists ? ['switch', base] : ['switch', '-c', base, target];
+      if (!step(args, repo.dir)) return rollback();
+      const created = exists ? null : run('git', ['rev-parse', `refs/heads/${base}`], {cwd: repo.dir}).stdout.trim();
+      const key = `branch.${base}.linked-target`;
+      const config: {set: boolean; previous: string | null} = {set: false, previous: null};
+      undo.push(() => {
+        const back = repo.branch ? ['switch', repo.branch] : ['switch', '--detach', repo.head];
+        run('git', back, {cwd: repo.dir});
+        // A base branch this run created goes again only while it is still
+        // what the run made: another agent may have forked from or moved it.
+        let keep = false;
+        if (created !== null) {
+          const now = run('git', ['rev-parse', '-q', '--verify', `refs/heads/${base}`], {cwd: repo.dir}).stdout.trim();
+          const checkedOut = worktreesOf(run, repo.dir).some((wt) => wt.branch === base);
+          if (now && (now !== created || checkedOut)) {
+            keep = true;
+            result.messages.push(
+              `${repo.rel}: kept ${base} at ${now}: ${checkedOut ? 'a worktree has it checked out' : `it moved from ${created}`}.`,
+            );
+          } else if (now) {
+            run('git', ['branch', '-D', base], {cwd: repo.dir});
+          }
+        }
+        if (config.set && !keep) {
+          run('git', config.previous ? ['config', key, config.previous] : ['config', '--unset', key], {cwd: repo.dir});
+        }
+      });
+      // Without an integration branch the base is its own target: nothing to record.
+      if (target !== base) {
+        config.previous = await getTarget(repo.dir, base, run);
+        config.set = true;
+        await setTarget(repo.dir, base, target, run);
+      }
+      result.messages.push(`${repo.rel}: ${exists ? 'switched to' : 'created'} ${base}${target !== base ? ` (target ${target})` : ''}`);
+    }
+
+    const appArgs = options.appDetached
+      ? ['worktree', 'add', '--detach', dir, base]
+      : ['worktree', 'add', '-b', branch, dir, base];
+    if (!step(appArgs, root)) return rollback();
+    createdDir = true;
+    undo.push(() => {
+      run('git', ['worktree', 'remove', '--force', dir], {cwd: root});
+      if (!options.appDetached) run('git', ['branch', '-D', branch], {cwd: root});
+    });
+    result.messages.push(
+      options.appDetached
+        ? `${dir}: app worktree, detached at ${base}`
+        : `${dir}: app worktree on ${branch}`,
+    );
+
+    try {
+      linkDir(path.join(root, 'node_modules'), path.join(dir, 'node_modules'));
+      result.messages.push(`${path.join(dir, 'node_modules')} -> ${path.join(root, 'node_modules')}`);
+      for (const name of fs.readdirSync(root).filter((n) => ENV_FILE.test(n)).sort()) {
+        // Only an untracked, gitignored file: a tracked one is in the worktree already.
+        if (run('git', ['check-ignore', '-q', name], {cwd: root}).status !== 0) continue;
+        // The file itself, not the root's entry: a link to a link breaks when the middle one moves.
+        const source = fs.realpathSync(path.join(root, name));
+        fs.symlinkSync(source, path.join(dir, name));
+        result.messages.push(`${path.join(dir, name)} -> ${source}`);
+      }
+    } catch (error) {
+      result.messages.push(`linking into ${dir} failed: ${(error as Error).message}`);
+      return rollback();
+    }
+
+    for (const repo of packages) {
+      const pkgDir = path.join(dir, 'packages-local', dirName(repo));
+      if (!step(['worktree', 'add', '-b', branch, pkgDir, base], repo.dir)) return rollback();
+      undo.push(() => {
+        run('git', ['worktree', 'remove', '--force', pkgDir], {cwd: repo.dir});
+        run('git', ['branch', '-D', branch], {cwd: repo.dir});
+      });
+      // npm nests version-conflicting dependencies in the checkout's own
+      // node_modules; without them the worktree's imports fall through to the
+      // root's versions.
+      const nested = path.join(repo.dir, 'node_modules');
+      if (fs.existsSync(nested)) {
+        try {
+          linkDir(nested, path.join(pkgDir, 'node_modules'));
+        } catch (error) {
+          result.messages.push(`linking ${pkgDir}/node_modules failed: ${(error as Error).message}`);
+          return rollback();
+        }
+        result.messages.push(`${path.join(pkgDir, 'node_modules')} -> ${nested}`);
+      }
+      result.messages.push(`${pkgDir}: ${repo.packageName ?? repo.rel} on ${branch}`);
     }
   } catch (error) {
-    result.messages.push(`linking into ${dir} failed: ${(error as Error).message}`);
+    result.messages.push(`failed: ${(error as Error).message}`);
     return rollback();
-  }
-
-  for (const repo of packages) {
-    const pkgDir = path.join(dir, 'packages-local', dirName(repo));
-    if (!step(['worktree', 'add', '-b', branch, pkgDir, base], repo.dir)) return rollback();
-    undo.push(() => {
-      run('git', ['worktree', 'remove', '--force', pkgDir], {cwd: repo.dir});
-      run('git', ['branch', '-D', branch], {cwd: repo.dir});
-    });
-    // npm nests version-conflicting dependencies in the checkout's own
-    // node_modules; without them the worktree's imports fall through to the
-    // root's versions.
-    const nested = path.join(repo.dir, 'node_modules');
-    if (fs.existsSync(nested)) {
-      try {
-        fs.symlinkSync(nested, path.join(pkgDir, 'node_modules'));
-      } catch (error) {
-        result.messages.push(`linking ${pkgDir}/node_modules failed: ${(error as Error).message}`);
-        return rollback();
-      }
-    }
-    result.messages.push(`${pkgDir}: ${repo.packageName ?? repo.rel} on ${branch}`);
   }
 
   const keys = fs
@@ -273,7 +307,7 @@ export async function worktreeAdd(
     .sort();
   if (keys.length) {
     result.messages.push(
-      `Not linked (private keys never are): ${keys.join(', ')}. If the app needs one here: ln -s ${path.join(root, keys[0])} ${dir}/`,
+      `Not linked (private keys never are): ${keys.join(', ')}. If the app needs one here: ln -s ${shellQuote(path.join(root, keys[0]))} ${shellQuote(dir + path.sep)}`,
     );
   }
 
@@ -281,8 +315,8 @@ export async function worktreeAdd(
   const scripts = (pkgJson?.scripts ?? {}) as Record<string, unknown>;
   const start = 'start:local' in scripts ? 'npm run start:local' : 'npm start';
   const env = [`PORT=${options.port ?? '<port>'}`];
-  if (options.dataset) env.push(`FUSEKI_DATASET=${options.dataset}`);
-  result.startCommand = `cd ${dir} && ${env.join(' ')} ${start}`;
+  if (options.dataset) env.push(`FUSEKI_DATASET=${shellQuote(options.dataset)}`);
+  result.startCommand = `cd ${shellQuote(dir)} && ${env.join(' ')} ${start}`;
   result.messages.push('', `Start it: ${result.startCommand}`);
   if (options.port === undefined) result.messages.push('(pick a free port: the main checkout uses 4040)');
   const backup = path.join(root, 'scripts', 'backup-cn-state.sh');
@@ -291,7 +325,7 @@ export async function worktreeAdd(
     result.messages.push(
       `Clone the data into ${options.dataset} first (from ${root}):`,
       `  scripts/backup-cn-state.sh --yes`,
-      `  scripts/restore-fuseki-dataset.sh <the cn-main dump it wrote> ${options.dataset} --yes`,
+      `  scripts/restore-fuseki-dataset.sh <the cn-main dump it wrote> ${shellQuote(options.dataset)} --yes`,
     );
   }
   result.messages.push(
@@ -300,6 +334,16 @@ export async function worktreeAdd(
   );
   result.code = 0;
   return result;
+}
+
+/** A directory symlink; a junction on Windows, which needs no extra privilege. */
+function linkDir(target: string, link: string): void {
+  fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : undefined);
+}
+
+/** `s` as one POSIX shell word: unchanged when it is plain, else single-quoted. */
+export function shellQuote(s: string): string {
+  return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 function readJson(file: string): Record<string, unknown> | null {
@@ -359,14 +403,17 @@ export interface PackageWorktree {
 }
 
 export interface AppWorktree {
-  /** The agent name: from a `<base>--<agent>` branch, else the directory name. */
+  /** The agent name: from a `<base>--<agent>` branch (the app's or a package's), else the directory name. */
   agent: string;
   dir: string;
   branch: string | null;
   head: string;
   /** Whether the branch is in the base; null when detached. */
   landed: boolean | null;
-  /** On a `<base>--<agent>` branch, or detached: the shape `worktree add` makes. */
+  /**
+   * The shape `worktree add` makes: on a `<base>--<agent>` branch, or
+   * detached with a package worktree on one.
+   */
   agentWorktree: boolean;
   packages: PackageWorktree[];
 }
@@ -376,18 +423,26 @@ export interface WorktreeList {
   worktrees: AppWorktree[];
 }
 
+export interface WorktreeListOptions {
+  /** Every worktree of the app, not only agent worktrees. */
+  all?: boolean;
+}
+
 /**
- * Every worktree of the app root other than the root itself, with the
- * package worktrees nested in its `packages-local/`. Worktrees made some
- * other way are listed too, marked `agentWorktree: false` unless they have
- * the agent shape.
+ * The agent worktrees of the app root, with the package worktrees nested in
+ * their `packages-local/`. With `all`, every other worktree of the app too
+ * (marked `agentWorktree: false`). The main checkout is never listed.
  */
 export async function worktreeList(
   appRoot: string,
+  options: WorktreeListOptions = {},
   run: Run = makeRun(appRoot),
 ): Promise<WorktreeList> {
   const root = realish(appRoot);
   const {base} = await baseOf(root, run);
+  const prefix = base ? `${base}--` : null;
+  const agentOf = (branch: string | null): string | null =>
+    prefix && branch?.startsWith(prefix) ? branch.slice(prefix.length) : null;
   const repos = (await listRepos(root, run)).slice(1);
   const nested = repos.flatMap((repo) =>
     worktreesOf(run, repo.dir)
@@ -395,28 +450,32 @@ export async function worktreeList(
       .map((wt) => ({repo, wt, dir: realish(wt.path)})),
   );
   const worktrees: AppWorktree[] = [];
-  for (const wt of worktreesOf(run, root)) {
+  // git lists the main worktree first.
+  for (const [i, wt] of worktreesOf(run, root).entries()) {
     const dir = realish(wt.path);
-    if (dir === root) continue;
-    const prefix = base ? `${base}--` : null;
-    const agentShaped = !!prefix && !!wt.branch?.startsWith(prefix);
+    if (i === 0 || dir === root) continue;
+    const packages: PackageWorktree[] = nested
+      .filter((n) => path.dirname(n.dir) === path.join(dir, 'packages-local'))
+      .map((n) => ({
+        rel: n.repo.rel,
+        packageName: n.repo.packageName,
+        checkout: n.repo.dir,
+        dir: n.dir,
+        branch: n.wt.branch,
+        landed: landed(run, n.repo.dir, n.wt.branch, base),
+      }));
+    const ownAgent = agentOf(wt.branch);
+    const packageAgent = wt.branch === null ? packages.map((p) => agentOf(p.branch)).find((a) => a !== null) ?? null : null;
+    const agent = ownAgent ?? packageAgent;
+    if (agent === null && !options.all) continue;
     worktrees.push({
-      agent: agentShaped && prefix && wt.branch ? wt.branch.slice(prefix.length) : path.basename(dir),
+      agent: agent ?? path.basename(dir),
       dir,
       branch: wt.branch,
       head: wt.head,
       landed: landed(run, root, wt.branch, base),
-      agentWorktree: agentShaped || wt.branch === null,
-      packages: nested
-        .filter((n) => path.dirname(n.dir) === path.join(dir, 'packages-local'))
-        .map((n) => ({
-          rel: n.repo.rel,
-          packageName: n.repo.packageName,
-          checkout: n.repo.dir,
-          dir: n.dir,
-          branch: n.wt.branch,
-          landed: landed(run, n.repo.dir, n.wt.branch, base),
-        })),
+      agentWorktree: agent !== null,
+      packages,
     });
   }
   return {base, worktrees};
@@ -424,9 +483,11 @@ export async function worktreeList(
 
 const landedLabel = (l: boolean | null): string => (l === null ? 'n/a' : l ? 'landed' : 'not landed');
 
-export function formatWorktreeList(list: WorktreeList): string {
+export function formatWorktreeList(list: WorktreeList, options: WorktreeListOptions = {}): string {
   const lines = [list.base ? `Base: ${list.base}` : 'Base: none (the app root is detached)'];
-  if (!list.worktrees.length) lines.push('No worktrees besides the app root.');
+  if (!list.worktrees.length) {
+    lines.push(options.all ? 'No worktrees besides the main checkout.' : 'No agent worktrees (--all lists every worktree).');
+  }
   for (const wt of list.worktrees) {
     lines.push(
       '',
@@ -441,8 +502,11 @@ export function formatWorktreeList(list: WorktreeList): string {
 }
 
 export interface WorktreeRemoveOptions {
-  /** Remove even with unlanded branches or changes, and delete unlanded agent branches. */
+  /** Remove worktrees that have changes of their own or unlanded branches; unlanded branches are kept. */
   force?: boolean;
+  /** Also delete agent branches that have not landed (`git branch -D`). */
+  deleteUnlanded?: boolean;
+  /** The app worktree's directory, instead of finding it by its agent branch. */
   dir?: string;
 }
 
@@ -453,10 +517,15 @@ export interface WorktreeRemoveResult {
 
 /**
  * Remove an agent's worktree: the nested package worktrees first, then the
- * app worktree, then the agent branches. Refuses, removing nothing, while an
- * agent branch has not landed in the base or a worktree has changes of its
- * own (the symlinks and cache `worktree add` and the dev server made don't
- * count), unless `force`.
+ * app worktree, then the agent branches. The app worktree is the one on
+ * `<base>--<agent>`; a detached one is found by its package worktrees on that
+ * branch, or at the default dir; `dir` names it outright.
+ *
+ * Refuses, removing nothing, while an agent branch has not landed in the base
+ * or a worktree has changes of its own (the symlinks and cache `worktree add`
+ * and the dev server made don't count). `force` removes the worktrees anyway
+ * but keeps unlanded branches, printing their sha; `deleteUnlanded` deletes
+ * those too.
  */
 export async function worktreeRemove(
   appRoot: string,
@@ -465,19 +534,35 @@ export async function worktreeRemove(
   run: Run = makeRun(appRoot),
 ): Promise<WorktreeRemoveResult> {
   const root = realish(appRoot);
-  const dir = realish(options.dir ?? defaultWorktreeDir(root, agent));
   const force = !!options.force;
+  const deleteUnlanded = !!options.deleteUnlanded;
   const messages: string[] = [];
   const refuse = (...m: string[]): WorktreeRemoveResult => ({code: 1, messages: [...messages, ...m]});
 
-  const list = await worktreeList(root, run);
-  const app = list.worktrees.find((w) => w.dir === dir);
-  if (!app) return refuse(`No worktree of ${root} at ${dir}.`);
+  const list = await worktreeList(root, {all: true}, run);
   let branch: string | null = null;
   try {
     branch = list.base ? agentBranch(list.base, agent) : null;
   } catch (error) {
     return refuse((error as Error).message);
+  }
+  let app: AppWorktree | undefined;
+  if (options.dir) {
+    const dir = realish(options.dir);
+    app = list.worktrees.find((w) => w.dir === dir);
+    if (!app) return refuse(`No worktree of ${root} at ${dir}.`);
+  } else {
+    const defaultDir = realish(defaultWorktreeDir(root, agent));
+    app =
+      (branch ? list.worktrees.find((w) => w.branch === branch) : undefined) ??
+      (branch ? list.worktrees.find((w) => w.branch === null && w.packages.some((p) => p.branch === branch)) : undefined) ??
+      list.worktrees.find((w) => w.dir === defaultDir);
+    if (!app) {
+      return refuse(
+        `No worktree of ${root} for ${agent}: none on ${branch ?? `<base>--${agent}`}, nor at ${defaultDir}.`,
+        'Pass its directory with --dir; `linked worktree list` shows the worktrees.',
+      );
+    }
   }
 
   const items: {label: string; repoDir: string; dir: string; branch: string | null; landed: boolean | null; ours: string[]}[] = [
@@ -499,19 +584,25 @@ export async function worktreeRemove(
     },
   ];
 
-  if (!force) {
-    const problems: string[] = [];
-    for (const it of items) {
-      if (it.landed === false) problems.push(`${it.label}: ${it.branch} has not landed in ${list.base}.`);
-      const status = run('git', ['status', '--porcelain'], {cwd: it.dir});
-      const own = status.stdout
-        .split('\n')
-        .filter(Boolean)
-        .filter((line) => !it.ours.includes(line.slice(3).replace(/\/$/, '')));
-      if (status.status !== 0) problems.push(`${it.label}: git status failed in ${it.dir}: ${failed(status)}`);
-      else if (own.length) problems.push(`${it.label}: ${it.dir} has changes: ${own.map((l) => l.trim()).join(', ')}`);
+  const problems: string[] = [];
+  for (const it of items) {
+    if (it.landed === false && !force && !deleteUnlanded) {
+      problems.push(`${it.label}: ${it.branch} has not landed in ${list.base}.`);
     }
-    if (problems.length) return refuse(...problems, 'Nothing was removed (--force removes it anyway).');
+    if (force) continue;
+    const status = run('git', ['status', '--porcelain'], {cwd: it.dir});
+    const own = status.stdout
+      .split('\n')
+      .filter(Boolean)
+      .filter((line) => !it.ours.includes(line.slice(3).replace(/\/$/, '')));
+    if (status.status !== 0) problems.push(`${it.label}: git status failed in ${it.dir}: ${failed(status)}`);
+    else if (own.length) problems.push(`${it.label}: ${it.dir} has changes: ${own.map((l) => l.trim()).join(', ')}`);
+  }
+  if (problems.length) {
+    return refuse(
+      ...problems,
+      'Nothing was removed. --force removes it anyway and keeps unlanded branches; --delete-unlanded deletes them too.',
+    );
   }
 
   for (const it of items) {
@@ -544,12 +635,18 @@ export async function worktreeRemove(
       if (it.branch) messages.push(`${it.label}: kept ${it.branch} (not ${branch ?? 'an agent branch'}).`);
       continue;
     }
-    if (!it.landed && !force) continue;
+    const sha = run('git', ['rev-parse', '--short', `refs/heads/${branch}`], {cwd: it.repoDir}).stdout.trim();
+    if (!it.landed && !deleteUnlanded) {
+      messages.push(`${it.label}: kept ${branch} at ${sha} (not landed)`);
+      continue;
+    }
     const r = run('git', ['branch', it.landed ? '-d' : '-D', branch], {cwd: it.repoDir});
     messages.push(
-      r.status === 0
-        ? `${it.label}: deleted ${branch}${it.landed ? '' : ' (not landed)'}`
-        : `${it.label}: could not delete ${branch}: ${failed(r)}`,
+      r.status !== 0
+        ? `${it.label}: could not delete ${branch}: ${failed(r)}`
+        : it.landed
+          ? `${it.label}: deleted ${branch}`
+          : `${it.label}: deleted ${branch} (was ${sha}, not landed)`,
     );
   }
   return {code: 0, messages};
@@ -593,18 +690,19 @@ export async function runWorktreeAdd(
 }
 
 /** The commander action for `worktree list`. */
-export async function runWorktreeList(options: {json?: boolean}): Promise<void> {
-  const list = await worktreeList(findAppRoot(process.cwd()));
-  process.stdout.write((options.json ? JSON.stringify(list, null, 2) : formatWorktreeList(list)) + '\n');
+export async function runWorktreeList(options: {json?: boolean; all?: boolean}): Promise<void> {
+  const list = await worktreeList(findAppRoot(process.cwd()), {all: options.all});
+  process.stdout.write((options.json ? JSON.stringify(list, null, 2) : formatWorktreeList(list, {all: options.all})) + '\n');
 }
 
 /** The commander action for `worktree remove`. */
 export async function runWorktreeRemove(
   agent: string,
-  options: {force?: boolean; dir?: string},
+  options: {force?: boolean; deleteUnlanded?: boolean; dir?: string},
 ): Promise<void> {
   const result = await worktreeRemove(findAppRoot(process.cwd()), agent, {
     force: options.force,
+    deleteUnlanded: options.deleteUnlanded,
     dir: resolveDir(options.dir),
   });
   const write = result.code === 0 ? console.log : console.error;

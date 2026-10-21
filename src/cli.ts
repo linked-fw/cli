@@ -664,8 +664,9 @@ worktree
 worktree
   .command('list')
   .description(
-    'Run in an app. Every worktree of the app root with its nested package worktrees: branch or detached, and whether each branch has landed in the base.',
+    "Run in an app. The app's agent worktrees (on <base>--<agent>, or detached with a package worktree on one) with their nested package worktrees: branch or detached, and whether each branch has landed in the base.",
   )
+  .option('--all', 'List every worktree of the app, not only agent worktrees.')
   .option('--json', 'Print the base and the worktrees as JSON.')
   .action(async (options) => {
     const {runWorktreeList} = await import('./commands/worktree.js');
@@ -675,10 +676,11 @@ worktree
 worktree
   .command('remove <agent>')
   .description(
-    "Run in an app. Remove the agent's package worktrees, then its app worktree, then delete its landed agent branches. Refuses, removing nothing, while a branch has not landed or a worktree has changes.",
+    "Run in an app. Find the agent's app worktree by its branch <base>--<agent> (a detached one by its package worktrees on that branch, or at the default dir), remove its package worktrees, then the app worktree, then delete its landed agent branches. Refuses, removing nothing, while a branch has not landed or a worktree has changes.",
   )
-  .option('--force', 'Remove anyway, and delete unlanded agent branches.')
-  .option('--dir <path>', 'The worktree directory, when it is not the default.')
+  .option('--force', 'Remove even when a worktree has changes or a branch has not landed; unlanded branches are kept and their sha printed.')
+  .option('--delete-unlanded', 'Also delete agent branches that have not landed (git branch -D), printing the sha each was at.')
+  .option('--dir <path>', 'The app worktree directory, instead of finding it by its branch.')
   .action(async (agent: string, options) => {
     const {runWorktreeRemove} = await import('./commands/worktree.js');
     return runWorktreeRemove(agent, options);

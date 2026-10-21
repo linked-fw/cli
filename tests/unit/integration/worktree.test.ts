@@ -203,6 +203,94 @@ describe('linked worktree add', () => {
     }
   });
 
+  test('add rejects an invalid agent name before changing anything', async () => {
+    const app = makeApp();
+    const result = await worktreeAdd(app.root, 'a..b', {with: ['core']});
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /invalid agent name/);
+    assert.equal(fs.existsSync(path.join(app.container, 'wt')), false);
+    assert.equal(branchOf(app.core), 'main');
+    assert.equal(hasBranch(app.core, 'overhaul'), false);
+    for (const repo of [app.root, app.server, app.core]) assert.equal(worktreeCount(repo), 1);
+  });
+
+  test('rollback when setTarget throws', async () => {
+    const app = makeApp();
+    const real = makeRun(app.root);
+    const run: Run = (cmd, args, opts) =>
+      args[0] === 'config' && args[1] === 'branch.overhaul.linked-target' && opts?.cwd === app.core
+        ? {status: 1, stdout: '', stderr: 'simulated config failure'}
+        : real(cmd, args, opts);
+    const result = await worktreeAdd(app.root, 'a1', {with: ['server', 'core']}, run);
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /simulated config failure/);
+    assert.match(result.messages.join('\n'), /Undid/);
+    assert.equal(fs.existsSync(app.dir), false);
+    assert.equal(branchOf(app.core), 'main');
+    assert.equal(hasBranch(app.core, 'overhaul'), false);
+    for (const repo of [app.root, app.server, app.core]) {
+      assert.equal(hasBranch(repo, 'overhaul--a1'), false);
+      assert.equal(worktreeCount(repo), 1);
+    }
+  });
+
+  test('rollback never removes a dir it did not create', async () => {
+    const app = makeApp();
+    const real = makeRun(app.root);
+    // Another run makes the dir between the checks and this run's worktree add.
+    const run: Run = (cmd, args, opts) => {
+      if (args[0] === 'worktree' && args[1] === 'add' && opts?.cwd === app.root) {
+        fs.mkdirSync(app.dir, {recursive: true});
+        fs.writeFileSync(path.join(app.dir, 'theirs.txt'), 'x');
+      }
+      return real(cmd, args, opts);
+    };
+    const result = await worktreeAdd(app.root, 'a1', {with: ['core']}, run);
+    assert.notEqual(result.code, 0);
+    assert.ok(fs.existsSync(path.join(app.dir, 'theirs.txt')));
+    assert.equal(branchOf(app.core), 'main');
+    assert.equal(hasBranch(app.core, 'overhaul'), false);
+  });
+
+  test('rollback keeps a base branch that moved', async () => {
+    const app = makeApp();
+    const real = makeRun(app.root);
+    // Someone commits on the core's new overhaul, then the core worktree fails.
+    const run: Run = (cmd, args, opts) => {
+      if (args[0] === 'worktree' && args[1] === 'add' && opts?.cwd === app.core) {
+        git(app.core, 'commit', '-q', '--allow-empty', '-m', 'another agent');
+        return {status: 1, stdout: '', stderr: 'simulated failure'};
+      }
+      return real(cmd, args, opts);
+    };
+    const moved = await worktreeAdd(app.root, 'a1', {with: ['core']}, run);
+    assert.notEqual(moved.code, 0);
+    assert.match(moved.messages.join('\n'), /kept overhaul at [0-9a-f]+: it moved/);
+    assert.equal(branchOf(app.core), 'main');
+    assert.equal(hasBranch(app.core, 'overhaul'), true);
+    assert.equal(await getTarget(app.core, 'overhaul'), 'main');
+    assert.equal(fs.existsSync(app.dir), false);
+  });
+
+  test('.env links to the realpath', async () => {
+    const app = makeApp();
+    const shared = path.join(app.container, 'shared.env');
+    fs.renameSync(path.join(app.root, '.env'), shared);
+    fs.symlinkSync(shared, path.join(app.root, '.env'));
+    const result = await worktreeAdd(app.root, 'a1');
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assert.equal(fs.readlinkSync(path.join(app.dir, '.env')), fs.realpathSync(shared));
+    assert.match(result.messages.join('\n'), /node_modules -> /);
+  });
+
+  test('the start command quotes a dir with spaces', async () => {
+    const app = makeApp();
+    const dir = path.join(app.container, 'my wt', 'a1');
+    const result = await worktreeAdd(app.root, 'a1', {dir, port: 4062});
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assert.equal(result.startCommand, `cd '${dir}' && PORT=4062 npm run start:local`);
+  });
+
   test('without an integration branch the base is the root branch', async () => {
     const app = makeApp();
     git(app.root, 'switch', '-q', 'main');
@@ -243,12 +331,28 @@ describe('linked worktree list', () => {
 
   test('a detached app worktree has no landed state', async () => {
     const app = makeApp();
-    assert.equal((await worktreeAdd(app.root, 'a1', {appDetached: true})).code, 0);
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server'], appDetached: true})).code, 0);
     const [wt] = (await worktreeList(app.root)).worktrees;
     assert.equal(wt.branch, null);
     assert.equal(wt.landed, null);
     assert.equal(wt.agent, 'a1');
     assert.equal(wt.agentWorktree, true);
+  });
+
+  test('list hides non-agent worktrees; --all shows them', async () => {
+    const app = makeApp();
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server']})).code, 0);
+    const other = path.join(app.container, 'other');
+    git(app.root, 'worktree', 'add', '-q', '-b', 'feature-x', other, 'overhaul');
+    const bare = path.join(app.container, 'bare-detached');
+    git(app.root, 'worktree', 'add', '-q', '--detach', bare, 'overhaul');
+
+    const list = await worktreeList(app.root);
+    assert.deepEqual(list.worktrees.map((w) => w.agent), ['a1']);
+    const all = await worktreeList(app.root, {all: true});
+    assert.deepEqual(all.worktrees.map((w) => w.dir).sort(), [app.dir, bare, other].sort());
+    assert.ok(all.worktrees.every((w) => w.dir !== app.root));
+    assert.equal(all.worktrees.find((w) => w.dir === other)?.agentWorktree, false);
   });
 });
 
@@ -301,15 +405,61 @@ describe('linked worktree remove', () => {
     assert.ok(fs.lstatSync(path.join(app.root, 'node_modules')).isDirectory());
   });
 
-  test('remove --force removes unlanded worktrees and deletes their branches', async () => {
+  test('remove --force keeps an unlanded branch and prints its sha', async () => {
     const app = makeApp();
     assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server']})).code, 0);
     git(app.dir, 'commit', '-q', '--allow-empty', '-m', 'app work');
+    const sha = git(app.root, 'rev-parse', '--short', 'overhaul--a1');
     fs.writeFileSync(path.join(app.dir, 'notes.txt'), 'x');
     const result = await worktreeRemove(app.root, 'a1', {force: true});
     assert.equal(result.code, 0, result.messages.join('\n'));
     assert.equal(fs.existsSync(app.dir), false);
-    assert.equal(hasBranch(app.root, 'overhaul--a1'), false);
+    assert.equal(worktreeCount(app.root), 1);
+    assert.equal(hasBranch(app.root, 'overhaul--a1'), true);
+    assert.ok(result.messages.includes(`app: kept overhaul--a1 at ${sha} (not landed)`), result.messages.join('\n'));
+    // The server branch had nothing of its own, so it counts as landed and goes.
     assert.equal(hasBranch(app.server, 'overhaul--a1'), false);
+  });
+
+  test('remove --delete-unlanded deletes it', async () => {
+    const app = makeApp();
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server']})).code, 0);
+    git(app.dir, 'commit', '-q', '--allow-empty', '-m', 'app work');
+    const sha = git(app.root, 'rev-parse', '--short', 'overhaul--a1');
+    const result = await worktreeRemove(app.root, 'a1', {deleteUnlanded: true});
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assert.equal(fs.existsSync(app.dir), false);
+    assert.equal(hasBranch(app.root, 'overhaul--a1'), false);
+    assert.ok(result.messages.includes(`app: deleted overhaul--a1 (was ${sha}, not landed)`), result.messages.join('\n'));
+  });
+
+  test('remove finds a worktree outside the default dir', async () => {
+    const app = makeApp();
+    const dir = path.join(app.container, 'wt', 'wt', 'a1');
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server'], dir})).code, 0);
+    const result = await worktreeRemove(app.root, 'a1');
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assert.equal(fs.existsSync(dir), false);
+    assert.equal(worktreeCount(app.root), 1);
+    assert.equal(worktreeCount(app.server), 1);
+  });
+
+  test('remove finds a detached worktree by its package worktrees', async () => {
+    const app = makeApp();
+    const dir = path.join(app.container, 'elsewhere', 'a1');
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server'], appDetached: true, dir})).code, 0);
+    const result = await worktreeRemove(app.root, 'a1');
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assert.equal(fs.existsSync(dir), false);
+    assert.equal(hasBranch(app.server, 'overhaul--a1'), false);
+  });
+
+  test('remove with nothing to find names --dir and worktree list', async () => {
+    const app = makeApp();
+    const result = await worktreeRemove(app.root, 'a1');
+    assert.notEqual(result.code, 0);
+    const text = result.messages.join('\n');
+    assert.match(text, /--dir/);
+    assert.match(text, /linked worktree list/);
   });
 });
