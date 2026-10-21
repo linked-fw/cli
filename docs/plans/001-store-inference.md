@@ -3,14 +3,12 @@ summary: >
   Sub-plan of CN plan 070 (the store infers; ontology data in every app dataset) for
   `linked-fw/cli`: L1, the package build ships Turtle (`src/**/*.ttl` copied to `lib/esm/`, the app
   backend build copies the app's own `src/**/*.ttl` next to its compiled modules, the ontology
-  scaffold in Turtle, the CLI e2e on the inferring Fuseki image); G1, plan 067's commands (repo
-  model, load the CLI once, start from a worktree, `doctor resolve`, `branch status/start`,
-  `worktree add/list/remove`, `release plan`), adapted to plan 070's integration-worktree layout;
-  L2 (post-build shape check) is detailed when its wave starts. Work lands on `store-inference`.
+  scaffold in Turtle, the CLI e2e on the inferring Fuseki image); L2 (post-build shape check) is
+  detailed when its wave starts. Work lands on `store-inference`.
 status: Plan
 ---
 
-# 001 — Store inference: Turtle in the build; plan 067's commands
+# 001 — Store inference: Turtle in the build
 
 Sub-plan of CN's master plan
 [070](https://github.com/Semantu/create-now/blob/store-inference/docs/plans/070-store-inference-and-ontology-data.md)
@@ -21,22 +19,22 @@ cli steps. Step agents start at tasks mode, seed their own plan doc from their s
 do not redesign: when the code contradicts this file, stop and report.
 
 Integration branch: `store-inference` (worktree `~/web/wt/070/packages-local/_linked-cli`).
-Records: L1 → report 024, L2 → report 025, G1 → report 026. Every step adds a **minor**
+Records: L1 → report 024, L2 → report 025. Every step adds a **minor**
 changeset (`npx changeset`) at landing.
 
-**Shared files.** L1 and G1 run in wave 1 in parallel; L2 runs in wave 4.
+**Shared files.** L1 runs in wave 1; L2 runs in wave 4. Plan 067's commands (G1) left this plan on
+2026-10-21: another agent runs plan 067; the work started here is on the pushed branch
+`store-inference--G1` (tip 7e68bea, P0-P6 committed, not landed).
 
-| File | L1 | G1 | L2 |
-|---|---|---|---|
-| `src/cli-methods.ts` | copy step in `planBuildSteps` (3165-3198), `createOntology` (1396-1483), `buildBackend` (2200-2241) | — | `planBuildSteps` (a new step after 'Checking shapes/index', ~3290) |
-| `src/app-release/build-backend.ts` | a Turtle copy next to `copyBackendStylesheets` (525-540) | — | — |
-| `src/cli.ts` | — | new commands `doctor`, `branch`, `worktree`, `release` (near `app-doctor` 588-596, `localize` 521-569) | `--skip-shape-check` on `build` (349) |
-| `src/vite-config.ts` | only if the dev-SSR measurement fails (see L1 Pitfalls) | `ssrNoExternal` (660-668), `createViteConfig` config (739/770) | — |
-| `README.md`, `CHANGELOG` | build section | commands section | build section |
+| File | L1 | L2 |
+|---|---|---|
+| `src/cli-methods.ts` | copy step in `planBuildSteps` (3165-3198), `createOntology` (1396-1483), `buildBackend` (2200-2241) | `planBuildSteps` (a new step after 'Checking shapes/index', ~3290) |
+| `src/app-release/build-backend.ts` | a Turtle copy next to `copyBackendStylesheets` (525-540) | — |
+| `src/cli.ts` | — | `--skip-shape-check` on `build` (349) |
+| `src/vite-config.ts` | only if the dev-SSR measurement fails (see L1 Pitfalls) | — |
+| `README.md`, `CHANGELOG` | build section | build section |
 
-Each step rebases onto `store-inference` before landing (master §How to use, 2). If L1's dev-SSR
-measurement needs a `vite-config.ts` change, L1 tells the master before editing it, since G1's P1
-and P2 edit that file in the same wave.
+Each step rebases onto `store-inference` before landing (master §How to use, 2).
 
 ## Contracts
 
@@ -210,7 +208,7 @@ So the proposal is both halves: keep packages external (no change) and copy the 
 | M5 | the tarball carries the data | `$LINKED build` then `npm pack --dry-run` in a fixture package with `src/data/x.ttl` | lists `lib/esm/data/x.ttl` |
 
 If M3 fails (Vite rewrites `import.meta.url` for bundled SSR modules), stop and report: the fix is
-in `vite-config.ts`, which G1 edits in the same wave. Proposed contract text, **adopted in the
+in `vite-config.ts`. Proposed contract text, **adopted in the
 master plan** in its own wording (the last bullet of §Ontology data files and loader above):
 
 > - `npx linked build` copies `src/**/*.ttl` into `lib/esm/` (so `src/data/x.ttl` →
@@ -335,116 +333,6 @@ tests, 4.9 s; `npm run test:unit` 870 tests, 21.8 s; CN's `appProjectPackages.te
 5.4 s. CN's landing changes two assertions in that test (lines 56 and 63, not one) and arch-03's
 package tree. Report 024.
 
-## G1 — plan 067's commands
-
-**Depends on:** nothing (wave 1, parallel with L1); before G2.
-
-**Goal:** the integration-branch workflow plan 070 runs by hand becomes CLI commands any linked
-app can use: `linked doctor resolve`, `linked branch status|start`, `linked worktree
-add|list|remove`, `linked release plan`, plus the two fixes a worktree needs to start cleanly and
-the CLI loaded once in dev.
-
-**Scope:** plan 067 §Tasks P0-P6 (CN `docs/plans/067-integration-branches-and-worktrees.md`
-217-490), one phase each, as written there, **except** what changed since 067 was written
-(2026-10-16), below. P7-P9 are G2.
-
-**What changed since plan 067:**
-
-1. **The layout.** 067's model (§The model 1, 7, 8) switches the app's main checkout and its
-   `packages-local/` checkouts to the integration branch; `worktree add --with` switches a main
-   checkout that joins midway. Plan 070 (decisions 25-26) keeps **every main checkout on `main`**
-   and puts the integration branch in a worktree set: `~/web/wt/070/` is a CN worktree on
-   `store-inference` (symlinked `node_modules` and `.env`) with each framework repository's
-   worktree on its own `store-inference` nested in its `packages-local/`; agents get
-   `~/web/wt/070-<step>/` sets on `store-inference--<step>`, landing with
-   `git -C ~/web/wt/070/<path> merge --ff-only`. G1 needs the master's ruling on which model the
-   commands implement. Proposed (implement 070's, since decision 26 makes it the way of working):
-   - `branch start <name> --target <t> [--dir <path>] [pkgs…]` creates the integration worktree
-     set: an app worktree on `<name>` (from `<t>`) at `--dir` (default
-     `<parent of app root>/wt/<name>`), `node_modules` and gitignored `.env*` symlinked, a nested
-     worktree per named package on `<name>`, and `branch.<name>.linked-target` in each repository.
-     It never switches a main checkout.
-   - `integrationOf(appRoot)`: the branch of the worktree `appRoot` is in, when that branch has a
-     target. `listRepos` accepts a `.git` **file** (a worktree), not only a directory (067's skip rule
-     applies only when `.git` is absent).
-   - `worktree add <agent>` runs from the integration worktree; default dir
-     `<parent of integration dir>/<integration dir name>-<agent>` (`~/web/wt/070-<agent>`);
-     `--with` a package not yet nested adds its integration worktree first (branch from target in
-     that repository), instead of switching its main checkout (067 decision 7).
-   - Landed = ancestor of the integration branch (as in 067). `remove` deletes agent worktrees and
-     branches only.
-   - 067 §The model 8 "every repo checks out its target" becomes "remove the integration worktree
-     set and delete the branch".
-   - `~/web/wt/070` was made by hand: the trial (G2/P9) first sets
-     `git config branch.store-inference.linked-target main` in each repository.
-2. **The `run` seam is synchronous** and never throws: `type Run = (cmd, args, opts?) =>
-   RunResult` (`src/localize/run.ts:28`; `RunResult = {status, stdout, stderr}` at 22; a missing
-   binary is status 1 with the error in stderr). P0's functions are synchronous (not Promises),
-   and P6's "`gh` missing" test fakes a non-zero status with `ENOENT` in stderr, not a throw.
-3. **Line drift in `src/vite-config.ts`** (#272, #284-#291, #305): `ssrNoExternal` 660-668 (067:
-   ~608), now `ssrNoExternal(workspaces, dependents = [])`, adding `SSR_ENTRY_PACKAGES`
-   (`['@_linked/server']`, 641); `createViteConfig` 739, its config object 770 (067: 687/718);
-   `discoverWorkspaces` 424-485 (067: 421-484); `linked:resolve-workspace-ts` ~813-847 (067:
-   749-795). `hooks/drift.cjs` `driftProblems` 75-97 is unchanged.
-4. **Standalone mode already leaves the CLI external** (`STANDALONE_SSR_BUNDLED`,
-   `vite-config.ts:647`, report 016; asserted in `tests/unit/ssrExternal.test.ts:165-185`). P1 is
-   for workspace mode only.
-5. **`app-doctor` exists** (`src/cli.ts:588-596`, `src/commands/app-doctor.ts`). `doctor resolve`
-   is a new top-level `doctor` command with a `resolve` subcommand; no command uses commander
-   subcommands yet, so P3 sets the pattern P4-P6 reuse (`branch`, `worktree`, `release`).
-6. **Reusable since 067:** `src/utils/ssrBundled.ts` (`isBundled` 15, `packageNameOf` 9) answers
-   P3's "bundled by Vite"; `src/installed-packages.ts` (`discoverInstalledLinkedPackages` 93)
-   lists installed `@_linked/*`; the dual-copy guard (`src/utils/dual-copy-guard.ts`, report 015)
-   already prints `TWO COPIES` at runtime, so P3's `two-copies` flag uses the same word.
-   `src/localize/members.ts` (`localMembers` 26) lists `packages-local/*` members.
-7. **Three Playwright specs**, not one: `create-app` (Docker; after L1 the image), `build-app`,
-   `dual-copy`. 067's "cli full gate: `npm test`" now needs Docker and `linked-fuseki:dev`.
-8. **Worktree-aware code exists:** `src/localize/app-root.ts:8` treats a git worktree nested in an
-   app (`<app>/.claude/worktrees/<wt>`) as its own app; `git-hooks.ts` (64-65, 122-139) and
-   `localize.ts:571-573` warn that hooks are shared by worktrees. `worktree add` must not run
-   localize or install hooks; its "refuse a dir under a workspace glob" check must still allow
-   `.claude/worktrees/`.
-9. **The CLI a worktree runs** is the main checkout's (see §Which CLI runs in the layout), so
-   every runtime check of a new command runs `$LINKED <cmd>` from the G1 worktree's build.
-
-**Phases, in this repository** (one commit each; P0 lands first, then any order; P4-P6 need P0):
-
-| Phase | 067 task | Files | Verify (quick gate plus) |
-|---|---|---|---|
-| 1 | P0 repo model | new `src/integration/repos.ts`; `tests/unit/integration/repos.test.ts` | 067 P0's cases, synchronous, plus "a `packages-local/x` whose `.git` is a file is listed" |
-| 2 | P1 load the CLI once | `src/vite-config.ts:660-668`; `tests/unit/ssrExternal.test.ts` | 067 P1's unit case; runtime: CN from `~/web/wt/070-G1` with the resolve logger, `lifecycle.js`/`utils.js` Node loads of `_linked-cli/lib/esm` only; `npx vitest run src/backend/provisioners/appProjectPackages.test.ts` |
-| 3 | P2 start from a worktree | `src/vite-config.ts` config at 770 (`cacheDir`); `hooks/drift.cjs:75-97`; new `tests/unit/viteCacheDir.test.ts`; `tests/unit/localize/drift.test.ts` | 067 P2's cases; runtime: two starts of CN in `~/web/wt/070-G1`, no `[localize] drift`, no re-optimize, `.vite-cache/deps` exists, main's `node_modules/.vite/deps` mtime unchanged (`stat -f %m`) |
-| 4 | P3 `doctor resolve` | new `src/commands/doctor.ts`; `src/cli.ts` (near 588); `tests/unit/doctorResolve.test.ts` | 067 P3's cases; `$LINKED doctor resolve` in `~/web/create_now` exits 0, and in `~/web/wt/070` shows `@_linked/cli`, `core`, `fuseki` as `overlay` at the nested paths |
-| 5 | P4 `branch status/start` | new `src/commands/branch.ts`; `tests/unit/integration/branch.test.ts` | 067 P4's cases rewritten for item 1 (start creates the worktree set; main checkouts stay on `main`; a dirty repository refuses before anything is created); `$LINKED branch status` in `~/web/wt/070` lists every nested repository on `store-inference` |
-| 6 | P5 `worktree add/list/remove` | new `src/commands/worktree.ts`; `tests/unit/integration/worktree.test.ts` | 067 P5's cases with item 1's defaults; runtime: from `~/web/wt/070`, `$LINKED worktree add g1probe --with cli --app-detached --port <G1 port>`, start the printed command, `Up and running`, `$LINKED doctor resolve` shows the overlay, `$LINKED worktree remove g1probe --force` |
-| 7 | P6 `release plan` | new `src/commands/release.ts`; `tests/unit/integration/releasePlan.test.ts` | 067 P6's cases (`gh` missing per item 2); `$LINKED release plan` in `~/web/wt/070` orders fuseki, core, cli before CN |
-
-**Verify (whole step):** each phase's row; `npx linked build` exits 0; `npm run test:unit`.
-
-**Done when:** the seven phases are in; every command has `--help` and a `--json` where 067 says
-so; the runtime checks are quoted in report 026; README documents the commands; minor changeset.
-
-**Pitfalls:**
-- Runtime checks that boot CN use their own port and their own dataset: `scripts/backup-cn-state.sh
-  --yes`, `scripts/restore-fuseki-dataset.sh <cn-main dump> cn-wt-g1 --yes`,
-  `FUSEKI_DATASET=cn-wt-g1`, dropped afterwards (master §Rules, isolation). 067's "worktrees share
-  cn-main" does not hold for this plan.
-- Never `git switch` a main checkout in a test or runtime check; tests use tmp repositories.
-- `git config branch.<b>.linked-target` is shared by every worktree of a repository (one config):
-  correct, and tests should assert it is read from a worktree.
-- P1 changes what CN loads in dev for every developer at release: the CN boot check is required.
-
-**Architecture:** CN plan 067 (§The model, §Running a second CN backend, §Tasks); plan 070
-decisions 25-26 and §How to use; cli `docs/localize.md`; cli reports 011, 013, 015, 016.
-
-**Tests:**
-- Quick gate (under 2 min), after each phase: `npx jest --config jest.config.cjs <the phase's test
-  files> tests/unit/discoverWorkspaces.test.ts tests/unit/ssrExternal.test.ts`; `npx linked build`.
-- Full gate, before landing: `npm run test:unit`; `npx playwright test --config playwright.config.ts
-  tests/e2e/dual-copy.spec.ts tests/e2e/build-app.spec.ts` (the create-app spec too when Docker
-  and `linked-fuseki:dev` are available; it is L1's).
-
-**Size:** large, 7 phases. **Changeset:** minor. **Record:** report 026.
 
 ## L2 — the post-build shape check
 
@@ -462,9 +350,6 @@ report 025; changeset minor.
 - [x] L1 phase 2 — scaffold in Turtle; CN's `appProjectPackages.test.ts` updated
 - [ ] L1 phase 3 — CLI e2e on the image
 - [ ] L1 landed on `store-inference` (commit: )
-- [ ] G1 layout ruling (item 1) received from the master
-- [ ] G1 phases 1-7 (report 026)
-- [ ] G1 landed on `store-inference` (commit: )
 - [ ] L2 detail written (wave 4)
 - [ ] L2 landed (report 025, commit: )
 - [ ] Release PR (R): link
