@@ -640,6 +640,52 @@ export async function resolveSourceSibling(
 export const SSR_ENTRY_PACKAGES = ['@_linked/server'];
 
 /**
+ * Packages Vite's SSR runner never loads, even from source: the CLI process
+ * already runs `@_linked/cli` from `lib/`, so bundling it gives a second copy
+ * whose module state is not shared. Its imports go to Node, whose `./*` export
+ * maps them to the `lib/esm` files the CLI loaded. They are also listed in
+ * `ssr.external`: Vite only externalizes a package that resolves outside
+ * `node_modules` (a workspace checkout) when `ssr.external` names it, and an
+ * entry handed to `ssrLoadModule` goes through `ssrNodeShim`.
+ */
+export const SSR_NODE_PACKAGES = ['@_linked/cli'];
+
+/** True for a `SSR_NODE_PACKAGES` name or one of its subpaths. */
+export function isSsrNodeSpecifier(id: string): boolean {
+  return SSR_NODE_PACKAGES.some((name) => id === name || id.startsWith(name + '/'));
+}
+
+const SSR_NODE_SHIM = '\0linked-ssr-node:';
+
+/**
+ * Vite externalizes `SSR_NODE_PACKAGES` only where a transformed module imports
+ * them. A specifier handed to `ssrLoadModule` itself is always transformed, so
+ * the plugin gives it this module instead. For a subpath it re-exports Node's
+ * copy (its bare import is external). For the package root it is empty: the
+ * only caller is `LinkedServer`, which imports every linked package whole so
+ * its shapes register, and the CLI has none. Node's copy of the root would
+ * also load the release tooling, whose `@_linked/core` import is a second copy
+ * of core in an app that has core as a source workspace.
+ */
+export function ssrNodeShim(id: string): {id: string; code: string} {
+  const code = SSR_NODE_PACKAGES.includes(id) ? 'export {};\n' : `export * from ${JSON.stringify(id)};\n`;
+  return {id: SSR_NODE_SHIM + id, code};
+}
+
+/** The `ssr.external` allowlist; see the comment at `ssr` in `createViteConfig`. */
+const SSR_EXTERNAL = ['react', 'react-dom', 'react-dom/server', 'react-router-dom', 'scheduler', 'express'];
+
+/** `ssr.external` for dev and for a build: dev adds `SSR_NODE_PACKAGES`. */
+export function ssrExternal(isDev: boolean): string[] {
+  return isDev ? [...SSR_EXTERNAL, ...SSR_NODE_PACKAGES] : [...SSR_EXTERNAL];
+}
+
+/** The source workspaces the SSR runner loads: all but `SSR_NODE_PACKAGES`. */
+export function ssrBundledWorkspaces<T extends {name: string}>(workspaces: T[]): T[] {
+  return workspaces.filter((w) => !SSR_NODE_PACKAGES.includes(w.name));
+}
+
+/**
  * Standalone dev SSR: every `@_linked/*` package except `@_linked/core` and
  * `@_linked/cli`. The lookahead is anchored, so a name that only starts with
  * `core` or `cli` (`@_linked/core-x`) is bundled.
@@ -653,7 +699,8 @@ export const STANDALONE_SSR_BUNDLED = /^@_linked\/(?!(core|cli)$)/;
  * against the bare package name, so subpath imports (`pkg/shapes/Foo`) match too.
  * Installed packages that depend on a workspace (`dependents`, from
  * `workspaceDependents`) are bundled too, so they share the Vite-loaded workspace,
- * and `SSR_ENTRY_PACKAGES` are bundled.
+ * and `SSR_ENTRY_PACKAGES` are bundled. `SSR_NODE_PACKAGES` are not, even as
+ * workspaces.
  * Standalone (no workspaces): every `@_linked/*` but core and the CLI
  * (`STANDALONE_SSR_BUNDLED`; see the comment at `noExternal` in `createViteConfig`).
  */
@@ -664,7 +711,8 @@ export function ssrNoExternal(
   if (workspaces.length === 0) {
     return [STANDALONE_SSR_BUNDLED];
   }
-  return [...new Set([...workspaces.map((w) => w.name), ...dependents, ...SSR_ENTRY_PACKAGES])];
+  const names = ssrBundledWorkspaces(workspaces).map((w) => w.name);
+  return [...new Set([...names, ...dependents, ...SSR_ENTRY_PACKAGES])];
 }
 
 /**
@@ -814,8 +862,11 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
           ? ({
               name: 'linked:resolve-workspace-ts',
               enforce: 'pre',
-              async resolveId(id, importer) {
+              async resolveId(id, importer, options) {
                 if (id.startsWith('\0')) return null;
+
+                // SSR: `@_linked/cli` is Node's (see ssrNodeShim).
+                if (options?.ssr && isSsrNodeSpecifier(id)) return ssrNodeShim(id).id;
 
                 // `./Sibling.js` → `.tsx` / `.ts` from source, workspace or
                 // installed (see resolveSourceSibling).
@@ -843,6 +894,10 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
                 // ("Failed to load url @_linked/server/shapes/LinkedServer").
 
                 return null;
+              },
+              load(id) {
+                if (!id.startsWith(SSR_NODE_SHIM)) return null;
+                return ssrNodeShim(id.slice(SSR_NODE_SHIM.length)).code;
               },
             } as Plugin)
           : null,
@@ -958,14 +1013,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // (not regex). Standalone `@_linked/*` / `lincd-*` are NOT force-listed
         // here — they auto-externalize (or bundle) and resolve via the
         // standalone `import → lib/esm` conditions set below.
-        external: [
-          'react',
-          'react-dom',
-          'react-dom/server',
-          'react-router-dom',
-          'scheduler',
-          'express',
-        ],
+        // Dev also lists `SSR_NODE_PACKAGES` (the CLI), so a workspace checkout
+        // of it is loaded by Node, not bundled.
+        external: ssrExternal(isDev),
         // Vite 7 auto-externalizes node_modules packages for SSR (loading them
         // via Node → the `import`→`lib/esm` condition), which would bypass the
         // `linked:resolve-workspace-ts` resolver and create a SECOND module
@@ -1021,7 +1071,9 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // standalone list — which compiled a private `server-utils` into `lib/`,
         // so no app provider was `instanceof` the server's `ShapeProvider` and
         // `LinkedServer` dropped them all ("exports two generic backend providers").
-        noExternal: isDev ? ssrNoExternal(workspaces, await workspaceDependents(workspaces)) : [],
+        noExternal: isDev
+          ? ssrNoExternal(workspaces, await workspaceDependents(ssrBundledWorkspaces(workspaces)))
+          : [],
         // STANDALONE: the SSR module runner (`vite.ssrLoadModule`, used to
         // load LinkedServer + the app graph in commands/start.ts) has its OWN
         // condition list, defaulting to `resolve.conditions`. Set it

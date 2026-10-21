@@ -4,8 +4,12 @@ import path from 'path';
 import {
   createViteConfig,
   discoverWorkspaces,
+  isSsrNodeSpecifier,
+  ssrExternal,
+  ssrNodeShim,
   ssrNoExternal,
   SSR_ENTRY_PACKAGES,
+  SSR_NODE_PACKAGES,
   STANDALONE_SSR_BUNDLED,
   workspaceDependents,
 } from '../../src/vite-config';
@@ -79,6 +83,75 @@ describe('ssr.noExternal', () => {
     // (`resolve` itself now carries the dedupe list — see viteDedupe.test.ts.)
     expect(config.resolve.conditions).toBeUndefined();
     expect(config.ssr.resolve).toBeUndefined();
+    // The CLI is named in `ssr.external`, so Node loads even a workspace checkout of it.
+    expect(config.ssr.external).toContain('@_linked/cli');
+  });
+
+  // The CLI process runs `@_linked/cli` from lib/. Bundling a source checkout of it
+  // as well gave every dev process a second copy (LinkedServer's
+  // `@_linked/cli/lifecycle` and `@_linked/cli/utils` imports).
+  it('workspace mode leaves @_linked/cli external', async () => {
+    expect(SSR_NODE_PACKAGES).toEqual(['@_linked/cli']);
+    const noExternal = ssrNoExternal([{name: '@_linked/cli'}, {name: '@_linked/core'}]);
+    expect(noExternal).toContain('@_linked/core');
+    expect(noExternal).toContain('@_linked/server');
+    expect(noExternal).not.toContain('@_linked/cli');
+    expect(bundled(noExternal, '@_linked/cli')).toBe(false);
+    // Vite externalizes a package that resolves outside node_modules (a checkout)
+    // only when `ssr.external` names it.
+    expect(ssrExternal(true)).toContain('@_linked/cli');
+    expect(ssrExternal(false)).not.toContain('@_linked/cli');
+  });
+
+  // `LinkedServer` hands every linked package to `ssrLoadModule` by name, and Vite
+  // transforms such an entry even when its package is external.
+  it('the resolver gives an SSR entry of @_linked/cli a shim instead of its source', async () => {
+    writeJson(path.join(tmp, 'package.json'), {name: 'root', workspaces: ['packages/*']});
+    const cli = path.join(tmp, 'packages', 'cli');
+    sourcePkg(cli, {name: '@_linked/cli', linkedPackage: true});
+    fs.writeFileSync(path.join(cli, 'src', 'utils.ts'), 'export {};');
+    process.chdir(tmp);
+    const factory = createViteConfig() as any;
+    const config = await factory({command: 'serve', mode: 'development'});
+    const plugin = config.plugins.flat().find((p: any) => p?.name === 'linked:resolve-workspace-ts');
+
+    const shim = async (id: string) => {
+      const shimId = await plugin.resolveId.call({}, id, undefined, {ssr: true});
+      expect(shimId).toBe(ssrNodeShim(id).id);
+      expect(shimId.startsWith('\0')).toBe(true);
+      return plugin.load.call({}, shimId);
+    };
+    expect(await shim('@_linked/cli/utils')).toBe('export * from "@_linked/cli/utils";\n');
+    expect(await shim('@_linked/cli/lifecycle')).toBe('export * from "@_linked/cli/lifecycle";\n');
+    // The root is only imported whole for its shapes; Node's copy would load
+    // the release tooling and, through it, a Node copy of @_linked/core.
+    expect(await shim('@_linked/cli')).toBe('export {};\n');
+    // The browser still gets the source.
+    expect(await plugin.resolveId.call({}, '@_linked/cli/utils', undefined, {ssr: false})).toBe(
+      path.join(cli, 'src', 'utils.ts'),
+    );
+    expect(plugin.load.call({}, path.join(cli, 'src', 'utils.ts'))).toBeNull();
+
+    expect(isSsrNodeSpecifier('@_linked/cli/lifecycle')).toBe(true);
+    expect(isSsrNodeSpecifier('@_linked/cli-tools')).toBe(false);
+    expect(isSsrNodeSpecifier('@_linked/core')).toBe(false);
+  });
+
+  it('a cli workspace makes no installed package a dependent', async () => {
+    writeJson(path.join(tmp, 'package.json'), {
+      name: 'root',
+      workspaces: ['packages/*'],
+      dependencies: {'@_linked/cli': '*', 'uses-cli': '1'},
+    });
+    const cli = path.join(tmp, 'packages', 'cli');
+    sourcePkg(cli, {name: '@_linked/cli', linkedPackage: true});
+    link('@_linked/cli', cli);
+    publishedPkg('uses-cli', {dependencies: {'@_linked/cli': '1'}});
+    process.chdir(tmp);
+    const factory = createViteConfig() as any;
+    const config = await factory({command: 'serve', mode: 'development'});
+    expect(config.ssr.noExternal).toEqual(['@_linked/server']);
+    expect(config.ssr.external).toContain('@_linked/cli');
   });
 
   // Helpers for workspaceDependents fixtures.
@@ -159,6 +232,7 @@ describe('ssr.noExternal', () => {
     for (const pkg of ['@_linked/server-utils', '@_linked/react', '@_linked/core']) {
       expect(bundled(noExternal, pkg)).toBe(false);
     }
+    expect(config.ssr.external).not.toContain('@_linked/cli');
   });
 
   // Standalone: an external framework package (schema, primitives, auth) that
