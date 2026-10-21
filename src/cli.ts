@@ -641,6 +641,47 @@ branch
     return runBranchStart(name, packages, options);
   });
 
+const worktree = program
+  .command('worktree')
+  .description(
+    "An agent's worktree set, made from the integration set (`linked branch start`): a worktree of the app and of each framework package the agent changes, next to the integration set.",
+  );
+
+worktree
+  .command('add <agent>')
+  .description(
+    "Run in the integration set. Creates <integration dir>-<agent> (--dir to choose): a worktree of the app on <integration>--<agent> (detached at the integration tip with --app-detached), node_modules and the gitignored .env files linked to the main checkout's (never private keys), and a worktree on <integration>--<agent> of each --with package in its packages-local/. A package the integration set lacks joins it first: its worktree on the integration branch (made from the target) is nested in the integration set; no main checkout is switched. Refuses a directory under a workspace glob, a dirty joining checkout, or an existing agent branch, before creating anything. Prints the start command and how to land.",
+  )
+  .option('--with <packages>', 'Comma-separated packages the agent changes (npm name, or the packages-local directory).')
+  .option('--app-detached', 'The agent does not change the app: check it out detached at the integration tip.')
+  .option('--port <port>', 'The port for the printed start command.')
+  .option('--dataset <name>', 'A dataset of its own for the printed start command (FUSEKI_DATASET), with the clone commands when the app has them.')
+  .option('--dir <path>', 'Where the set goes (default <integration dir>-<agent>, or <parent>/wt/<agent> from a main checkout).')
+  .action(async (agent: string, options) => {
+    const {runWorktreeAdd} = await import('./commands/worktree.js');
+    return runWorktreeAdd(agent, options);
+  });
+
+worktree
+  .command('list')
+  .description("The agent sets of the integration branch you are on, with their nested package worktrees, each landed (merged into the integration branch) or not.")
+  .option('--json', 'Print the sets as JSON.')
+  .action(async (options) => {
+    const {runWorktreeList} = await import('./commands/worktree.js');
+    return runWorktreeList(options);
+  });
+
+worktree
+  .command('remove <agent>')
+  .description(
+    "Remove an agent's set: the nested package worktrees, then the app worktree, then the landed agent branches. Refuses while a branch is not landed.",
+  )
+  .option('--force', 'Remove even with unlanded branches or local changes; unlanded branches are kept.')
+  .action(async (agent: string, options) => {
+    const {runWorktreeRemove} = await import('./commands/worktree.js');
+    return runWorktreeRemove(agent, options);
+  });
+
 program
   .command('setup-publish')
   .description(
