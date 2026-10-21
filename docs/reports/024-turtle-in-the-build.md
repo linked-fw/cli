@@ -8,8 +8,8 @@ summary: >
   and workspace, client build, tarball): each module reads the Turtle beside its own file through
   `import.meta.url`. New ontology packages are scaffolded in Turtle (`src/data/<name>.ttl`,
   `loadData` through core's `loadOntologyFiles`), which also changes Create Now's generated project
-  packages. Part of CN plan 070 (sub-plan 001, step L1); the e2e on the inferring Fuseki image
-  follows.
+  packages. The CLI e2e runs its Fuseki on the inferring image with a `tdb2` dataset and asserts
+  the dataset infers. Part of CN plan 070 (sub-plan 001, step L1).
 ---
 
 # 024 — Turtle in the build
@@ -191,9 +191,46 @@ New and changed cases: `createPackageScaffold.test.ts` and `packageFiles.test.ts
 `owl:Ontology` line), `createInsidePackage.test.ts` (`create-ontology` in a package writes the three
 files, fills every variable and adds the register import).
 
+## The CLI e2e on the inferring image
+
+`tests/e2e/create-app.spec.ts` starts its testcontainer from `FUSEKI_IMAGE` (default
+`linked-fuseki:dev`, the image built from linked-fw/fuseki's `server/`; it was `stain/jena-fuseki`)
+on a random host port, creates the app's dataset with `dbType=tdb2` (a `mem` dataset gets the plain
+template and would not infer) and adds a test before the Person round-trip: insert
+`<urn:linked-e2e:A> rdfs:subClassOf <urn:linked-e2e:B> . <urn:linked-e2e:a> a <urn:linked-e2e:A>`
+through `/<ds>/update`, `ASK { <urn:linked-e2e:a> a <urn:linked-e2e:B> }` is true on `/<ds>/sparql`
+and false on `/<ds>/stored`, then delete the triples (the ASK is false again). Fuseki 6 answers a
+successful update with 204, so the check is `r.ok`.
+
+The app is still cloned from app-template's GitHub `main` and installed from npm, so this spec
+cannot show a template app reading its own Turtle; that assertion belongs to T1 and the release.
+
+Verify (fuseki `store-inference` 112f09f):
+
+```
+$ time docker build -q -t linked-fuseki:dev ~/web/wt/070/packages-local/_linked-fuseki/server
+sha256:93b22495b3ccc8866310597a39c741e53bbb38aa07f775357be1070d86411bc0        8.5 s
+$ time npx playwright test --config playwright.config.ts tests/e2e/create-app.spec.ts
+  ✓  1 tests/e2e/create-app.spec.ts:120:1 › the dataset infers over its stored rdfs:subClassOf hierarchy (5.2s)
+  ✓  2 tests/e2e/create-app.spec.ts:154:1 › Person fixture: add → edit → delete round-trip (15.0s)
+  2 passed (1.8m)        1:49.9 total
+```
+
+Full gate (cli worktree built with the integration CLI):
+
+```
+$ time npm run test:unit
+Test Suites: 80 passed, 80 total
+Tests:       870 passed, 870 total        51.6 s
+$ time npx playwright test --config playwright.config.ts
+  6 passed (2.4m)        2:23.8 total     (create-app 2, build-app, dual-copy 3)
+```
+
 ## Follow-ups
 
 - The scaffold's `@_linked/core` range (`defaults/package/package.json`, `^2.0`) must reach the
   core release that exports `ontology/loadOntologyFiles`, and `tests/template/package.full.test.ts`
   (installs from npm) passes only then: sub-plan 001, Release (R).
 - `tests/e2e/create-app.spec.ts` on the inferring Fuseki image: sub-plan 001, L1 phase 3.
+- The e2e's default image becomes the published `ghcr.io/linked-fw/fuseki:6.2.0-1` once F1's image
+  is released: sub-plan 001, Release (R).

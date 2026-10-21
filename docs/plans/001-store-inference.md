@@ -333,6 +333,13 @@ tests, 4.9 s; `npm run test:unit` 870 tests, 21.8 s; CN's `appProjectPackages.te
 5.4 s. CN's landing changes two assertions in that test (lines 56 and 63, not one) and arch-03's
 package tree. Report 024.
 
+**Outcome (phase 3 of 3).** `create-app.spec.ts` runs Fuseki from `FUSEKI_IMAGE` (default
+`linked-fuseki:dev`) with a `tdb2` dataset; a new test inserts `A rdfs:subClassOf B . a a A`,
+asserts `ASK {a a B}` true on `/<ds>/sparql` and false on `/<ds>/stored`, and deletes the triples.
+Fuseki 6 answers updates with 204 (the check is `r.ok`). Verify: image rebuilt from fuseki
+112f09f, the spec 2 passed in 1:50; full gate `npm run test:unit` 870 passed (51.6 s), all three
+Playwright specs 6 passed (2:24). Report 024.
+
 
 ## L2 — the post-build shape check
 
@@ -348,10 +355,12 @@ report 025; changeset minor.
 - [ ] Sub-plan reviewed by the master; contradictions routed into the master's §Contracts
 - [x] L1 phase 1 — Turtle in the package and app backend builds; the contract verified, M1-M5 (report 024)
 - [x] L1 phase 2 — scaffold in Turtle; CN's `appProjectPackages.test.ts` updated
-- [ ] L1 phase 3 — CLI e2e on the image
+- [x] L1 phase 3 — CLI e2e on the image
 - [ ] L1 landed on `store-inference` (commit: )
 - [ ] L2 detail written (wave 4)
 - [ ] L2 landed (report 025, commit: )
 - [ ] Release PR (R): link
+- [ ] R: `create-app.spec.ts`'s default `FUSEKI_IMAGE` becomes the published
+  `ghcr.io/linked-fw/fuseki:6.2.0-1` (report 024)
 - [ ] R: raise `defaults/package/package.json`'s `@_linked/core` range to the release exporting
   `ontology/loadOntologyFiles`; run `tests/template/package.full.test.ts` (report 024)
