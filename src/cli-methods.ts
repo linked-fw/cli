@@ -1920,7 +1920,7 @@ export const depCheck = async (packagePath: string = process.cwd()) => {
         //especially things like @types/react, @types/react-dom, @types/node (they are added elsewhere?)
         // missing = missing.filter(m => m.indexOf('@types/') === 0);
         //currently react is not an explicit dependency, but we should add it as a peer dependency
-        missing.splice(missing.indexOf('react'), 1);
+        missing = missing.filter((dep) => dep !== 'react');
 
         let missingLincdPackages = missing.filter((missingDep) => {
           return lincdPackages.some((lincdPackage) => {
