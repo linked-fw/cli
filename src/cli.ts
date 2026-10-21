@@ -640,6 +640,50 @@ branch
     return runBranchStart(name, packages, options);
   });
 
+const worktree = program
+  .command('worktree')
+  .description(
+    "An agent's worktree of the app (default <parent of the app root>/wt/<agent>) with a nested worktree of each package it changes, on the branch <base>--<agent>. The base is the root's integration branch, or its current branch. node_modules is shared with the main checkout.",
+  );
+
+worktree
+  .command('add <agent>')
+  .description(
+    "Run in an app. Create the app worktree on <base>--<agent> (or detached with --app-detached), symlink node_modules and the gitignored .env files, and add a worktree of each --with package in its packages-local/. A --with checkout not on the base joins it (created from the target), refusing, with nothing changed, when it has changes. Prints the start command.",
+  )
+  .option('--with <packages>', 'Comma-separated packages-local/ checkouts to change: @_linked/core, core or _linked-core.')
+  .option('--app-detached', 'Check the app out detached at the base tip: for work that changes only packages.')
+  .option('--port <n>', 'The port for the printed start command.')
+  .option('--dataset <name>', 'A dataset of its own for the printed start command (FUSEKI_DATASET).')
+  .option('--dir <path>', 'Where to put the worktree.')
+  .action(async (agent: string, options) => {
+    const {runWorktreeAdd} = await import('./commands/worktree.js');
+    return runWorktreeAdd(agent, options);
+  });
+
+worktree
+  .command('list')
+  .description(
+    'Run in an app. Every worktree of the app root with its nested package worktrees: branch or detached, and whether each branch has landed in the base.',
+  )
+  .option('--json', 'Print the base and the worktrees as JSON.')
+  .action(async (options) => {
+    const {runWorktreeList} = await import('./commands/worktree.js');
+    return runWorktreeList(options);
+  });
+
+worktree
+  .command('remove <agent>')
+  .description(
+    "Run in an app. Remove the agent's package worktrees, then its app worktree, then delete its landed agent branches. Refuses, removing nothing, while a branch has not landed or a worktree has changes.",
+  )
+  .option('--force', 'Remove anyway, and delete unlanded agent branches.')
+  .option('--dir <path>', 'The worktree directory, when it is not the default.')
+  .action(async (agent: string, options) => {
+    const {runWorktreeRemove} = await import('./commands/worktree.js');
+    return runWorktreeRemove(agent, options);
+  });
+
 program
   .command('setup-publish')
   .description(

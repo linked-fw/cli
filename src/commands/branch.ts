@@ -46,14 +46,14 @@ export interface BranchStatus {
   rows: BranchStatusRow[];
 }
 
-function refExists(run: Run, dir: string, ref: string): boolean {
+export function refExists(run: Run, dir: string, ref: string): boolean {
   const r = run('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
     cwd: dir,
   });
   return r.status === 0;
 }
 
-function localBranchExists(run: Run, dir: string, branch: string): boolean {
+export function localBranchExists(run: Run, dir: string, branch: string): boolean {
   return refExists(run, dir, `refs/heads/${branch}`);
 }
 
@@ -165,6 +165,34 @@ function matches(repo: RepoInfo, wanted: string): boolean {
 }
 
 /**
+ * The `packages-local/` checkouts named by `wanted` (package name, dir name or
+ * short name), each once, in the order given; or why one name matches none or
+ * several.
+ */
+export function selectCheckouts(
+  local: RepoInfo[],
+  wanted: string[],
+): {repos: RepoInfo[]} | {error: string} {
+  const repos: RepoInfo[] = [];
+  for (const name of wanted) {
+    const found = local.filter((r) => matches(r, name));
+    if (found.length !== 1) {
+      const available = local
+        .map((r) => (r.packageName ? `${r.packageName} (${r.rel})` : r.rel))
+        .join(', ');
+      return {
+        error:
+          found.length === 0
+            ? `No checkout in packages-local/ matches "${name}". Available: ${available || 'none'}.`
+            : `"${name}" matches several checkouts: ${found.map((r) => r.rel).join(', ')}. Use the full package name.`,
+      };
+    }
+    if (!repos.includes(found[0])) repos.push(found[0]);
+  }
+  return {repos};
+}
+
+/**
  * Put the app root and the named `packages-local/` checkouts on integration
  * branch `name`, created from `target` where it does not exist yet, and
  * record `target` for it in each. Every precondition is checked in every
@@ -190,21 +218,9 @@ export async function branchStart(
 
   const repos = await listRepos(appRoot, run);
   const [root, ...local] = repos;
-  const selected: RepoInfo[] = [root];
-  for (const wanted of packages) {
-    const found = local.filter((r) => matches(r, wanted));
-    if (found.length !== 1) {
-      const available = local
-        .map((r) => (r.packageName ? `${r.packageName} (${r.rel})` : r.rel))
-        .join(', ');
-      return refuse(
-        found.length === 0
-          ? `No checkout in packages-local/ matches "${wanted}". Available: ${available || 'none'}.`
-          : `"${wanted}" matches several checkouts: ${found.map((r) => r.rel).join(', ')}. Use the full package name.`,
-      );
-    }
-    if (!selected.includes(found[0])) selected.push(found[0]);
-  }
+  const chosen = selectCheckouts(local, packages);
+  if ('error' in chosen) return refuse(chosen.error);
+  const selected: RepoInfo[] = [root, ...chosen.repos];
 
   const dirty = selected.filter((r) => r.dirty);
   if (dirty.length) {
