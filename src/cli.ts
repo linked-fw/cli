@@ -632,7 +632,7 @@ branch
 branch
   .command('start <name> [packages...]')
   .description(
-    'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when any of them has uncommitted or untracked changes. The name must not contain "--" (it separates agent branches).',
+    'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when: any of them has uncommitted or untracked changes; --target is missing in a repo where <name> has to be created; <name> equals the target; <name> contains "--" (it separates agent branches); or another worktree has <name> checked out. If a switch fails partway, the repos already switched go back: each to its previous branch, a branch the run created is deleted (kept, with its sha printed, when it moved or another branch forked from it), and the target entry is restored.',
   )
   .requiredOption('--target <branch>', 'The branch the work lands in, e.g. main or dev.')
   .action(async (name: string, packages: string[], options) => {

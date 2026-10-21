@@ -174,6 +174,30 @@ describe('linked branch start: atomicity', () => {
     assert.equal(await getTarget(root, 'overhaul'), 'old-target');
     assert.equal(await getTarget(core, 'overhaul'), null);
   });
+
+  test('rollback keeps a created base another branch forked from', async () => {
+    const {root, core, server} = makeApp();
+    const real = makeRun(root);
+    // root and core get overhaul created; another agent forks from root's before server fails.
+    const run: Run = (cmd, args, opts) => {
+      if (cmd === 'git' && args[0] === 'switch' && opts?.cwd === server && args.includes('overhaul')) {
+        git(root, 'branch', 'overhaul--other', 'overhaul');
+        return {status: 1, stdout: '', stderr: 'simulated failure'};
+      }
+      return real(cmd, args, opts);
+    };
+    const result = await branchStart(root, 'overhaul', 'main', ['core', 'server'], run);
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /\.: kept overhaul at [0-9a-f]+: overhaul--other forked from it/);
+    assert.equal(branchOf(root), 'main');
+    assert.equal(branchOf(core), 'main');
+    assert.equal(hasBranch(root, 'overhaul'), true);
+    assert.equal(hasBranch(root, 'overhaul--other'), true);
+    assert.equal(await getTarget(root, 'overhaul'), 'main');
+    // Nothing forked from core's: removed as before.
+    assert.equal(hasBranch(core, 'overhaul'), false);
+    assert.equal(await getTarget(core, 'overhaul'), null);
+  });
 });
 
 describe('linked branch status', () => {

@@ -272,6 +272,27 @@ describe('linked worktree add', () => {
     assert.equal(fs.existsSync(app.dir), false);
   });
 
+  test('rollback keeps a created base another branch forked from', async () => {
+    const app = makeApp();
+    const real = makeRun(app.root);
+    // The join created core's overhaul; another agent forks from it before the core worktree fails.
+    const run: Run = (cmd, args, opts) => {
+      if (args[0] === 'worktree' && args[1] === 'add' && opts?.cwd === app.core) {
+        git(app.core, 'branch', 'overhaul--other', 'overhaul');
+        return {status: 1, stdout: '', stderr: 'simulated failure'};
+      }
+      return real(cmd, args, opts);
+    };
+    const result = await worktreeAdd(app.root, 'a1', {with: ['core']}, run);
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /kept overhaul at [0-9a-f]+: overhaul--other forked from it/);
+    assert.equal(branchOf(app.core), 'main');
+    assert.equal(hasBranch(app.core, 'overhaul'), true);
+    assert.equal(hasBranch(app.core, 'overhaul--other'), true);
+    assert.equal(await getTarget(app.core, 'overhaul'), 'main');
+    assert.equal(fs.existsSync(app.dir), false);
+  });
+
   test('.env links to the realpath', async () => {
     const app = makeApp();
     const shared = path.join(app.container, 'shared.env');

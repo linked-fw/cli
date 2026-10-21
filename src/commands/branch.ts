@@ -58,6 +58,48 @@ export function localBranchExists(run: Run, dir: string, branch: string): boolea
   return refExists(run, dir, `refs/heads/${branch}`);
 }
 
+/** The local branches (full ref names) whose history contains `sha`. */
+export function branchesContaining(run: Run, repoDir: string, sha: string): string[] {
+  const r = run('git', ['for-each-ref', '--contains', sha, '--format=%(refname)', 'refs/heads'], {cwd: repoDir});
+  return r.status === 0 ? r.stdout.split('\n').map((l) => l.trim()).filter(Boolean) : [];
+}
+
+export type DeleteCheck = {ok: true} | {ok: false; reason: string; sha: string};
+
+/**
+ * Whether an undo may delete `branch`, which this run created at `createdSha`.
+ * Only while it is still exactly what the run made: it points at `createdSha`,
+ * no worktree has it checked out, and no other local branch has forked from
+ * it. `existing` lists the branches that already contained `createdSha` when
+ * it was created (the target it was made from, typically); those don't count
+ * as forks. When not ok, `sha` is where the branch is now ('' when it is gone).
+ */
+export function safeToDeleteCreatedBranch(
+  repoDir: string,
+  branch: string,
+  createdSha: string,
+  run: Run,
+  existing: string[] = [],
+): DeleteCheck {
+  const ref = `refs/heads/${branch}`;
+  const now = run('git', ['rev-parse', '-q', '--verify', ref], {cwd: repoDir}).stdout.trim();
+  if (!now) return {ok: false, reason: 'it no longer exists', sha: ''};
+  if (now !== createdSha) return {ok: false, reason: `it moved from ${createdSha}`, sha: now};
+  const holder = worktreesOf(run, repoDir).find((wt) => wt.branch === branch);
+  if (holder) return {ok: false, reason: `the worktree at ${holder.path} has it checked out`, sha: now};
+  const forks = branchesContaining(run, repoDir, createdSha).filter(
+    (r) => r !== ref && !existing.includes(r),
+  );
+  if (forks.length) {
+    return {
+      ok: false,
+      reason: `${forks.map((r) => r.replace(/^refs\/heads\//, '')).join(', ')} forked from it`,
+      sha: now,
+    };
+  }
+  return {ok: true};
+}
+
 export interface GitWorktree {
   path: string;
   head: string;
@@ -243,7 +285,8 @@ function real(p: string): string {
  * is switched, so a refusal leaves all untouched. If a switch still fails
  * partway, the repos already switched go back to where they were: each
  * returns to its previous branch (or commit), a branch this run created is
- * deleted, and the target entry is restored.
+ * deleted (unless it moved, is checked out, or another branch forked from it:
+ * see `safeToDeleteCreatedBranch`), and the target entry is restored.
  */
 export async function branchStart(
   appRoot: string,
@@ -330,12 +373,31 @@ export async function branchStart(
           return rollback();
         }
       }
+      // A branch this run created: where it was made, and the branches that
+      // already contained that commit (so a later fork can be told apart).
+      const created =
+        exists || repo.branch === name
+          ? null
+          : run('git', ['rev-parse', `refs/heads/${name}`], {cwd: repo.dir}).stdout.trim();
+      const before = created
+        ? branchesContaining(run, repo.dir, created).filter((r) => r !== `refs/heads/${name}`)
+        : [];
       undo.push(() => {
+        let keep = false;
         if (repo.branch !== name) {
           const back = repo.branch ? ['switch', repo.branch] : ['switch', '--detach', repo.head];
           run('git', back, {cwd: repo.dir});
-          if (!exists) run('git', ['branch', '-D', name], {cwd: repo.dir});
+          if (created) {
+            const check = safeToDeleteCreatedBranch(repo.dir, name, created, run, before);
+            if (check.ok) {
+              run('git', ['branch', '-D', name], {cwd: repo.dir});
+            } else if ('sha' in check && check.sha) {
+              keep = true;
+              messages.push(`${repo.rel}: kept ${name} at ${check.sha}: ${check.reason}.`);
+            }
+          }
         }
+        if (keep) return;
         run(
           'git',
           previousTarget ? ['config', key, previousTarget] : ['config', '--unset', key],

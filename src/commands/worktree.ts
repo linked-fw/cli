@@ -26,7 +26,14 @@ import process from 'node:process';
 import {integrationOf, agentBranch, getTarget, listRepos, setTarget, type RepoInfo} from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
-import {localBranchExists, refExists, selectCheckouts, worktreesOf} from './branch.js';
+import {
+  branchesContaining,
+  localBranchExists,
+  refExists,
+  safeToDeleteCreatedBranch,
+  selectCheckouts,
+  worktreesOf,
+} from './branch.js';
 
 export interface WorktreeAddOptions {
   /** `packages-local/` checkouts to give a worktree: package name, dir name or short name. */
@@ -208,25 +215,27 @@ export async function worktreeAdd(
     for (const {repo, exists} of joins) {
       const args = exists ? ['switch', base] : ['switch', '-c', base, target];
       if (!step(args, repo.dir)) return rollback();
+      // Where this run made the base, and the branches that already contained
+      // that commit (the target, typically), so a later fork can be told apart.
       const created = exists ? null : run('git', ['rev-parse', `refs/heads/${base}`], {cwd: repo.dir}).stdout.trim();
+      const before = created
+        ? branchesContaining(run, repo.dir, created).filter((r) => r !== `refs/heads/${base}`)
+        : [];
       const key = `branch.${base}.linked-target`;
       const config: {set: boolean; previous: string | null} = {set: false, previous: null};
       undo.push(() => {
         const back = repo.branch ? ['switch', repo.branch] : ['switch', '--detach', repo.head];
         run('git', back, {cwd: repo.dir});
         // A base branch this run created goes again only while it is still
-        // what the run made: another agent may have forked from or moved it.
+        // what the run made: another agent may have moved or forked from it.
         let keep = false;
-        if (created !== null) {
-          const now = run('git', ['rev-parse', '-q', '--verify', `refs/heads/${base}`], {cwd: repo.dir}).stdout.trim();
-          const checkedOut = worktreesOf(run, repo.dir).some((wt) => wt.branch === base);
-          if (now && (now !== created || checkedOut)) {
-            keep = true;
-            result.messages.push(
-              `${repo.rel}: kept ${base} at ${now}: ${checkedOut ? 'a worktree has it checked out' : `it moved from ${created}`}.`,
-            );
-          } else if (now) {
+        if (created) {
+          const check = safeToDeleteCreatedBranch(repo.dir, base, created, run, before);
+          if (check.ok) {
             run('git', ['branch', '-D', base], {cwd: repo.dir});
+          } else if ('sha' in check && check.sha) {
+            keep = true;
+            result.messages.push(`${repo.rel}: kept ${base} at ${check.sha}: ${check.reason}.`);
           }
         }
         if (config.set && !keep) {
