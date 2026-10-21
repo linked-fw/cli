@@ -2,7 +2,7 @@
 summary: >
   Sub-plan of CN plan 070 (the store infers; ontology data in every app dataset) for
   `linked-fw/cli`: L1, the package build ships Turtle (`src/**/*.ttl` copied to `lib/esm/`, the app
-  backend build copies the app's own `src/data/*.ttl` next to its compiled modules, the ontology
+  backend build copies the app's own `src/**/*.ttl` next to its compiled modules, the ontology
   scaffold in Turtle, the CLI e2e on the inferring Fuseki image); G1, plan 067's commands (repo
   model, load the CLI once, start from a worktree, `doctor resolve`, `branch status/start`,
   `worktree add/list/remove`, `release plan`), adapted to plan 070's integration-worktree layout;
@@ -59,20 +59,32 @@ landing.
   :tdb a tdb2:DatasetTDB2 ; tdb2:location "/fuseki-base/databases/<name>" .
   ```
   It infers over every graph; its hierarchy is the closure of the stored `rdfs:subClassOf`
-  triples in the default graph, rebuilt after a commit that adds or removes one (and at start).
+  triples in the default graph. A commit that adds or removes one marks the hierarchy stale and
+  bumps a generation counter; the first transaction to begin afterwards rebuilds it once (other
+  starting readers wait), and each transaction keeps the hierarchy it began with. A burst of sync
+  commits costs one rebuild; a writer sees its own `subClassOf` change from its next transaction.
+- The image keeps the base image's `ds` dataset and its `shacl` endpoint under
+  `ENABLE_SHACL=true`, as `lf:DatasetRDFSLive` over TDB2 at `/fuseki-base/databases/ds` (the base
+  image's `ds` is TDB1 with a union default graph; its Lucene index and `ENABLE_*` handling are
+  kept). Core's SHACL tests validate through it.
+- The module rewrites `$FUSEKI_BASE/templates/config-tdb2` at start when it is missing or
+  different, with a warning (Fuseki copies its stock template only when the file is missing, so a
+  persisted volume would otherwise create plain datasets silently).
 - `templates/config-tdb2` (baked in) declares the service with the endpoints CN uses today
   (`""`/`sparql`/`query`, `""`/`update`, `""`/`data` GSP read-write, `upload`, `get`) over
-  `lf:DatasetRDFSLive`, plus `stored`. A form-created dataset (`POST $/datasets`,
-  `dbName`, `dbType=tdb2`) gets it.
-- `/<ds>/stored`: SPARQL query and GSP read over the stored triples only (every graph). *pending
-  F1:* whether one endpoint name serves both (an operation per content type) or two
-  (`stored` query, `stored-data` GSP).
+  `lf:DatasetRDFSLive`, plus `stored` and `shacl` (store validation, decision 23). A form-created dataset (`POST $/datasets`,
+  `dbName`, `dbType=tdb2`) gets it. **Only `dbType=tdb2` datasets infer**; `mem` (`config-mem`)
+  stays plain.
+- `/<ds>/stored`: one module operation (`lf:stored`) over the stored triples only (every graph),
+  run by TDB2's own query engine: a SPARQL query or a GSP read, chosen from the request; writes
+  answer 405.
+- **Backups and copies stream `GET /<ds>/stored` as N-Quads.** `POST $/backup` and `GET /<ds>`
+  dump the service's dataset, inferred triples included, so they are never used for these
+  datasets.
+- `DELETE $/datasets/<ds>` removes the TDB2 files too (a module filter finishes what Fuseki skips
+  for a wrapped dataset); a re-created name starts empty.
 - `arq:httpServiceAllowed=false` set by the module for every dataset.
-- *pending F1:* what `POST $/backup/<ds>` dumps through the view (stored or stored + inferred) and,
-  if the latter, the module makes it stored-only or backups use `/<ds>/stored`; whether
-  `DELETE $/datasets/<ds>` removes the TDB2 files of the wrapped dataset (Fuseki skips non-TDB2
-  datasets); whether `text:TextDataset` (pg-test) works over `lf:DatasetRDFSLive`.
-
+- *pending F1:* whether `text:TextDataset` (pg-test) works over `lf:DatasetRDFSLive`.
 
 ### Ontology data files and loader (provider K1 + L1; consumers N1, N2, P1, C2, C3, T1, every package)
 
@@ -89,9 +101,11 @@ landing.
   ```
   A package without data passes no `loadData`. A `loadData` that resolves to anything but strings
   (an unconverted JSON package) is skipped with one warning naming the package.
-- `npx linked build` copies `src/data/**/*.ttl` to `lib/esm/data/`; *pending L1:* how a
-  standalone app bundle keeps them reachable from the bundled module.
-
+- `npx linked build` copies `src/**/*.ttl` into `lib/esm/`, keeping `src`'s layout. A release
+  app build keeps every `@_linked/*` package external (it fails if one is compiled in), so their
+  data is read from the installed package; `build-app` copies the app's own `src/**/*.ttl` into
+  `lib/` the way it copies CSS. L1 verifies (its checks M1-M5, incl. `import.meta.url` under dev
+  SSR).
 
 ### Shape check (provider K1; consumers V1, L2, C3, every package)
 
@@ -101,15 +115,19 @@ export type ShapeCheckKind =
   | 'extends-without-subclass'   // decision 13, direction II
   | 'subclass-without-extends'   // decision 13, direction I (in scope; out of scope → severity 'warning')
   | 'borrowed-target-class'      // decision 15
-  | 'mirror-undefined-term';     // decision 16
+  | 'mirror-undefined-term'      // decision 16
+  | 'override-not-tightened';    // decision 14: a narrower class/value shape (needs the hierarchy) and every data-only shape
 export interface ShapeCheckFinding { kind: ShapeCheckKind; severity: 'error' | 'warning'; shape?: string; iri?: string; message: string }
-export function checkShapeHierarchy(options?: {hierarchy?: HierarchyTriple[]}): Promise<ShapeCheckFinding[]>;
+export function checkShapeHierarchy(options?: {
+  hierarchy?: HierarchyTriple[];
+  dependencies?: Record<string, string[]>;   // package → its dependencies, from package.json (L2, V1);
+}): Promise<ShapeCheckFinding[]>;            // without it, direction I's scope is the shape's own package
 ```
 Reads registered shapes, registered ontologies (parsed through the reader unless `hierarchy` is
 given) and `linkedPackage(..., {mirrors})`. `@linkedShape({sharedTargetClass: true})` exempts a
-shape from `borrowed-target-class`. Boot and sync log findings; `npx linked build` fails on any
+shape from `borrowed-target-class`; shape sync stores it as `core:sharedTargetClass` so data-only
+shapes keep it. Boot and sync log findings; `npx linked build` fails on any
 `error` (L2); CN's builder refuses or offers the fix (C3).
-
 
 ### CLI build check (provider L2; consumers every package)
 
@@ -117,7 +135,6 @@ After compiling, `npx linked build` imports the built package's shape and ontolo
 `package.js` registration, `shapes/index.js`, `ontologies/*.register.js`; not its UI index), runs
 `checkShapeHierarchy()`, prints every finding, and exits non-zero on an `error`.
 `--skip-shape-check "<reason>"` prints the reason and skips.
-
 
 ## Which CLI runs in the layout
 
@@ -150,7 +167,7 @@ scaffolded in Turtle.
 **Scope:**
 1. `npx linked build` copies `src/**/*.ttl` into `lib/esm/` (and `lib/cjs/` when the package
    publishes CJS), next to the JSON, CSS and declarations it copies today.
-2. *pending L1*, settled by measurement (below): `linked build-app` copies the app's own
+2. As the master's contract says, verified by measurement (below): `linked build-app` copies the app's own
    `src/**/*.ttl` into `lib/` next to the compiled backend; framework and workspace packages stay
    external in the backend build (already enforced) and read their own `lib/esm/data/`.
 3. The ontology scaffold (`create-ontology`, `create-package --kind ontology`,
@@ -161,7 +178,7 @@ scaffolded in Turtle.
 5. README (build section: `.ttl` files ship; the app build copies the app's own), report 024,
    minor changeset.
 
-**Settling *pending L1*.** What the code does today:
+**Settling *pending L1*** (adopted in the master plan; M1-M5 verify it). What the code does today:
 
 - The release backend build (`buildBackendWithVite`, `src/app-release/build-backend.ts:429-516`)
   keeps every installed `@_linked/*` and every workspace package external (`ssr.external` =
@@ -193,8 +210,8 @@ So the proposal is both halves: keep packages external (no change) and copy the 
 | M5 | the tarball carries the data | `$LINKED build` then `npm pack --dry-run` in a fixture package with `src/data/x.ttl` | lists `lib/esm/data/x.ttl` |
 
 If M3 fails (Vite rewrites `import.meta.url` for bundled SSR modules), stop and report: the fix is
-in `vite-config.ts`, which G1 edits in the same wave. Proposed contract text once M1-M5 pass
-(replaces the last bullet of §Ontology data files and loader in both copies):
+in `vite-config.ts`, which G1 edits in the same wave. Proposed contract text, **adopted in the
+master plan** in its own wording (the last bullet of §Ontology data files and loader above):
 
 > - `npx linked build` copies `src/**/*.ttl` into `lib/esm/` (so `src/data/x.ttl` →
 >   `lib/esm/data/x.ttl`). `linked build-app` copies the app's own `src/**/*.ttl` into `lib/`
@@ -218,7 +235,7 @@ in `vite-config.ts`, which G1 edits in the same wave. Proposed contract text onc
 **Done when:** a built package's `lib/esm/data/` holds its `.ttl` files and `npm pack` ships them;
 a release backend and a dev server both read an app's own and an installed package's Turtle
 (M1-M3); the scaffold writes Turtle and builds against core's `loadOntologyFiles`; the CLI e2e
-passes on the image; the master's contract carries the settled text; report 024 and a minor
+passes on the image; M1-M5 confirm the master's contract text; report 024 and a minor
 changeset are in.
 
 **Files:**
@@ -293,7 +310,7 @@ package data); arch-10 (package layout); core `docs/architecture/ontologies.md`;
   `npx vitest run src/backend/provisioners/appProjectPackages.test.ts` in `~/web/wt/070-L1/`.
 
 **Size:** small, **3 phases** (the master says 2; phase 3 waits for F1 and phase 2 for K1):
-1. Turtle in the package build and the app backend build; M1-M5; contract text proposed.
+1. Turtle in the package build and the app backend build; M1-M5 verify the contract text.
 2. The scaffold in Turtle (needs K1's `loadOntologyFiles`); CN's test line.
 3. The CLI e2e on the image (needs F1).
 
@@ -422,7 +439,7 @@ report 025; changeset minor.
 ## Progress
 
 - [ ] Sub-plan reviewed by the master; contradictions routed into the master's §Contracts
-- [ ] L1 phase 1 — Turtle in the package and app backend builds; *pending L1* settled (report 024)
+- [ ] L1 phase 1 — Turtle in the package and app backend builds; the contract verified, M1-M5 (report 024)
 - [ ] L1 phase 2 — scaffold in Turtle; CN's `appProjectPackages.test.ts` updated
 - [ ] L1 phase 3 — CLI e2e on the image
 - [ ] L1 landed on `store-inference` (commit: )
