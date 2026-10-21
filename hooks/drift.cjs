@@ -71,8 +71,25 @@ function satisfies(version, range) {
   return semver.satisfies(version, range);
 }
 
+/**
+ * The checkout whose install `appRoot` runs on. A worktree that symlinks the main checkout's
+ * `node_modules` runs on the main checkout's install, so its hidden lockfile describes the main
+ * checkout's `packages-local/`, not the worktree's.
+ */
+function installRoot(appRoot) {
+  const nodeModules = path.join(appRoot, 'node_modules');
+  try {
+    if (fs.lstatSync(nodeModules).isSymbolicLink())
+      return path.dirname(fs.realpathSync(nodeModules));
+  } catch {
+    // No node_modules, or a dangling link: the app root itself.
+  }
+  return appRoot;
+}
+
 /** Every drift in the installed tree, in a stable order. No install yet means none. */
-function driftProblems(appRoot) {
+function driftProblems(appRootIn) {
+  const appRoot = installRoot(appRootIn);
   const lock = readJson(
     path.join(appRoot, 'node_modules', '.package-lock.json'),
   );
@@ -166,4 +183,4 @@ function describeDrift(d) {
   }
 }
 
-module.exports = {driftProblems, describeDrift, satisfies};
+module.exports = {driftProblems, describeDrift, satisfies, installRoot};

@@ -745,6 +745,22 @@ export async function installedLinkedDeps(cwd: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * A worktree whose `node_modules` is a symlink to the main checkout's would
+ * share Vite's default cache, `node_modules/.vite`, and re-optimize the main
+ * checkout's dependencies under a running server. It gets its own cache under
+ * its root instead.
+ */
+export function worktreeCacheDir(appRoot: string): {cacheDir?: string} {
+  try {
+    if (fsExtra.lstatSync(path.join(appRoot, 'node_modules')).isSymbolicLink())
+      return {cacheDir: path.join(appRoot, '.vite-cache')};
+  } catch {
+    /* no node_modules: Vite's default */
+  }
+  return {};
+}
+
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
   return defineConfig(async ({mode}) => {
     const isDev = mode === 'development';
@@ -777,6 +793,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     const clientDepIncludes =
       isDev && opts.clientDepIncludes !== false && process.env.LINKED_CLIENT_DEP_INCLUDES !== '0';
     const config: UserConfig = {
+      ...worktreeCacheDir(process.cwd()),
       server: {
         port: opts.port ?? 4040,
         middlewareMode: true,
