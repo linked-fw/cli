@@ -133,6 +133,11 @@ After compiling, `npx linked build` imports the built package's shape and ontolo
 `package.js` registration, `shapes/index.js`, `ontologies/*.register.js`; not its UI index), runs
 `checkShapeHierarchy()`, prints every finding, and exits non-zero on an `error`.
 `--skip-shape-check "<reason>"` prints the reason and skips.
+Ontology data registers through each package's `ontologies/*.register.js`, not its shape modules
+(a package's `shapes/index` imports its dependencies' shapes but not their data). The check
+therefore imports the register modules of the package **and of every `@_linked/*` dependency**,
+as an app's boot does; without them every term of a dependency's namespace reads as
+`mirror-undefined-term` (N2 measured 66 such findings for org with schema's data unregistered).
 
 ## Which CLI runs in the layout
 
@@ -343,12 +348,93 @@ Playwright specs 6 passed (2:24). Report 024.
 
 ## L2 — the post-build shape check
 
-Detail written when its wave starts (wave 4). Contract: §CLI build check above; it adds a step to
-`planBuildSteps` (`src/cli-methods.ts:3141`, after 'Checking shapes/index') and a
-`--skip-shape-check` option on `build` (`src/cli.ts:349`). The existing shape checks already load
-each compiled shape module in a child process (`inspectShapeReferences`, shared by 'Checking shape
-references' and 'Checking shapes/index'); L2's plan should say whether it reuses that run. Record:
-report 025; changeset minor.
+**Depends on:** K1 and K2 landed (core's `store-inference` exports
+`@_linked/core/shapes/checkShapeHierarchy`); L1 landed (the Turtle the check reads is in `lib/esm/`).
+
+**Goal:** `linked build` fails a package whose shapes disagree with the class hierarchy
+(decisions 13-16), so a published package is clean; `--skip-shape-check "<reason>"` is the
+explicit way out.
+
+**Scope:**
+1. A build step **'Checking shape hierarchy'** right after 'Checking shapes/index': in one child
+   `node` (cwd the package, the shape-references asset hook registered), import the package's
+   `lib/esm/package.js`, its `lib/esm/shapes/index.js` (or, without one, every shape module
+   `findShapeModules` lists), its `lib/esm/ontologies/*.register.js`, then the
+   `ontologies/*.register.js` of every `@_linked/*` dependency (dependencies and
+   peerDependencies, transitively, each resolved from the package the way Node resolves it and
+   imported by real path); then `checkShapeHierarchy({dependencies})` from the `@_linked/core`
+   the package resolves (its own `lib/esm` when the package is core), with `dependencies` mapping
+   the package and each visited dependency to its `dependencies` + `peerDependencies` names.
+2. Every finding printed (severity, kind, shape, message); any `error` fails the build
+   (`{error}`), warnings alone warn (a string), none passes.
+3. Skips quietly (passes, no output) when the package has no shape modules or does not depend on
+   `@_linked/core` (and is not core). A core without `shapes/checkShapeHierarchy` (npm's, until
+   the release) warns `skipped: …` and passes; a module that throws while loading fails the step.
+4. `linked build --skip-shape-check "<reason>"` (commander `<reason>`, required): the step warns
+   `skipped: <reason>` and does not run. `buildPackage` gains an options argument passed to
+   `planBuildSteps`; `build-all` passes none.
+5. `depCheck` (`src/cli-methods.ts:1923`): remove `react` only when it is in the list.
+6. README build section, report 025, minor changeset.
+
+**Reuse of `inspectShapeReferences`:** no. That run loads each shape module alone, one child per
+module, by design (a second module in one process would see the first one's shapes). The shape
+check needs everything registered in one process, the dependencies' ontology data included. It
+reuses the probe's child-process pattern and asset hook (exported from `shapeReferences.ts`) and
+`findShapeModules`.
+
+**Files:**
+- `src/utils/shapeHierarchy.ts` (new): `collectShapeCheckInputs(packagePath)` (modules, the
+  `dependencies` map, the core specifier, or a skip reason), `runShapeHierarchyCheck(packagePath)`
+  (the child, returns findings or a skip/error), `checkShapeHierarchyStep(packagePath, {skip})`
+  (the build-step result), `formatFinding`.
+- `src/utils/shapeReferences.ts`: export `ASSET_HOOK`.
+- `src/cli-methods.ts`: `planBuildSteps(pkgJson, packagePath, options?)` (3146) gains the step
+  after 'Checking shapes/index' (3295); `buildPackage` (2931) gains `options` and passes it
+  (3062); `depCheck` (1923).
+- `src/cli.ts:349-359`: `.option('--skip-shape-check <reason>', …)`, passed to `buildPackage`.
+- `tests/unit/shapeHierarchy.test.ts` (new); `tests/unit/esmSpecifiers.test.ts:250-263` (the
+  step list); `tests/unit/depCheck.test.ts` (new).
+- `README.md` build section; `docs/reports/025-…md`; `.changeset/`.
+
+**Pitfalls:**
+- `npx linked` runs main's CLI; verify packages with the worktree's built bin (`$LINKED`), and
+  after landing with the integration CLI.
+- Resolve dependencies from the package, not from the CLI: in the layout a package's own
+  `node_modules` holds no `@_linked` (it links to the main checkout's nested one), so the walk goes
+  up to `~/web/wt/070/node_modules/@_linked/<x>`. A dependency's `exports` may not expose
+  `package.json`, so walk `node_modules` directories rather than `require.resolve`.
+- Import by real path (`fs.realpathSync`): Node resolves the dependency's own imports through the
+  real path, and a symlinked URL would evaluate its modules a second time.
+- `*.register.test.js` (fuseki) is not a register module: match `/\.register\.js$/`.
+- The registry and ontology registry live in shared state on `globalThis`, so the check sees what
+  the imported modules registered even if a dependency resolved a second copy of core.
+- The child's stdout may carry module logs: report through a marker line, as the probe does.
+
+**Tests (`tests/unit/shapeHierarchy.test.ts`, compiled fixture packages written in tmp dirs, run
+against the repository's core via `fixtureNodeModules`):**
+- one fixture per kind: `extends-without-subclass` (error, build step fails),
+  `subclass-without-extends` (error in scope), `borrowed-target-class` (error),
+  `mirror-undefined-term` (error, through `linkedPackage(name, {mirrors})` and a register module
+  with Turtle data), `override-not-tightened` (warning, step warns, build passes);
+- a clean fixture passes; the dependency's register module is imported (a fixture whose `extends`
+  is backed only by a dependency's Turtle passes; without the dependency's data it fails);
+- the `dependencies` map reaches the check (out-of-scope root → warning);
+- skips: no shapes; no core dependency; `--skip-shape-check` reason in the warning.
+- `tests/unit/depCheck.test.ts`: a fixture importing `n3` and not `react`, neither declared →
+  the warning lists `n3`.
+
+- Quick gate (after each phase): `npx linked build` in the cli worktree, then
+  `npx jest --config jest.config.cjs tests/unit/shapeHierarchy.test.ts tests/unit/depCheck.test.ts tests/unit/esmSpecifiers.test.ts tests/unit/shapeReferences.test.ts tests/unit/shapesIndex.test.ts`.
+- Full gate (before landing): `npm run test:unit` and the build.
+
+**Verify:** every package the plan changed builds clean with the worktree's CLI in its
+`~/web/wt/070/packages-local/<dir>` copy: core, server, server-utils, schema, xsd, rdfs, dcmi,
+owl, sioc, dcat, org, auth, fuseki; quote each result; `git status` clean after each.
+
+**Size:** 2 phases: (1) the `depCheck` fix; (2) the shape check, its flag and its tests; docs at
+landing.
+
+**Changeset:** minor. **Record:** report 025.
 
 ## Progress
 
@@ -357,7 +443,7 @@ report 025; changeset minor.
 - [x] L1 phase 2 — scaffold in Turtle; CN's `appProjectPackages.test.ts` updated
 - [x] L1 phase 3 — CLI e2e on the image
 - [ ] L1 landed on `store-inference` (commit: )
-- [ ] L2 detail written (wave 4)
+- [x] L2 detail written (wave 4)
 - [ ] L2 landed (report 025, commit: )
 - [ ] Release PR (R): link
 - [ ] R: `create-app.spec.ts`'s default `FUSEKI_IMAGE` becomes the published
