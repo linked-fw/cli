@@ -612,6 +612,35 @@ doctor
     return runDoctorResolve(options);
   });
 
+const branch = program
+  .command('branch')
+  .description(
+    'Integration branches: one branch per larger piece of work, shared by the app and the framework repositories it touches, worked on in worktree sets while every main checkout stays on its target.',
+  );
+
+branch
+  .command('status')
+  .description(
+    "Per repository of the checkout you are in (the app and each packages-local/ checkout): branch, recorded target, dirty, ahead/behind the target and the integration branch. Flags a repository that is neither on the integration branch (or an agent branch of it) nor on its target.",
+  )
+  .option('--json', 'Print the rows as JSON.')
+  .action(async (options) => {
+    const {runBranchStatusCommand} = await import('./commands/branch.js');
+    return runBranchStatusCommand(options);
+  });
+
+branch
+  .command('start <name> [packages...]')
+  .description(
+    "Create the integration worktree set <name>: a worktree of the app on <name> (from --target) at --dir (default <parent of the app>/wt/<name>), node_modules and the gitignored .env files linked to the main checkout's, a worktree on <name> of each named package (npm name, or its packages-local directory) in its packages-local/, and branch.<name>.linked-target in every repository. Never switches a main checkout. Refuses, before creating anything, when a repository is dirty, has no --target, or has <name> checked out already. Agents then run `linked worktree add` in the new set.",
+  )
+  .requiredOption('--target <branch>', 'The branch the work is released to (main, dev, ...).')
+  .option('--dir <path>', 'Where the integration set goes (default <parent of the app>/wt/<name>).')
+  .action(async (name: string, packages: string[], options) => {
+    const {runBranchStart} = await import('./commands/branch.js');
+    return runBranchStart(name, packages, options);
+  });
+
 program
   .command('setup-publish')
   .description(
