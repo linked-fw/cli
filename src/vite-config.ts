@@ -18,6 +18,7 @@ import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
+import {packageNameOf} from './utils/ssrBundled.js';
 import {
   discoverInstalledLinkedPackages,
   isLinkedPackageJson,
@@ -653,7 +654,7 @@ export const STANDALONE_SSR_BUNDLED = /^@_linked\/(?!(core|cli)$)/;
  * against the bare package name, so subpath imports (`pkg/shapes/Foo`) match too.
  * Installed packages that depend on a workspace (`dependents`, from
  * `workspaceDependents`) are bundled too, so they share the Vite-loaded workspace,
- * and `SSR_ENTRY_PACKAGES` are bundled.
+ * and `SSR_ENTRY_PACKAGES` are bundled. `@_linked/cli` never is.
  * Standalone (no workspaces): every `@_linked/*` but core and the CLI
  * (`STANDALONE_SSR_BUNDLED`; see the comment at `noExternal` in `createViteConfig`).
  */
@@ -664,8 +665,16 @@ export function ssrNoExternal(
   if (workspaces.length === 0) {
     return [STANDALONE_SSR_BUNDLED];
   }
-  return [...new Set([...workspaces.map((w) => w.name), ...dependents, ...SSR_ENTRY_PACKAGES])];
+  // The CLI process already runs `@_linked/cli` from its `lib/`; bundling a
+  // checkout of it in Vite would give a second copy whose module state is not
+  // shared. Its imports go to Node, which resolves them to the same files.
+  return [
+    ...new Set([...workspaces.map((w) => w.name), ...dependents, ...SSR_ENTRY_PACKAGES]),
+  ].filter((name) => name !== CLI_PACKAGE);
 }
+
+/** The CLI's own package name: always external in dev SSR. */
+export const CLI_PACKAGE = '@_linked/cli';
 
 /**
  * Packages a STANDALONE app has always deduped, installed or not: the two that
@@ -814,8 +823,12 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
           ? ({
               name: 'linked:resolve-workspace-ts',
               enforce: 'pre',
-              async resolveId(id, importer) {
+              async resolveId(id, importer, options) {
                 if (id.startsWith('\0')) return null;
+
+                // The CLI stays external in SSR (see ssrNoExternal): resolving
+                // its bare specifiers to src/ here would bundle it anyway.
+                if (options?.ssr && packageNameOf(id) === CLI_PACKAGE) return null;
 
                 // `./Sibling.js` → `.tsx` / `.ts` from source, workspace or
                 // installed (see resolveSourceSibling).
@@ -965,6 +978,11 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
           'react-router-dom',
           'scheduler',
           'express',
+          // Vite processes a linked dependency (one whose real path is outside
+          // node_modules, as a localized checkout is) itself unless it is
+          // listed here, so leaving the CLI out of `noExternal` is not enough
+          // to hand it to Node.
+          ...(isDev && !isStandalone ? [CLI_PACKAGE] : []),
         ],
         // Vite 7 auto-externalizes node_modules packages for SSR (loading them
         // via Node → the `import`→`lib/esm` condition), which would bypass the

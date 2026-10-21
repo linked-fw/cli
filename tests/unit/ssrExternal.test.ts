@@ -194,6 +194,7 @@ describe('ssr.noExternal', () => {
     const config = await factory({command: 'serve', mode: 'development'});
     expect(config.ssr.noExternal).toEqual([STANDALONE_SSR_BUNDLED]);
     expect(config.ssr.resolve).toEqual({conditions: ['module', 'node']});
+    expect(config.ssr.external).not.toContain('@_linked/cli');
   });
 
   // `start` loads LinkedServer through `vite.ssrLoadModule`, so Vite evaluates the
@@ -207,5 +208,41 @@ describe('ssr.noExternal', () => {
       expect(bundled(noExternal, '@_linked/server')).toBe(true);
     }
     expect(ssrNoExternal([{name: '@_linked/server'}])).toEqual(['@_linked/server']);
+  });
+  // The CLI process runs `@_linked/cli` from `lib/`; a Vite copy of a checkout
+  // of it would be a second instance (LinkedServer imports its lifecycle and utils).
+  it('workspace mode leaves @_linked/cli external', () => {
+    const noExternal = ssrNoExternal(
+      [{name: '@_linked/cli'}, {name: '@_linked/core'}],
+      ['@_linked/cli'],
+    );
+    expect(noExternal).toContain('@_linked/core');
+    expect(noExternal).toContain('@_linked/server');
+    expect(noExternal).not.toContain('@_linked/cli');
+  });
+  // Leaving the CLI out of `noExternal` is not enough: the workspace resolver
+  // would still map its bare specifiers to src/ and Vite would load them.
+  it('the workspace resolver hands @_linked/cli to Node in SSR', async () => {
+    writeJson(path.join(tmp, 'package.json'), {name: 'app', private: true, workspaces: ['packages-local/*']});
+    for (const [dir, name] of [['_linked-cli', '@_linked/cli'], ['_linked-core', '@_linked/core']]) {
+      const root = path.join(tmp, 'packages-local', dir);
+      writeJson(path.join(root, 'package.json'), {
+        name,
+        type: 'module',
+        exports: {'./*': {import: './lib/esm/*.js'}},
+      });
+      fs.mkdirSync(path.join(root, 'src'), {recursive: true});
+      fs.writeFileSync(path.join(root, 'src', 'lifecycle.ts'), 'export {};');
+    }
+    process.chdir(tmp);
+    const config = await (createViteConfig() as any)({command: 'serve', mode: 'development'});
+    const plugin = config.plugins.flat().find((p: any) => p?.name === 'linked:resolve-workspace-ts');
+    expect(config.ssr.noExternal).not.toContain('@_linked/cli');
+    expect(config.ssr.external).toContain('@_linked/cli');
+    expect(config.ssr.external).toContain('react');
+    expect(await plugin.resolveId('@_linked/cli/lifecycle', undefined, {ssr: true})).toBeNull();
+    expect(await plugin.resolveId('@_linked/core/lifecycle', undefined, {ssr: true})).toBe(
+      path.join(tmp, 'packages-local', '_linked-core', 'src', 'lifecycle.ts'),
+    );
   });
 });
