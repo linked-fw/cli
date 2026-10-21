@@ -595,6 +595,23 @@ program
     return runAppDoctor();
   });
 
+const doctor = program
+  .command('doctor')
+  .description(
+    'Diagnose how the app in the current directory runs (`doctor resolve`). The dependency checks are `linked app-doctor`.',
+  );
+
+doctor
+  .command('resolve')
+  .description(
+    "For every linked package (source workspaces, installed linked packages, node_modules/@_linked/*): the directory Vite's dev SSR runner loads it from (or external) and the package root Node resolves. A package Vite bundles from another directory than Node's is an overlay (a worktree's own checkout), or TWO COPIES when Node also loads it during start (the CLI, auth). Exits 1 on TWO COPIES.",
+  )
+  .option('--json', 'Print the rows as JSON (name, vite, node, bundled, flag).')
+  .action(async (options) => {
+    const {runDoctorResolve} = await import('./commands/doctor.js');
+    return runDoctorResolve(options);
+  });
+
 program
   .command('setup-publish')
   .description(
