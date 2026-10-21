@@ -314,7 +314,10 @@ What the runner bundles: in a standalone app (no workspaces) every `@_linked/*` 
 `TWO COPIES` line. Core stays a single Node copy (its registries are on `globalThis`, and
 `loadStores` imports stores through the loader `linked start` installs, which needs
 `@_linked/core` 2.34.0 or later); the CLI is the Node process. With workspaces, only the source
-workspaces, the installed packages that depend on them and `@_linked/server` are bundled.
+workspaces (but never `@_linked/cli`: Node runs it, and its imports from `LinkedServer` go to the
+same `lib/` files), the installed packages that depend on them and `@_linked/server` are bundled.
+`linked doctor resolve` prints, per package, the directory Vite loads it from and the one Node
+resolves, and exits 1 when a package Node loads during `start` is also bundled from elsewhere.
 
 `tests/e2e/dual-copy.spec.ts` keeps it that way: it installs this CLI build into an app made from
 the template, boots it on its FusekiStore and with a `RemoteDataset`, and fails on a missing `on`
@@ -361,6 +364,44 @@ directory whose `package.json` has `workspaces`. It also writes git hooks into t
 **Drift.** npm links a checkout whatever its version. `--list` and the check before `linked start`,
 `script`, `call` and `build-all` report a range a checkout misses, a second copy of a localized
 package, a nested copy of `@_linked/core`/`react`/`server-utils`, and a checkout that is gone.
+
+### Integration branches and worktree sets
+
+A larger piece of work spanning the app and several framework repositories runs on one
+**integration branch** with a recorded target (`git config branch.<name>.linked-target <target>`,
+one config per repository, read by all its worktrees). Main checkouts stay on their target; the
+integration branch lives in a **worktree set**: a git worktree of the app whose `node_modules` and
+gitignored `.env` files link to the main checkout's, with a worktree of each framework repository
+the work changes nested in its `packages-local/`. Vite's workspace table maps those names to the
+nested checkouts and every other package to the main checkout's. Agents work in their own sets on
+`<integration>--<agent>` and land locally: rebase onto the integration branch, then
+`git -C <integration checkout> merge --ff-only <agent branch>`.
+
+```bash
+# in the app's main checkout
+linked branch start overhaul --target main core server   # ../wt/overhaul: app + core + server on overhaul
+# in the integration set
+linked branch status [--json]           # per repository: branch, target, dirty, ahead/behind target and integration
+linked worktree add a1 --with server --port 4062          # ../overhaul-a1 on overhaul--a1, prints the start command
+linked worktree add a2 --with schema --app-detached       # schema joins overhaul first (its own nested integration worktree)
+linked worktree list [--json]           # agent sets, landed or not
+linked worktree remove a1 [--force]     # nested worktrees, the app worktree, the landed agent branches
+linked release plan [--json]            # per repository, dependency order, app last: commits, reports, changesets, release PRs, next action
+```
+
+- `branch start` refuses, before creating anything, a name with `--`, a dirty repository, a
+  repository without the target, or a branch already checked out elsewhere. It never switches a
+  main checkout.
+- `worktree add` refuses a directory under a workspace glob of the app (a second package of the same
+  name), a dirty checkout that would join, or an existing agent branch. It never links private keys
+  (`*.pem`); it names them so you can link one by hand. `--dataset X` adds `FUSEKI_DATASET=X` to
+  the printed start command (and the clone commands when the app has `scripts/backup-cn-state.sh`).
+- A worktree whose `node_modules` is a symlink gets its own Vite cache (`.vite-cache/`, add it to
+  `.gitignore`), and the drift check reads the main checkout's install, so a set starts with no
+  re-optimizing and no false drift.
+- `release plan` finds the release PRs as the PRs whose head starts with `<integration>--`, in
+  stack order (via `gh`; without it, `PR state unknown`), and prints each new report's `## PR`
+  section. Next actions: `open PRs`, `waiting`, `merge target back`, `done`.
 
 ### Registry / dev utilities
 
