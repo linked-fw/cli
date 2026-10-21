@@ -46,6 +46,7 @@ import {
   type ShapeReferenceReport,
 } from './utils/shapeReferences.js';
 import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
+import {checkShapeHierarchyStep} from './utils/shapeHierarchy.js';
 
 import {spawnSync} from 'child_process';
 import {spawnCommand} from './utils/spawn.js';
@@ -2933,6 +2934,7 @@ export const buildPackage = async (
   target2,
   packagePath = process.cwd(),
   logResults: boolean = true,
+  options: BuildOptions = {},
 ) => {
   // Ensure packagePath is absolute and points to a directory containing package.json; if not, go up until we find one
   // First, resolve to absolute path
@@ -3059,7 +3061,7 @@ export const buildPackage = async (
     });
   };
 
-  planBuildSteps(pkgJson, packagePath).forEach(buildStep);
+  planBuildSteps(pkgJson, packagePath, options).forEach(buildStep);
 
   let success = await buildProcess.catch((err) => {
     let msg =
@@ -3103,6 +3105,11 @@ export const buildPackage = async (
   return success === true;
 };
 
+export type BuildOptions = {
+  /** Skip the shape hierarchy check; the reason is printed. */
+  skipShapeCheck?: string;
+};
+
 type BuildStep = {
   name: string;
   // true/undefined: success; {info}: success with a note; a string: success
@@ -3143,7 +3150,11 @@ const loadServerClass = async (): Promise<any> => {
   }
 };
 
-export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
+export const planBuildSteps = (
+  pkgJson,
+  packagePath: string,
+  options: BuildOptions = {},
+): BuildStep[] => {
   // Loading every shape module in a child process of its own is the slow part of
   // a build; the shape checks below share one run, started by the first to ask.
   let inspection: Promise<ShapeReferenceReport> | undefined;
@@ -3294,6 +3305,13 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
     // because apps load a package's shapes with `import '<pkg>/shapes/index'`.
     name: 'Checking shapes/index',
     apply: () => checkShapesIndex(packagePath, undefined, inspectShapes()),
+  },
+  {
+    // The package's shapes, with its own and its dependencies' ontology data
+    // registered, against the class hierarchy: an error fails the build.
+    name: 'Checking shape hierarchy',
+    apply: () =>
+      checkShapeHierarchyStep(packagePath, {skip: options.skipShapeCheck}),
   },
   {
     // A bundler drops the side-effect-only imports in shapes/index of a module

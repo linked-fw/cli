@@ -108,7 +108,7 @@ const slugOf = (iri: string): string | undefined =>
  * component would look broken when it is not. A CSS-module stub maps every
  * class name to itself.
  */
-const ASSET_HOOK = `
+export const ASSET_HOOK = `
 const ASSET = /\\.(css|scss|sass|less|styl|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot)$/i;
 export async function load(url, context, next) {
   if (url.startsWith('file:') && ASSET.test(new URL(url).pathname)) {
