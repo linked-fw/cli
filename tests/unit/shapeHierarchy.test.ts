@@ -334,9 +334,11 @@ describe("the dependencies' ontology data and scope", () => {
     dependency();
     hound();
     expect(collectShapeCheckInputs(dir)).toMatchObject({
-      modules: expect.arrayContaining([
-        expect.stringMatching(/fixture-dep\/lib\/esm\/ontologies\/dep\.register\.js$/),
+      packageDirs: expect.arrayContaining([
+        fs.realpathSync(dir),
+        fs.realpathSync(path.join(dir, 'node_modules/@_linked/fixture-dep')),
       ]),
+      expectRegistered: ['@test/fixture', '@_linked/fixture-dep'],
       dependencies: {
         '@test/fixture': ['@_linked/core', '@_linked/fixture-dep'],
         '@_linked/fixture-dep': ['@_linked/core'],
@@ -394,6 +396,16 @@ describe('skipping', () => {
     expect(await checkShapeHierarchyStep(dir)).toBe(true);
   });
 
+  test('a core without the check warns and skips', async () => {
+    fixture({shapes: {Animal: animal, Dog: dogExtendingAnimal}, data: ''});
+    const core = path.join(dir, 'node_modules', '@_linked', 'core');
+    fs.unlinkSync(core);
+    write('node_modules/@_linked/core/package.json', JSON.stringify({name: '@_linked/core', version: '2.0.0'}));
+    expect(await checkShapeHierarchyStep(dir)).toBe(
+      'skipped: the @_linked/core this package resolves (2.0.0) has no shapes/checkShapeHierarchy',
+    );
+  });
+
   test('--skip-shape-check prints the reason and does not run the check', async () => {
     fixture({shapes: {Animal: animal, Dog: dogExtendingAnimal}, data: ''});
     expect(await checkShapeHierarchyStep(dir, {skip: 'pending the data fix'})).toBe(
@@ -403,6 +415,14 @@ describe('skipping', () => {
       (s) => s.name === 'Checking shape hierarchy',
     )!;
     expect(await step.apply()).toBe('skipped: pending the data fix');
+  });
+
+  test('a register module that throws fails the step and quotes the warning', async () => {
+    fixture({shapes: {Animal: animal}, data: ''});
+    write('lib/esm/ontologies/fx.register.js', "throw new Error('register boom');\n");
+    const result = (await checkShapeHierarchyStep(dir)) as {error: string};
+    expect(result.error).toMatch(/the ontology register modules of @test\/fixture threw/);
+    expect(result.error).toMatch(/register boom/);
   });
 
   test('a module that throws while loading fails the step and names it', async () => {

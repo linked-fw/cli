@@ -100,6 +100,7 @@ package goes in `./packages/`, `./modules/` or the current directory, and instal
 
 ```bash
 linked build                      # build the current package (tsc + checks)
+linked build --skip-shape-check "<reason>"  # the same without the shape hierarchy check
 linked build-app                  # build frontend + backend for the current app
 linked build-app --target web     # web release: build and write public/bundles/linked-release.json
 linked build-app --target capacitor  # Capacitor/local native build: local manifest only, never published
@@ -115,6 +116,19 @@ package publishes CommonJS. A package's ontology data, `src/data/<file>.ttl`, th
 `import.meta.url`. `linked build-app` copies the app's own `src/**/*.ttl` into `lib/` beside the
 compiled backend (a failed copy fails the build); framework and workspace packages stay external
 to the backend build and read their own `lib/esm/data/`.
+
+After compiling, `linked build` checks the package's shapes against the class hierarchy
+(**Checking shape hierarchy**). In one `node` process it loads the built package's `package.js`,
+`shapes/index.js` and ontology data (`ontologies/*.register.js`), and the ontology data of every
+linked dependency (dependencies and peerDependencies, transitively), then runs
+`@_linked/core/shapes/checkShapeHierarchy`. It reports a shape that extends another whose class its
+data does not make a superclass (`extends-without-subclass`), a subclass whose shape does not extend
+its superclass's shape (`subclass-without-extends`), a shape that inherits its parent's class instead
+of declaring its own (`borrowed-target-class`), a term in a mirrored standard's namespace the
+package's data does not define (`mirror-undefined-term`), and an override that widens what it
+inherits (`override-not-tightened`). Every finding is printed; an `error` fails the build, warnings
+alone do not. A package without shapes, or without a `@_linked/core` dependency, is not checked.
+`linked build --skip-shape-check "<reason>"` skips the check and prints the reason.
 
 `linked build` exits with code 1 whenever the build does not succeed, including when it is run in a `linkedApp` or
 in a package without `"linkedPackage": true` (it used to exit 0 there). A build that finishes with warnings still

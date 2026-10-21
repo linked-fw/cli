@@ -16,8 +16,9 @@ import {ASSET_HOOK, findShapeModules} from './shapeReferences.js';
  *
  * Everything has to be registered in one process: the package's shapes, its ontology data and the
  * ontology data of its dependencies (a package's `shapes/index` imports its dependencies' shapes
- * but not their data, which registers through each package's `ontologies/*.register.js`, as an
- * app's boot loads it). So, unlike the shape-reference check, this runs one child `node` for the
+ * but not their data, which registers through each package's `ontologies/*.register.js`). Core's
+ * `registerInstalledOntologies` registers the data of the package and of every linked dependency,
+ * as an app's boot does. So, unlike the shape-reference check, this runs one child `node` for the
  * whole package.
  */
 
@@ -31,12 +32,18 @@ export interface ShapeCheckFinding {
 }
 
 export interface ShapeCheckInputs {
-  /** File URLs, imported in this order. */
+  /** File URLs of the package's own modules (`package.js`, its shapes), imported in this order. */
   modules: string[];
+  /** The package's directory and each linked dependency's, for `registerInstalledOntologies`. */
+  packageDirs: string[];
+  /** The packages among them that have register modules, so must come back registered. */
+  expectRegistered: string[];
   /** Package name → its `dependencies` and `peerDependencies`, for the check's direction-I scope. */
   dependencies: Record<string, string[]>;
   /** File URL of the `checkShapeHierarchy` module the package's core provides. */
   core: string;
+  /** File URL of the `registerInstalled` module the package's core provides. */
+  registerInstalled: string;
 }
 
 export type ShapeCheckOutcome =
@@ -50,6 +57,7 @@ export type ShapeCheckOutcome =
 
 const CORE = '@_linked/core';
 const CHECK_MODULE = path.join('lib', 'esm', 'shapes', 'checkShapeHierarchy.js');
+const REGISTER_MODULE = path.join('lib', 'esm', 'ontology', 'registerInstalled.js');
 const DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies'];
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -75,15 +83,10 @@ export const resolvePackageDir = (name: string, fromDir: string): string | undef
   }
 };
 
-/** `lib/esm/ontologies/*.register.js` of a package, sorted. */
-const registerModules = (packageDir: string): string[] => {
+/** Whether a package's build holds ontology register modules (`lib/esm/ontologies/*.register.js`). */
+const hasRegisterModules = (packageDir: string): boolean => {
   const dir = path.join(packageDir, 'lib', 'esm', 'ontologies');
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((file) => /\.register\.js$/.test(file))
-    .sort()
-    .map((file) => path.join(dir, file));
+  return fs.existsSync(dir) && fs.readdirSync(dir).some((file) => /\.register\.js$/.test(file));
 };
 
 /** The name the package registers its shapes under: `linkedPackage('<name>')` in `package.js`. */
@@ -120,10 +123,16 @@ export const collectShapeCheckInputs = (
     return {skip: true, reason: `${CORE} is a dependency but could not be resolved from ${packagePath}`};
   }
   const core = path.join(coreDir, CHECK_MODULE);
-  if (!fs.existsSync(core)) {
+  const registerInstalled = path.join(coreDir, REGISTER_MODULE);
+  const lacking = [core, registerInstalled].find((file) => !fs.existsSync(file));
+  if (lacking) {
     return {
       skip: true,
-      reason: `the ${CORE} this package resolves (${readJson(path.join(coreDir, 'package.json')).version}) has no shapes/checkShapeHierarchy`,
+      reason: `the ${CORE} this package resolves (${readJson(path.join(coreDir, 'package.json')).version}) has no ${path
+        .relative(path.join(coreDir, 'lib', 'esm'), lacking)
+        .replace(/\.js$/, '')
+        .split(path.sep)
+        .join('/')}`,
     };
   }
 
@@ -132,7 +141,7 @@ export const collectShapeCheckInputs = (
   if (fs.existsSync(pkgModule)) modules.push(pkgModule);
   const index = path.join(libEsm, 'shapes', 'index.js');
   modules.push(...(fs.existsSync(index) ? [index] : shapeModules));
-  modules.push(...registerModules(packagePath));
+  const packageDirs = [fs.realpathSync(packagePath)];
 
   const dependencies: Record<string, string[]> = {};
   for (const name of new Set([pkgJson.name, runtimePackageName(libEsm)])) {
@@ -151,14 +160,19 @@ export const collectShapeCheckInputs = (
     if (!isLinkedDependency(name, depJson)) continue;
     const deps = dependencyNames(depJson);
     dependencies[name] = deps;
-    modules.push(...registerModules(dir));
+    packageDirs.push(dir);
     queue.push(...deps.map((dep) => ({name: dep, from: dir})));
   }
 
   return {
-    modules: [...new Set(modules)].map((file) => pathToFileURL(file).href),
+    modules: modules.map((file) => pathToFileURL(file).href),
+    packageDirs: [...new Set(packageDirs)],
+    expectRegistered: [...new Set(packageDirs)]
+      .filter(hasRegisterModules)
+      .map((dir) => readJson(path.join(dir, 'package.json')).name ?? path.basename(dir)),
     dependencies,
     core: pathToFileURL(core).href,
+    registerInstalled: pathToFileURL(registerInstalled).href,
   };
 };
 
@@ -176,6 +190,22 @@ try {
   for (const m of JSON.parse(process.env.LINKED_CHECK_MODULES)) {
     loading = m;
     await import(m);
+  }
+  loading = 'the ontology data of ' + process.env.LINKED_CHECK_PACKAGE_DIRS;
+  const {registerInstalledOntologies} = await import(process.env.LINKED_CHECK_REGISTER);
+  // A register module that throws is only warned about; here it fails the check, with the warning.
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = (...args) => warnings.push(args.map(String).join(' '));
+  let registered;
+  try {
+    registered = await registerInstalledOntologies(JSON.parse(process.env.LINKED_CHECK_PACKAGE_DIRS));
+  } finally {
+    console.warn = warn;
+  }
+  const failed = JSON.parse(process.env.LINKED_CHECK_EXPECT).filter((name) => !registered.includes(name));
+  if (failed.length > 0) {
+    throw new Error('the ontology register modules of ' + failed.join(', ') + ' threw:\\n' + warnings.join('\\n'));
   }
   loading = undefined;
   const {checkShapeHierarchy} = await import(process.env.LINKED_CHECK_CORE);
@@ -209,6 +239,9 @@ export const runShapeHierarchyCheck = async (
           LINKED_CHECK_MODULES: JSON.stringify(inputs.modules),
           LINKED_CHECK_DEPENDENCIES: JSON.stringify(inputs.dependencies),
           LINKED_CHECK_CORE: inputs.core,
+          LINKED_CHECK_REGISTER: inputs.registerInstalled,
+          LINKED_CHECK_PACKAGE_DIRS: JSON.stringify(inputs.packageDirs),
+          LINKED_CHECK_EXPECT: JSON.stringify(inputs.expectRegistered),
         },
         timeout: timeoutMs,
         maxBuffer: 64 * 1024 * 1024,
