@@ -37,6 +37,7 @@ import {
   INSTALL_ARGS,
   LOCKFILE,
   reportError,
+  refuseSharedInstall,
   restoreSetAside,
   tail,
 } from './localize.js';
@@ -50,6 +51,7 @@ export function delocalize(
   deps: Deps,
 ): number {
   try {
+    refuseSharedInstall(deps.appRoot);
     restoreSetAside(deps);
   } catch (e) {
     return reportError(e, deps);

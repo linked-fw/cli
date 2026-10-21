@@ -26,7 +26,7 @@ import process from 'node:process';
 import {integrationOf, agentBranch, getTarget, listRepos, setTarget, type RepoInfo} from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
-import {localBranchExists, refExists, selectCheckouts} from './branch.js';
+import {localBranchExists, refExists, selectCheckouts, worktreesOf} from './branch.js';
 
 export interface WorktreeAddOptions {
   /** `packages-local/` checkouts to give a worktree: package name, dir name or short name. */
@@ -353,35 +353,6 @@ function readJson(file: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-interface GitWorktree {
-  path: string;
-  head: string;
-  /** Null when detached. */
-  branch: string | null;
-}
-
-/** Parse `git worktree list --porcelain`. Bare entries are skipped. */
-export function parseWorktreeList(out: string): GitWorktree[] {
-  const list: GitWorktree[] = [];
-  for (const block of out.split(/\n\s*\n/)) {
-    let wt: GitWorktree | null = null;
-    let bare = false;
-    for (const line of block.split('\n')) {
-      if (line.startsWith('worktree ')) wt = {path: line.slice('worktree '.length), head: '', branch: null};
-      else if (wt && line.startsWith('HEAD ')) wt.head = line.slice(5);
-      else if (wt && line.startsWith('branch ')) wt.branch = line.slice(7).replace(/^refs\/heads\//, '');
-      else if (line === 'bare') bare = true;
-    }
-    if (wt && !bare) list.push(wt);
-  }
-  return list;
-}
-
-function worktreesOf(run: Run, repoDir: string): GitWorktree[] {
-  const r = run('git', ['worktree', 'list', '--porcelain'], {cwd: repoDir});
-  return r.status === 0 ? parseWorktreeList(r.stdout) : [];
 }
 
 /** Whether `branch` is contained in `base` in `repoDir`; null when detached. */

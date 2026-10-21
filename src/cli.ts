@@ -604,7 +604,7 @@ const doctor = program
 doctor
   .command('resolve')
   .description(
-    'Run in an app. For every source workspace and installed @_linked package: the directory Vite\'s dev SSR runner loads it from (or "external" when Vite leaves it to Node), the directory Node resolves it to, and whether Vite bundles it. Flags "overlay" when the two differ (a worktree\'s own checkout) and "two-copies" when they differ for a package Node also loads during linked start (@_linked/cli, @_linked/auth). Exits 1 on "two-copies".',
+    'Run in an app. For every source workspace and installed @_linked package: the directory Vite\'s dev SSR runner loads it from (or "external" when Vite leaves it to Node), the directory Node resolves it to, and whether Vite bundles it. Flags "overlay" when the two differ (a worktree\'s own checkout) and "two-copies" when they differ for a package Node also loads during linked start (@_linked/cli, and every @_linked package the app\'s vite.config imports). Exits 1 on "two-copies".',
   )
   .option('--json', 'Print the rows as JSON: name, vite, node, bundled, flag.')
   .action(async (options) => {
@@ -695,7 +695,7 @@ const release = program
 release
   .command('plan')
   .description(
-    'Run in an app on an integration branch. Per repo on it, in dependency order with the app last: commits, reports and changesets the target lacks, each new report\'s "## PR" section, the release PRs (head <integration>--*) in stack order with their state (via gh), and the next action: open PRs, waiting, merge target back, done or nothing to release. Changes nothing.',
+    'Run in an app on an integration branch. Per repo on it, in dependency order with the app last: commits, reports and changesets the target lacks, each new report\'s "## PR" section, the release PRs (head <integration>--*) in stack order with their state (via gh), and the next action: open PRs, waiting, merge target back, done or nothing to release. Warns when a changesets repo adds no changeset, and when origin/<target> has commits the local target lacks. It compares against the local target branches and never fetches: fetch and fast-forward them first. Changes nothing.',
   )
   .option('--json', 'Print the plan as JSON.')
   .action(async (options) => {

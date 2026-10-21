@@ -26,14 +26,43 @@ import {
   type WorkspaceEntry,
 } from '../vite-config.js';
 
+/** The `vite.config` files Vite looks for in the app root. */
+const VITE_CONFIGS = ['vite.config.ts', 'vite.config.js', 'vite.config.mts', 'vite.config.mjs'];
+
+/** `from '…'`, `import '…'`, `import('…')` and `require('…')` of an `@_linked/*` package; group 1 is the package name. */
+const LINKED_SPECIFIER =
+  /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)['"](@_linked\/[^'"/\s]+)/g;
+
+/** Comments, and imports TypeScript erases (`import type`, `export type … from`). */
+const NOT_LOADED = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|\b(?:import|export)\s+type\s[^;]*?from\s*['"][^'"]*['"]/g;
+
+/** The `@_linked/*` packages `source` imports at run time, by package name, each once. */
+export function linkedImports(source: string): string[] {
+  const code = source.replace(NOT_LOADED, '');
+  return [...new Set([...code.matchAll(LINKED_SPECIFIER)].map((m) => m[1]))];
+}
+
 /**
  * Packages Node itself loads while `linked start` runs, so a bundled copy of
  * one of them is a second instance in the same process:
- * - `@_linked/cli`: the `linked` bin is the CLI, loaded from its `lib/`.
- * - `@_linked/auth`: CN's `vite.config.ts` imports
- *   `@_linked/auth/utils/cookieNames` natively when Vite reads its config.
+ * - `@_linked/cli`: the `linked` bin is the CLI, loaded from its `lib/`;
+ * - every `@_linked/*` package the app's `vite.config.*` imports: Node loads
+ *   the config, and so those packages, natively when Vite starts (CN's imports
+ *   `@_linked/auth/utils/cookieNames`).
  */
-export const NODE_LOADED = ['@_linked/cli', '@_linked/auth'];
+export function nodeLoaded(cwd: string): string[] {
+  const names = new Set(['@_linked/cli']);
+  for (const file of VITE_CONFIGS) {
+    let source: string;
+    try {
+      source = fs.readFileSync(path.join(cwd, file), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const name of linkedImports(source)) names.add(name);
+  }
+  return [...names].sort();
+}
 
 export type ResolveFlag = 'two-copies' | 'overlay' | '';
 
@@ -67,8 +96,8 @@ const realpath = (p: string): string => {
 /**
  * Vite matches `ssr.noExternal` entries against the bare package name, and a
  * name in `ssr.external` wins over `ssr.noExternal` (Vite 6
- * `createIsConfiguredAsExternal`). That matters for the CLI: `workspaceDependents`
- * can list it (it depends on workspace packages), but `ssrExternal(true)` names it.
+ * `createIsConfiguredAsExternal`), so a name in both is external. `ssrNoExternal`
+ * already leaves the CLI out; the order here keeps a passed-in `noExternal` honest.
  */
 function isBundled(noExternal: (string | RegExp)[], external: string[], name: string): boolean {
   if (external.includes(name)) return false;
@@ -122,6 +151,7 @@ export async function resolveRows(
   const external = inputs.external ?? ssrExternal(true);
   const wsRoot = new Map(workspaces.map((w) => [w.name, realpath(path.dirname(w.srcDir))]));
   const names = [...new Set([...workspaces.map((w) => w.name), ...installedLinkedNames(cwd)])].sort();
+  const loadedByNode = nodeLoaded(cwd);
 
   return names.map((name) => {
     const node = nodeResolveRoot(name, cwd);
@@ -131,7 +161,7 @@ export async function resolveRows(
     const vite = bundled ? (wsRoot.get(name) ?? node ?? 'external') : 'external';
     let flag: ResolveFlag = '';
     if (bundled && vite !== node) {
-      flag = NODE_LOADED.includes(name) ? 'two-copies' : 'overlay';
+      flag = loadedByNode.includes(name) ? 'two-copies' : 'overlay';
     }
     return {name, vite, node, bundled, flag};
   });

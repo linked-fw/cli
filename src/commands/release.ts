@@ -87,6 +87,16 @@ export interface ReleaseRepo {
   /** Why the PR state is unknown: `gh not found`, or the first line of gh's error. */
   prReason?: string;
   next: NextAction;
+  /**
+   * What may make the plan wrong, each a short sentence:
+   * - `no changeset: merging will not publish`: the repo uses changesets
+   *   (`.changeset/config.json` at the integration tip), has commits to
+   *   release, and adds no changeset;
+   * - `target behind origin/<target>: fetch first`: the remote-tracking ref
+   *   has commits the local target lacks. The plan compares against the
+   *   local target and never fetches, so it may be stale.
+   */
+  warnings: string[];
 }
 
 export interface ReleasePlan {
@@ -256,6 +266,7 @@ async function planRepo(
     changesets: [] as string[],
     prs: [] as ReleasePr[],
     prState: 'known' as const,
+    warnings: [] as string[],
   };
   if (!refExists(run, repo.dir, target)) {
     return {...base, error: `target "${target}" does not exist`, next: 'nothing to release'};
@@ -276,9 +287,24 @@ async function planRepo(
   const changesets = added('.changeset').filter(
     (p) => p.endsWith('.md') && !['.changeset/README.md', '.changeset/config.json'].includes(p),
   );
+  const warnings: string[] = [];
+  const usesChangesets =
+    run('git', ['cat-file', '-e', `${tip}:.changeset/config.json`], {cwd: repo.dir}).status === 0;
+  if (usesChangesets && subjects.length > 0 && changesets.length === 0) {
+    warnings.push('no changeset: merging will not publish');
+  }
+  const remote = `refs/remotes/origin/${target}`;
+  if (refExists(run, repo.dir, remote)) {
+    const behind = Number.parseInt(
+      git(run, repo.dir, ['rev-list', '--count', `${target}..${remote}`]),
+      10,
+    );
+    if (behind > 0) warnings.push(`target behind origin/${target}: fetch first`);
+  }
   const found = releasePrs(gh, repo.dir, integration.branch);
   const partial = {
     ...base,
+    warnings,
     commits: {count: subjects.length, subjects},
     targetAhead,
     reports,
@@ -325,6 +351,7 @@ export function formatReleasePlan(plan: ReleasePlan): string {
       return;
     }
     out.push(`   next: ${r.next}`);
+    for (const w of r.warnings) out.push(`   warning: ${w}`);
     out.push(`   commits: ${r.commits.count}`);
     for (const s of r.commits.subjects) out.push(`     - ${s}`);
     if (r.targetAhead > 0) out.push(`   target has ${r.targetAhead} commit(s) not in ${plan.integration!.branch}`);

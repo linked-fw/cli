@@ -97,6 +97,10 @@ describe('ssr.noExternal', () => {
     expect(noExternal).toContain('@_linked/server');
     expect(noExternal).not.toContain('@_linked/cli');
     expect(bundled(noExternal, '@_linked/cli')).toBe(false);
+    // Nor as a dependent of a workspace, which the CLI is.
+    const withDependents = ssrNoExternal([{name: '@_linked/core'}], ['@_linked/cli', 'uses-core']);
+    expect(withDependents).toContain('uses-core');
+    expect(withDependents).not.toContain('@_linked/cli');
     // Vite externalizes a package that resolves outside node_modules (a checkout)
     // only when `ssr.external` names it.
     expect(ssrExternal(true)).toContain('@_linked/cli');

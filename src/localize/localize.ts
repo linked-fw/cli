@@ -31,6 +31,11 @@
  *      builds run `linked`. A failing build warns: a package whose build is
  *      broken is usually what you localized it to fix.
  *
+ * Before any of it, a run refuses an app whose `node_modules` is a symlink: a
+ * git worktree sharing the main checkout's install (`linked worktree add`).
+ * Installing there would rewrite the main checkout's install and relink its
+ * packages to the worktree's checkouts (`refuseSharedInstall`).
+ *
  * `adopt` (adopt.ts) replaces step 3 with "the checkout is already there", and
  * `--parked` with "every parked checkout". Steps 1, 2 and 4-6 are `runLocalize`.
  *
@@ -130,6 +135,7 @@ export function runLocalize(
 ): number {
   let setupLock: string | undefined;
   try {
+    refuseSharedInstall(deps.appRoot);
     restoreSetAside(deps);
     checkDir(opts.dir);
     // The checkouts already there count too: the one install below covers them all.
@@ -621,6 +627,35 @@ export function defaultBuildCommand(
   pkg: {scripts?: Record<string, unknown>} | null,
 ): string {
   return typeof pkg?.scripts?.build === 'string' ? DEFAULT_BUILD_COMMAND : '';
+}
+
+/**
+ * Throw when `appRoot/node_modules` is a symlink: the app is a worktree that
+ * shares another checkout's install, and an `npm install` here would rewrite
+ * that checkout's `node_modules` (and relink its packages to this worktree's
+ * checkouts). localize and delocalize install, so they run in the checkout
+ * that owns the install, which the message names. Reading (`--list`) is fine.
+ */
+export function refuseSharedInstall(appRoot: string): void {
+  const nodeModules = path.join(appRoot, 'node_modules');
+  let isLink = false;
+  try {
+    isLink = fs.lstatSync(nodeModules).isSymbolicLink();
+  } catch {
+    return;
+  }
+  if (!isLink) return;
+  let owner: string;
+  try {
+    owner = path.dirname(fs.realpathSync(nodeModules));
+  } catch {
+    owner = `the target of ${nodeModules}`;
+  }
+  throw new LocalizeError(
+    `${nodeModules} is a symlink: this worktree shares the install of ${owner}, and installing ` +
+      `here would rewrite it. Run this in ${owner} instead. Nothing was changed.`,
+    EXIT_REFUSED,
+  );
 }
 
 export function reportError(e: unknown, deps: Pick<Deps, 'error'>): number {

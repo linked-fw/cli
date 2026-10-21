@@ -700,7 +700,7 @@ export const STANDALONE_SSR_BUNDLED = /^@_linked\/(?!(core|cli)$)/;
  * Installed packages that depend on a workspace (`dependents`, from
  * `workspaceDependents`) are bundled too, so they share the Vite-loaded workspace,
  * and `SSR_ENTRY_PACKAGES` are bundled. `SSR_NODE_PACKAGES` are not, even as
- * workspaces.
+ * workspaces or dependents.
  * Standalone (no workspaces): every `@_linked/*` but core and the CLI
  * (`STANDALONE_SSR_BUNDLED`; see the comment at `noExternal` in `createViteConfig`).
  */
@@ -712,7 +712,9 @@ export function ssrNoExternal(
     return [STANDALONE_SSR_BUNDLED];
   }
   const names = ssrBundledWorkspaces(workspaces).map((w) => w.name);
-  return [...new Set([...names, ...dependents, ...SSR_ENTRY_PACKAGES])];
+  // The CLI depends on workspace packages, so `workspaceDependents` can list it.
+  const bundledDependents = dependents.filter((name) => !SSR_NODE_PACKAGES.includes(name));
+  return [...new Set([...names, ...bundledDependents, ...SSR_ENTRY_PACKAGES])];
 }
 
 /**

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {doctorResolve, resolveRows} from '../../src/commands/doctor';
+import {doctorResolve, linkedImports, nodeLoaded, resolveRows} from '../../src/commands/doctor';
 
 // `linked doctor resolve` compares where Vite's dev SSR runner loads each
 // package with where Node resolves it, so a worktree overlay is visible and a
@@ -100,7 +100,7 @@ describe('linked doctor resolve', () => {
     // Without inputs the real config leaves the CLI to Node: no flag.
     const [real] = await resolveRows(wt);
     expect(real).toEqual({name: '@_linked/cli', vite: 'external', node: mainCli, bundled: false, flag: ''});
-    // Listed in ssr.noExternal too (workspaceDependents can return it), ssr.external still wins.
+    // Passed in ssr.noExternal too, ssr.external still wins.
     const [both] = await resolveRows(wt, {noExternal: ['@_linked/cli']});
     expect(both.bundled).toBe(false);
 
@@ -110,6 +110,63 @@ describe('linked doctor resolve', () => {
     const out: string[] = [];
     expect(await doctorResolve({}, wt, inputs, (s) => out.push(s))).toBe(1);
     expect(out.join('')).toContain('@_linked/cli: Vite bundles a different copy');
+  });
+
+  it('NODE_LOADED from the app\'s vite config: an overlay of a package it imports is two copies', async () => {
+    // The main checkout and a worktree overlaying @_linked/auth and @_linked/server.
+    const main = path.join(tmp, 'main');
+    const wt = path.join(tmp, 'wt');
+    writeJson(path.join(wt, 'package.json'), {name: 'app', workspaces: ['packages-local/*']});
+    link(path.join(main, 'node_modules'), path.join(wt, 'node_modules'));
+    for (const short of ['auth', 'server']) {
+      const mainPkg = path.join(main, 'packages-local', `_linked-${short}`);
+      sourcePkg(mainPkg, `@_linked/${short}`);
+      link(mainPkg, path.join(main, 'node_modules', '@_linked', short));
+      sourcePkg(path.join(wt, 'packages-local', `_linked-${short}`), `@_linked/${short}`);
+    }
+
+    // No vite config: only the CLI is loaded by Node, so both are overlays.
+    expect(nodeLoaded(wt)).toEqual(['@_linked/cli']);
+    expect((await resolveRows(wt)).map((r) => r.flag)).toEqual(['overlay', 'overlay']);
+
+    fs.writeFileSync(
+      path.join(wt, 'vite.config.ts'),
+      [
+        "import {defineConfig} from 'vite';",
+        "import {AUTH_COOKIE} from '@_linked/auth/utils/cookieNames';",
+        "import type {Shape} from '@_linked/core/shapes/Shape';",
+        "// import '@_linked/maps';",
+        "const x = await import('@_linked/rdfs');",
+        'export default defineConfig({});',
+      ].join('\n'),
+    );
+    expect(nodeLoaded(wt)).toEqual(['@_linked/auth', '@_linked/cli', '@_linked/rdfs']);
+    const rows = await resolveRows(wt);
+    expect(rows.map((r) => [r.name, r.flag])).toEqual([
+      ['@_linked/auth', 'two-copies'],
+      ['@_linked/server', 'overlay'],
+    ]);
+    expect(await doctorResolve({}, wt, {}, () => {})).toBe(1);
+  });
+
+  it('linkedImports reads import, export-from, dynamic import and require specifiers', () => {
+    const source = [
+      "import a from '@_linked/a';",
+      'import "@_linked/b/side-effect";',
+      "export {c} from '@_linked/c/sub/path';",
+      "const d = require('@_linked/d');",
+      "const e = await import ( '@_linked/e/x' );",
+      "export type {F} from '@_linked/f';",
+      "/* import g from '@_linked/g'; */",
+      "import h from '@other/h';",
+    ].join('\n');
+    expect(linkedImports(source).sort()).toEqual([
+      '@_linked/a',
+      '@_linked/b',
+      '@_linked/c',
+      '@_linked/d',
+      '@_linked/e',
+    ]);
   });
 
   it('--json prints the rows with name, vite, node, bundled and flag', async () => {

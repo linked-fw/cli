@@ -122,6 +122,61 @@ describe('linked release plan', () => {
     assert.equal(repo.commits.count, 3);
     assert.equal(repo.commits.subjects[0], 'feat: one');
     assert.deepEqual(repo.changesets, ['.changeset/feat.md']);
+    assert.deepEqual(repo.warnings, []);
+  });
+
+  describe('warnings', () => {
+    test('warns no changeset', async () => {
+      const {root, core, server} = await makeApp();
+      commit(core, '.changeset/config.json', '{}', 'config');
+      commit(core, 'a.txt', 'a', 'feat: a');
+      // server uses changesets too, but has nothing to release: no warning.
+      commit(server, '.changeset/config.json', '{}', 'config');
+      git(server, 'switch', '-q', 'main');
+      git(server, 'merge', '-q', '--ff-only', 'overhaul');
+      git(server, 'switch', '-q', 'overhaul');
+      const plan = await releasePlan(root, {gh: fakeGh()});
+      const byRepo = Object.fromEntries(plan.repos.map((r) => [r.repo, r]));
+      assert.deepEqual(byRepo['packages-local/_linked-core'].warnings, [
+        'no changeset: merging will not publish',
+      ]);
+      assert.deepEqual(byRepo['packages-local/_linked-server'].warnings, []);
+      // The app root has no .changeset/config.json: no warning either.
+      commit(root, 'b.txt', 'b', 'app work');
+      const again = await releasePlan(root, {gh: fakeGh()});
+      assert.deepEqual(again.repos.find((r) => r.repo === '.')!.warnings, []);
+      assert.match(formatReleasePlan(plan), /warning: no changeset: merging will not publish/);
+    });
+
+    test('warns target behind origin', async () => {
+      const {root, core} = await makeApp();
+      const remotes = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'release-origin-')));
+      tmpDirs.push(remotes);
+      const bare = path.join(remotes, 'core.git');
+      git(remotes, 'init', '-q', '--bare', '-b', 'main', bare);
+      git(core, 'remote', 'add', 'origin', bare);
+      git(core, 'push', '-q', 'origin', 'main');
+      git(core, 'fetch', '-q', 'origin');
+      let repo = (await releasePlan(root, {gh: fakeGh()})).repos[0];
+      assert.deepEqual(repo.warnings, []);
+
+      // Someone else lands on origin's main; the local main does not have it.
+      const other = path.join(remotes, 'other');
+      git(remotes, 'clone', '-q', bare, other);
+      git(other, 'config', 'user.email', 'test@example.com');
+      git(other, 'config', 'user.name', 'Test');
+      git(other, 'config', 'commit.gpgsign', 'false');
+      git(other, 'config', 'core.hooksPath', '/dev/null');
+      commit(other, 'c.txt', 'c', 'landed elsewhere');
+      git(other, 'push', '-q', 'origin', 'main');
+      git(core, 'fetch', '-q', 'origin');
+
+      const plan = await releasePlan(root, {gh: fakeGh()});
+      repo = plan.repos[0];
+      assert.equal(repo.repo, 'packages-local/_linked-core');
+      assert.deepEqual(repo.warnings, ['target behind origin/main: fetch first']);
+      assert.match(formatReleasePlan(plan), /warning: target behind origin\/main: fetch first/);
+    });
   });
 
   test('orders by dependency', async () => {

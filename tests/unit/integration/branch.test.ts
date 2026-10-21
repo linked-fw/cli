@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import {branchStart, branchStatus} from '../../../src/commands/branch.js';
 import {getTarget} from '../../../src/integration/repos.js';
-import {makeRun} from '../../../src/localize/run.js';
+import {makeRun, type Run} from '../../../src/localize/run.js';
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -120,6 +120,59 @@ describe('linked branch start', () => {
     assert.match(text, /@_linked\/server/);
     assert.equal(branchOf(root), 'main');
     assert.equal(hasBranch(root, 'overhaul'), false);
+  });
+});
+
+describe('linked branch start: atomicity', () => {
+  test('start refuses name === target', async () => {
+    const {root} = makeApp();
+    const result = await branchStart(root, 'main', 'main', []);
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /is the target itself/);
+    assert.equal(await getTarget(root, 'main'), null);
+  });
+
+  test('start refuses a branch checked out elsewhere', async () => {
+    const {root, core} = makeApp();
+    git(core, 'branch', 'overhaul');
+    const elsewhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'branch-wt-')));
+    tmpDirs.push(elsewhere);
+    const wtDir = path.join(elsewhere, 'core');
+    git(core, 'worktree', 'add', '-q', wtDir, 'overhaul');
+    const result = await branchStart(root, 'overhaul', 'main', ['core']);
+    assert.notEqual(result.code, 0);
+    const text = result.messages.join('\n');
+    assert.match(text, /checked out in another worktree of packages-local\/_linked-core/);
+    assert.match(text, /nothing was switched/);
+    assert.equal(branchOf(root), 'main');
+    assert.equal(hasBranch(root, 'overhaul'), false);
+    assert.equal(await getTarget(root, 'overhaul'), null);
+  });
+
+  test('start undoes earlier switches when one fails', async () => {
+    const {root, core, server} = makeApp();
+    // core already has the branch (switched to, not created); root gets it created.
+    git(core, 'branch', 'overhaul');
+    git(root, 'config', 'branch.overhaul.linked-target', 'old-target');
+    const real = makeRun(root);
+    const run: Run = (cmd, args, opts) =>
+      cmd === 'git' && args[0] === 'switch' && opts?.cwd === server && args.includes('overhaul')
+        ? {status: 1, stdout: '', stderr: 'simulated failure'}
+        : real(cmd, args, opts);
+    const result = await branchStart(root, 'overhaul', 'main', ['core', 'server'], run);
+    assert.notEqual(result.code, 0);
+    const text = result.messages.join('\n');
+    assert.match(text, /packages-local\/_linked-server: git switch -c overhaul main failed: simulated failure/);
+    assert.match(text, /back where they were/);
+    assert.equal(branchOf(root), 'main');
+    assert.equal(branchOf(core), 'main');
+    assert.equal(branchOf(server), 'main');
+    // Created by this run: gone. There before: kept.
+    assert.equal(hasBranch(root, 'overhaul'), false);
+    assert.equal(hasBranch(core, 'overhaul'), true);
+    // Target entries back to what they were.
+    assert.equal(await getTarget(root, 'overhaul'), 'old-target');
+    assert.equal(await getTarget(core, 'overhaul'), null);
   });
 });
 

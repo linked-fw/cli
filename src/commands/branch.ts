@@ -7,6 +7,7 @@
  * and an exit code; printing is separate, so tests drive them against real
  * throwaway repos.
  */
+import fs from 'node:fs';
 import process from 'node:process';
 
 import {
@@ -55,6 +56,36 @@ export function refExists(run: Run, dir: string, ref: string): boolean {
 
 export function localBranchExists(run: Run, dir: string, branch: string): boolean {
   return refExists(run, dir, `refs/heads/${branch}`);
+}
+
+export interface GitWorktree {
+  path: string;
+  head: string;
+  /** Null when detached. */
+  branch: string | null;
+}
+
+/** Parse `git worktree list --porcelain`. Bare entries are skipped. */
+export function parseWorktreeList(out: string): GitWorktree[] {
+  const list: GitWorktree[] = [];
+  for (const block of out.split(/\n\s*\n/)) {
+    let wt: GitWorktree | null = null;
+    let bare = false;
+    for (const line of block.split('\n')) {
+      if (line.startsWith('worktree ')) wt = {path: line.slice('worktree '.length), head: '', branch: null};
+      else if (wt && line.startsWith('HEAD ')) wt.head = line.slice(5);
+      else if (wt && line.startsWith('branch ')) wt.branch = line.slice(7).replace(/^refs\/heads\//, '');
+      else if (line === 'bare') bare = true;
+    }
+    if (wt && !bare) list.push(wt);
+  }
+  return list;
+}
+
+/** The worktrees of the repo at `repoDir`, its main checkout first; empty when git fails. */
+export function worktreesOf(run: Run, repoDir: string): GitWorktree[] {
+  const r = run('git', ['worktree', 'list', '--porcelain'], {cwd: repoDir});
+  return r.status === 0 ? parseWorktreeList(r.stdout) : [];
 }
 
 /**
@@ -192,11 +223,27 @@ export function selectCheckouts(
   return {repos};
 }
 
+/** `p` resolved through symlinks when it exists, so paths compare equal however they were spelled. */
+function real(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
 /**
  * Put the app root and the named `packages-local/` checkouts on integration
  * branch `name`, created from `target` where it does not exist yet, and
- * record `target` for it in each. Every precondition is checked in every
- * selected repo before any is switched, so a refusal leaves all untouched.
+ * record `target` for it in each.
+ *
+ * Every precondition (a valid name other than the target, clean trees, the
+ * target present wherever the branch has to be created, and no other
+ * worktree holding the branch) is checked in every selected repo before any
+ * is switched, so a refusal leaves all untouched. If a switch still fails
+ * partway, the repos already switched go back to where they were: each
+ * returns to its previous branch (or commit), a branch this run created is
+ * deleted, and the target entry is restored.
  */
 export async function branchStart(
   appRoot: string,
@@ -213,6 +260,11 @@ export async function branchStart(
     );
   }
   if (!target) return refuse('--target <branch> is required.');
+  if (name === target) {
+    return refuse(
+      `"${name}" is the target itself: an integration branch lands in its target, so it needs a name of its own.`,
+    );
+  }
   const check = run('git', ['check-ref-format', '--branch', name], {cwd: appRoot});
   if (check.status !== 0) return refuse(`"${name}" is not a valid branch name.`);
 
@@ -238,20 +290,65 @@ export async function branchStart(
       `"${target}" does not exist in ${noTarget.map((p) => p.repo.rel).join(', ')}, so "${name}" cannot be created there; nothing was switched.`,
     );
   }
+  // git refuses to switch to a branch another worktree has checked out.
+  const held: string[] = [];
+  for (const {repo} of plan) {
+    const self = real(repo.dir);
+    for (const wt of worktreesOf(run, repo.dir)) {
+      if (wt.branch === name && real(wt.path) !== self) held.push(`${repo.rel} (at ${wt.path})`);
+    }
+  }
+  if (held.length) {
+    return refuse(
+      `"${name}" is checked out in another worktree of ${held.join(', ')}. Remove that worktree or pick another name; nothing was switched.`,
+    );
+  }
 
   const messages: string[] = [];
-  for (const {repo, exists} of plan) {
-    if (repo.branch !== name) {
-      const args = exists ? ['switch', name] : ['switch', '-c', name, target];
-      const r = run('git', args, {cwd: repo.dir});
-      if (r.status !== 0) {
-        messages.push(`${repo.rel}: git ${args.join(' ')} failed: ${(r.stderr || r.stdout).trim()}`);
-        return {code: 1, messages};
+  // Each repo switched pushes how to put it back.
+  const undo: (() => void)[] = [];
+  const rollback = (): BranchStartResult => {
+    for (const fn of undo.reverse()) {
+      try {
+        fn();
+      } catch (error) {
+        messages.push(`undo failed: ${(error as Error).message}`);
       }
     }
-    await setTarget(repo.dir, name, target, run);
-    const how = repo.branch === name ? 'already on' : exists ? 'switched to' : 'created';
-    messages.push(`${repo.rel}: ${how} ${name} (target ${target})`);
+    if (undo.length) messages.push('Put the repos switched so far back where they were.');
+    return {code: 1, messages};
+  };
+  const key = `branch.${name}.linked-target`;
+  try {
+    for (const {repo, exists} of plan) {
+      const previousTarget = await getTarget(repo.dir, name, run);
+      if (repo.branch !== name) {
+        const args = exists ? ['switch', name] : ['switch', '-c', name, target];
+        const r = run('git', args, {cwd: repo.dir});
+        if (r.status !== 0) {
+          messages.push(`${repo.rel}: git ${args.join(' ')} failed: ${(r.stderr || r.stdout).trim()}`);
+          return rollback();
+        }
+      }
+      undo.push(() => {
+        if (repo.branch !== name) {
+          const back = repo.branch ? ['switch', repo.branch] : ['switch', '--detach', repo.head];
+          run('git', back, {cwd: repo.dir});
+          if (!exists) run('git', ['branch', '-D', name], {cwd: repo.dir});
+        }
+        run(
+          'git',
+          previousTarget ? ['config', key, previousTarget] : ['config', '--unset', key],
+          {cwd: repo.dir},
+        );
+      });
+      await setTarget(repo.dir, name, target, run);
+      const how = repo.branch === name ? 'already on' : exists ? 'switched to' : 'created';
+      messages.push(`${repo.rel}: ${how} ${name} (target ${target})`);
+    }
+  } catch (error) {
+    messages.push(`failed: ${(error as Error).message}`);
+    return rollback();
   }
   const untouched = local.filter((r) => !selected.includes(r)).map((r) => r.rel);
   if (untouched.length) messages.push(`Left as they are: ${untouched.join(', ')}`);
