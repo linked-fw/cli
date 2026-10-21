@@ -62,10 +62,9 @@ const EXAMPLE_ONTOLOGY_FILES = [
   // The register sibling is what index.ts imports; without it the package keeps a literal
   // `example-ontology.register.ts` full of unfilled `${...}` and nothing calls linkedOntology().
   'src/ontologies/example-ontology.register.ts',
-  'src/data/example-ontology.json',
-  'src/data/example-ontology.json.d.ts',
+  'src/data/example-ontology.ttl',
 ];
-const FILLED_ONTOLOGY_FILES = EXAMPLE_ONTOLOGY_FILES.slice(0, 3);
+const FILLED_ONTOLOGY_FILES = EXAMPLE_ONTOLOGY_FILES;
 
 /**
  * This package's `defaults/` folder. The built module sits in `lib/esm/utils/`

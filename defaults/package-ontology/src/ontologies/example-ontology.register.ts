@@ -13,4 +13,4 @@ import * as terms from './${hyphen_name}.js';
 import {linkedOntology} from '../package.js';
 import {loadData, ns} from './${hyphen_name}.js';
 
-linkedOntology(terms, ns, '${hyphen_name}', loadData, '../data/${hyphen_name}.json');
+linkedOntology(terms, ns, '${hyphen_name}', loadData, ['../data/${hyphen_name}.ttl']);

@@ -6,8 +6,10 @@ summary: >
   own `src/**/*.ttl` into `lib/` beside the compiled backend (`copyBackendOntologyData`; a failed
   copy fails the build). Measured in every mode an app runs in (release backend, dev SSR standalone
   and workspace, client build, tarball): each module reads the Turtle beside its own file through
-  `import.meta.url`. Part of CN plan 070 (sub-plan 001, step L1); the scaffold in Turtle and the
-  e2e on the inferring Fuseki image follow.
+  `import.meta.url`. New ontology packages are scaffolded in Turtle (`src/data/<name>.ttl`,
+  `loadData` through core's `loadOntologyFiles`), which also changes Create Now's generated project
+  packages. Part of CN plan 070 (sub-plan 001, step L1); the e2e on the inferring Fuseki image
+  follows.
 ---
 
 # 024 — Turtle in the build
@@ -128,9 +130,70 @@ CJS is published), `buildBackend.test.ts` (`copyBackendOntologyData`: same relat
 only, nothing for an app without Turtle, fails on a copy error), `ontologyDataReachable.test.ts`
 (M1-M4, needs the built CLI; CI builds before it tests).
 
+## The scaffold in Turtle
+
+`create-package --kind ontology` (through `buildPackageFiles`) and `create-ontology` write:
+
+- `src/data/<name>.ttl`, replacing `<name>.json` and `<name>.json.d.ts`: a fixed prefix block
+  (`dc`, `owl`, `rdf`, `rdfs` and the ontology's own prefix, as the JSON-LD context had) and
+  `<namespace> a owl:Ontology .`, no blank nodes;
+- `src/ontologies/<name>.ts`: `export var loadData = () => loadOntologyFiles(import.meta.url,
+  ['../data/<name>.ttl']);` (`@_linked/core/ontology/loadOntologyFiles`);
+- `src/ontologies/<name>.register.ts`: `linkedOntology(terms, ns, '<name>', loadData,
+  ['../data/<name>.ttl']);`, the master plan's contract form. Core's `docs/ontologies.md` shows
+  the same call with an exported `dataFiles` constant; the scaffold keeps the literal list so the
+  ontology module exports nothing but terms, `ns` and `loadData`.
+
+Create Now builds its project packages through `buildPackageFiles`, so they change with it; its
+`appProjectPackages.test.ts` now expects the `.ttl` file and the array form, and arch-03's package
+tree names `data/<name>.ttl`.
+
+**Verify** (tmp dir, worktree CLI as `$LINKED`; core packed from `store-inference` 944b6d0):
+
+```
+$ $LINKED create-package probe --kind ontology
+create exit 1   (expected: npm's core has no ontology/loadOntologyFiles yet)
+TS2307: Cannot find module '@_linked/core/ontology/loadOntologyFiles' …
+$ npm install <tmp>/_linked-core-2.36.4.tgz
+$ (cd probe-ont && time $LINKED build)
+✔ Build successful        build exit 0, 1.93 s
+$ ls lib/esm/data
+probe.ttl
+$ npm pack --dry-run | grep data/
+npm notice 311B lib/esm/data/probe.ttl
+```
+
+The built package registers and reads its data through core (importing `lib/esm/index.js`, then
+`getRegisteredOntologies()` and the entry's `load()`):
+
+```
+{"prefix":"probe","files":["../data/probe.ttl"],"loaded":[311]}
+```
+
+Gate after the phase:
+
+```
+$ time npx linked build
+✔ Build successful        9.34 s
+$ time npx jest --config jest.config.cjs <the Verify line> tests/unit/ontologyDataReachable.test.ts
+Test Suites: 8 passed, 8 total
+Tests:       130 passed, 130 total        4.92 s
+$ time npm run test:unit
+Test Suites: 80 passed, 80 total
+Tests:       870 passed, 870 total        21.8 s
+CN (~/web/wt/070-L1): $ time npx vitest run src/backend/provisioners/appProjectPackages.test.ts
+Test Files  1 passed (1)
+Tests  25 passed | 1 skipped (26)        5.37 s
+```
+
+New and changed cases: `createPackageScaffold.test.ts` and `packageFiles.test.ts` (file list holds
+`src/data/planning.ttl` and no `.json`, the register line, the `loadOntologyFiles` call, the
+`owl:Ontology` line), `createInsidePackage.test.ts` (`create-ontology` in a package writes the three
+files, fills every variable and adds the register import).
+
 ## Follow-ups
 
-- The ontology scaffold in Turtle (`create-ontology`, `create-package --kind ontology`,
-  `buildPackageFiles`) and CN's `appProjectPackages.test.ts` line: sub-plan 001, L1 phase 2
-  (after core's `loadOntologyFiles`).
+- The scaffold's `@_linked/core` range (`defaults/package/package.json`, `^2.0`) must reach the
+  core release that exports `ontology/loadOntologyFiles`, and `tests/template/package.full.test.ts`
+  (installs from npm) passes only then: sub-plan 001, Release (R).
 - `tests/e2e/create-app.spec.ts` on the inferring Fuseki image: sub-plan 001, L1 phase 3.

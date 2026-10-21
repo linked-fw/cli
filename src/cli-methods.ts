@@ -1431,36 +1431,22 @@ export const createOntology = async (
     targetRegisterFile,
   );
 
-  //copy data files
+  // The ontology's data, Turtle. `loadData` reads it beside the compiled module
+  // (`../data/<name>.ttl`), and `linked build` copies it to lib/esm/data/.
   let targetDataFile = path.join(
     targetFolder,
     '..',
     'data',
-    hyphenName + '.json',
-  );
-  let targetDataFile2 = path.join(
-    targetFolder,
-    '..',
-    'data',
-    hyphenName + '.json.d.ts',
+    hyphenName + '.ttl',
   );
   fs.copySync(
-    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.json'),
+    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.ttl'),
     targetDataFile,
-  );
-  fs.copySync(
-    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.json.d.ts'),
-    targetDataFile2,
   );
 
-  await replaceVariablesInFiles(
-    targetFile,
-    targetRegisterFile,
-    targetDataFile,
-    targetDataFile2,
-  );
+  await replaceVariablesInFiles(targetFile, targetRegisterFile, targetDataFile);
   log(
-    `Prepared a new ontology data files in ${chalk.magenta(
+    `Prepared a new ontology data file in ${chalk.magenta(
       targetDataFile.replace(basePath, ''),
     )}`,
     `And an ontology accessor file in ${chalk.magenta(

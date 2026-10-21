@@ -58,6 +58,34 @@ describe('create-shape and friends need a src/package.ts', () => {
     expect(fs.existsSync(path.join(app, 'src', 'shapes', 'thing.ts'))).toBe(true);
   });
 
+  test('create-ontology writes the ontology with its Turtle data in a package', async () => {
+    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linkedPackage: true});
+    fs.outputFileSync(
+      path.join(app, 'src', 'package.ts'),
+      `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
+    );
+    fs.outputFileSync(path.join(app, 'src', 'index.ts'), '');
+    // The index import is added relative to the working directory.
+    jest.spyOn(process, 'cwd').mockReturnValue(app);
+    await createOntology('planning', undefined, app);
+
+    const read = (rel: string) => fs.readFileSync(path.join(app, 'src', rel), 'utf8');
+    expect(fs.readdirSync(path.join(app, 'src', 'data'))).toEqual(['planning.ttl']);
+    expect(read('data/planning.ttl')).toContain(
+      '<https://linked.cm/ont/planning/> a owl:Ontology .',
+    );
+    expect(read('ontologies/planning.ts')).toContain(
+      `loadOntologyFiles(import.meta.url, ['../data/planning.ttl'])`,
+    );
+    expect(read('ontologies/planning.register.ts')).toContain(
+      `linkedOntology(terms, ns, 'planning', loadData, ['../data/planning.ttl'])`,
+    );
+    expect(read('index.ts')).toContain('./ontologies/planning.register.js');
+    for (const rel of ['data/planning.ttl', 'ontologies/planning.ts', 'ontologies/planning.register.ts']) {
+      expect([rel, read(rel)]).not.toEqual([rel, expect.stringContaining('${')]);
+    }
+  });
+
   test('create-shape writes the shape in a package', async () => {
     fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-assets', linkedPackage: true});
     fs.outputFileSync(

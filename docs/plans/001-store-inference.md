@@ -323,8 +323,17 @@ package data); arch-10 (package layout); core `docs/architecture/ontologies.md`;
 stands. Quick gate: `npx linked build` 7.1 s; the Verify jest line plus
 `ontologyDataReachable.test.ts`, 8 suites / 129 tests passed, 23.5 s. Deviation: the fake installed
 `@_linked/probe-ont` is copied into the fixture app's `node_modules` (it needs no core), not built
-through `tests/fixtureNodeModules.ts`. Measurements and output: report 024. Phases 2 (scaffold,
-after K1) and 3 (e2e, after F1) open.
+through `tests/fixtureNodeModules.ts`. Measurements and output: report 024. Phase 3 (e2e, after F1) open.
+
+**Outcome (phase 2 of 3).** The scaffold writes `src/data/<name>.ttl` (fixed prefix block,
+`<ns> a owl:Ontology .`), `loadData` via `loadOntologyFiles(import.meta.url, [...])` and the
+register form `linkedOntology(terms, ns, '<name>', loadData, ['../data/<name>.ttl'])`; the `.json`
+and `.json.d.ts` example files are gone. Verify passed: `$LINKED create-package probe --kind
+ontology`, core's packed `store-inference` (944b6d0) installed, `$LINKED build` exit 0 with
+`lib/esm/data/probe.ttl`, and core's registry loads it. Gate: build 9.3 s; Verify jest line 130
+tests, 4.9 s; `npm run test:unit` 870 tests, 21.8 s; CN's `appProjectPackages.test.ts` 25 passed,
+5.4 s. CN's landing changes two assertions in that test (lines 56 and 63, not one) and arch-03's
+package tree. Report 024.
 
 ## G1 — plan 067's commands
 
@@ -450,7 +459,7 @@ report 025; changeset minor.
 
 - [ ] Sub-plan reviewed by the master; contradictions routed into the master's §Contracts
 - [x] L1 phase 1 — Turtle in the package and app backend builds; the contract verified, M1-M5 (report 024)
-- [ ] L1 phase 2 — scaffold in Turtle; CN's `appProjectPackages.test.ts` updated
+- [x] L1 phase 2 — scaffold in Turtle; CN's `appProjectPackages.test.ts` updated
 - [ ] L1 phase 3 — CLI e2e on the image
 - [ ] L1 landed on `store-inference` (commit: )
 - [ ] G1 layout ruling (item 1) received from the master
@@ -459,3 +468,5 @@ report 025; changeset minor.
 - [ ] L2 detail written (wave 4)
 - [ ] L2 landed (report 025, commit: )
 - [ ] Release PR (R): link
+- [ ] R: raise `defaults/package/package.json`'s `@_linked/core` range to the release exporting
+  `ontology/loadOntologyFiles`; run `tests/template/package.full.test.ts` (report 024)

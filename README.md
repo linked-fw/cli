@@ -40,6 +40,9 @@ live in its packages. A linked package is one of two kinds:
 - an **ontology package**, `<name>-ont` — exactly one ontology (`src/ontologies/<name>.ts`), no
   shapes, components or backend. Its ontology slug is `<name>` (without `-ont`), so its terms
   mint `https://linked.cm/ont/<name>/{Term}`, or `<uri_base>{Term}` when a namespace is given.
+  Its data is Turtle, `src/data/<name>.ttl` (starting as `<namespace> a owl:Ontology .`), which
+  `loadData` reads on the server through `@_linked/core/ontology/loadOntologyFiles`;
+  `create-ontology` scaffolds the same three files in an existing package.
 - an **asset package**, `<name>-assets` — shapes, components and a backend, and no ontology.
 
 `create-package` asks which on a terminal; `--kind ontology|assets|both` answers it (`both`
