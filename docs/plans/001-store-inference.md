@@ -316,6 +316,16 @@ package data); arch-10 (package layout); core `docs/architecture/ontologies.md`;
 
 **Changeset:** minor. **Record:** report 024.
 
+**Outcome (phase 1 of 3).** The package build copies `src/**/*.ttl` (glob gains `ttl`);
+`buildBackend` copies the app's own Turtle through `copyBackendOntologyData`
+(`src/app-release/build-backend.ts`), failing the build on a copy error. M1-M5 pass as planned, no
+`vite-config.ts` change (dev SSR keeps each module's real `import.meta.url`); the contract text
+stands. Quick gate: `npx linked build` 7.1 s; the Verify jest line plus
+`ontologyDataReachable.test.ts`, 8 suites / 129 tests passed, 23.5 s. Deviation: the fake installed
+`@_linked/probe-ont` is copied into the fixture app's `node_modules` (it needs no core), not built
+through `tests/fixtureNodeModules.ts`. Measurements and output: report 024. Phases 2 (scaffold,
+after K1) and 3 (e2e, after F1) open.
+
 ## G1 — plan 067's commands
 
 **Depends on:** nothing (wave 1, parallel with L1); before G2.
@@ -439,7 +449,7 @@ report 025; changeset minor.
 ## Progress
 
 - [ ] Sub-plan reviewed by the master; contradictions routed into the master's §Contracts
-- [ ] L1 phase 1 — Turtle in the package and app backend builds; the contract verified, M1-M5 (report 024)
+- [x] L1 phase 1 — Turtle in the package and app backend builds; the contract verified, M1-M5 (report 024)
 - [ ] L1 phase 2 — scaffold in Turtle; CN's `appProjectPackages.test.ts` updated
 - [ ] L1 phase 3 — CLI e2e on the image
 - [ ] L1 landed on `store-inference` (commit: )

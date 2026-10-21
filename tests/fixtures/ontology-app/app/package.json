@@ -1,0 +1,9 @@
+{
+  "name": "ontology-app",
+  "private": true,
+  "type": "module",
+  "linkedApp": true,
+  "dependencies": {
+    "@_linked/probe-ont": "*"
+  }
+}

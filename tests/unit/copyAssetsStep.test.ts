@@ -37,6 +37,7 @@ test('copies nested assets into lib/esm at the same relative path', async () => 
   write('src/data/terms.json', '{}');
   write('src/types/extra.d.ts', 'export {};\n');
   write('src/deep/nested/vars.scss', '$a: 1;');
+  write('src/data/terms.ttl', '<https://example.test/ont/terms/> a <http://www.w3.org/2002/07/owl#Ontology> .\n');
 
   const ok = await copyStep({name: 'p', type: 'module'}).apply();
 
@@ -44,6 +45,7 @@ test('copies nested assets into lib/esm at the same relative path', async () => 
   for (const f of [
     'styles/theme.css',
     'data/terms.json',
+    'data/terms.ttl',
     'types/extra.d.ts',
     'deep/nested/vars.scss',
   ]) {
@@ -55,6 +57,7 @@ test('copies nested assets into lib/esm at the same relative path', async () => 
 
 test('mirrors into lib/cjs when the package publishes CommonJS', async () => {
   write('src/theme.css', 'a{}');
+  write('src/data/terms.ttl', '');
 
   const ok = await copyStep({
     name: 'p',
@@ -66,6 +69,7 @@ test('mirrors into lib/cjs when the package publishes CommonJS', async () => {
   expect(ok).toBe(true);
   expect(fs.existsSync(path.join(dir, 'lib/esm/theme.css'))).toBe(true);
   expect(fs.existsSync(path.join(dir, 'lib/cjs/theme.css'))).toBe(true);
+  expect(fs.existsSync(path.join(dir, 'lib/cjs/data/terms.ttl'))).toBe(true);
 });
 
 test('a package without src assets copies nothing and succeeds', async () => {

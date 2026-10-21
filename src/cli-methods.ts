@@ -2202,9 +2202,8 @@ export const buildBackend = async () => {
   await ensureEnvironmentLoaded();
 
   const appRoot = process.cwd();
-  const {buildBackendWithVite, copyBackendStylesheets} = await import(
-    './app-release/build-backend.js'
-  );
+  const {buildBackendWithVite, copyBackendStylesheets, copyBackendOntologyData} =
+    await import('./app-release/build-backend.js');
 
   // Step 1: Compile with Vite (it empties lib/ itself)
   const compileSpinner = ora({
@@ -2235,6 +2234,26 @@ export const buildBackend = async () => {
   } catch (e) {
     console.error(e);
     copySpinner.fail('Failed to copy CSS files');
+  }
+
+  // Step 3: Copy the app's own ontology data (Turtle), which its compiled
+  // ontology modules read beside themselves at runtime. Unlike the CSS copy,
+  // a failure here fails the build: a backend without its ontology data boots
+  // without its class hierarchy.
+  const ttlSpinner = ora({
+    discardStdin: true,
+    text: 'Copying ontology data',
+  }).start();
+
+  try {
+    const copied = await copyBackendOntologyData(appRoot, (dir) =>
+      getFiles(dir, '.ttl'),
+    );
+    ttlSpinner.succeed(`${copied} ontology data files copied`);
+  } catch (e) {
+    console.error(e);
+    ttlSpinner.fail('Failed to copy ontology data');
+    return;
   }
 
   return true;
@@ -3166,7 +3185,9 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
     apply: async () => {
       // Relative to src/ (glob's cwd), so the destination is a plain join: a pattern or a
       // prefix built from an absolute Windows path would not match.
-      const files = await glob('**/*.{json,d.ts,css,scss}', {
+      // `.ttl` is a package's ontology data, read next to its compiled module at runtime
+      // (`@_linked/core/ontology/loadOntologyFiles`), so it ships at the same relative path.
+      const files = await glob('**/*.{json,d.ts,css,scss,ttl}', {
         cwd: path.join(packagePath, 'src'),
       });
       let cjsPublished = false;

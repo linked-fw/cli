@@ -105,6 +105,14 @@ linked build-updated              # incremental: only packages that changed sinc
 linked build-package <file>       # walk up from a file path to find its package and rebuild
 ```
 
+`linked build` copies the non-TypeScript files of `src/` that a package ships (`.json`, `.d.ts`,
+`.css`, `.scss` and `.ttl`) into `lib/esm/` at the same relative path, and into `lib/cjs/` when the
+package publishes CommonJS. A package's ontology data, `src/data/<file>.ttl`, therefore lands in
+`lib/esm/data/`, next to the compiled `lib/esm/ontologies/` modules that read it through
+`import.meta.url`. `linked build-app` copies the app's own `src/**/*.ttl` into `lib/` beside the
+compiled backend (a failed copy fails the build); framework and workspace packages stay external
+to the backend build and read their own `lib/esm/data/`.
+
 `linked build` exits with code 1 whenever the build does not succeed, including when it is run in a `linkedApp` or
 in a package without `"linkedPackage": true` (it used to exit 0 there). A build that finishes with warnings still
 exits 0.
