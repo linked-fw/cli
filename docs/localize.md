@@ -339,6 +339,10 @@ drift: @_linked/core@2.28.3 (packages-local/_linked-core) does not satisfy depen
 
 `--list --check` prints only these lines and exits 1 when there are any.
 
+In a worktree whose `node_modules` is a symlink to the main checkout's, a checkout counts as
+present when it is next to the real `node_modules`, so the worktree reports no false "checkout is
+gone".
+
 ## Changing the app's dependencies while localized
 
 lock-at-rest restores the lockfile only when every dependency manifest (the app's
@@ -400,6 +404,11 @@ tree without the cli installed skips it rather than blocking git.
   the main repository's, where every worktree runs them, each against its own `node_modules`.
   localize says so once. `post-merge` and `post-checkout` do nothing in a work tree with no
   checkouts, so the other worktrees are unaffected.
+  In a worktree whose `node_modules` is a symlink to the main checkout's (`linked worktree add`)
+  they skip the install, which would rewrite the main checkout's: `[linked] skipped npm install:
+  node_modules is a symlink to <path> …`. `linked localize` and `linked delocalize` refuse there
+  (exit 6) and name the checkout to run them in. See
+  [integration branches and worktrees](integration-branches-and-worktrees.md#shared-install).
 
 A `pre-commit`, `post-merge` or `post-checkout` you wrote yourself is left alone and reported;
 without ours there, run `npm install` after pulls that change dependencies.
@@ -508,7 +517,7 @@ administrator rights; a CRLF `package.json` or `.gitignore` stays CRLF. Known li
 | 2 | bad command line (`--dir` other than `packages-local`, `--adopt` with `--repo`/`--subdir`, `--parked` with names) |
 | 4 | no repository could be resolved. Pass `--repo` |
 | 5 | something was warned about and skipped; the rest worked (a failed build, a name that is not localized, a park blocked by an existing directory, a failed `npm rebuild`) |
-| 6 | a guard refused: an existing directory, a parked checkout whose name is already a member, a conflicting override, a clone that is not the package, a failed `git clone`, an unusable `package.json`, a refused `--purge` (it was 5 before this version) |
+| 6 | a guard refused: a worktree whose `node_modules` is a symlink, an existing directory, a parked checkout whose name is already a member, a conflicting override, a clone that is not the package, a failed `git clone`, an unusable `package.json`, a refused `--purge` (it was 5 before this version) |
 | 7 | `npm install` (or `npm ci`) at the app root failed |
 
 Each package is processed independently, and the exit code is the highest of the per-package codes

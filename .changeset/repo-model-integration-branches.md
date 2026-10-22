@@ -2,4 +2,4 @@
 "@_linked/cli": minor
 ---
 
-Add the repo model (an app's checkouts, their branches and integration targets) that the upcoming `linked branch`, `linked worktree` and `linked release` commands build on.
+`@_linked/cli/integration/repos`: the repo model behind `linked branch`, `linked worktree` and `linked release` — an app's checkouts (`listRepos`), the target recorded per integration branch (`getTarget`, `setTarget`, git config `branch.<name>.linked-target`), `aheadBehind`, `integrationOf` and `agentBranch` (`<integration>--<agent>`).
