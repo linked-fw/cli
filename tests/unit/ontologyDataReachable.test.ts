@@ -142,7 +142,10 @@ describe('ontology data reaches its module in every mode', () => {
     const externalized =
       '[plugin vite:resolve] Module "node:fs/promises" has been externalized for browser compatibility, imported by <module>. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.';
     expect(
-      result.warnings.map((w) => w.replace(/imported by ".*?"/, 'imported by <module>')),
+      result.warnings.map((w) =>
+        // Vite colours its warnings when the terminal (or CI's FORCE_COLOR) asks for it.
+        w.replace(/\x1b\[[0-9;]*m/g, '').replace(/imported by ".*?"/, 'imported by <module>'),
+      ),
     ).toEqual([externalized, externalized, 'Generated an empty chunk: "__vite-browser-external".']);
   }, 120_000);
 });

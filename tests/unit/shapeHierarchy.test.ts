@@ -337,7 +337,8 @@ describe("the dependencies' ontology data and scope", () => {
         fs.realpathSync(dir),
         fs.realpathSync(path.join(dir, 'node_modules/@_linked/fixture-dep')),
       ]),
-      expectRegistered: ['@test/fixture', '@_linked/fixture-dep'],
+      // A core that ships its own ontology data is registered too.
+      expectRegistered: expect.arrayContaining(['@test/fixture', '@_linked/fixture-dep']),
       dependencies: {
         '@test/fixture': ['@_linked/core', '@_linked/fixture-dep'],
         '@_linked/fixture-dep': ['@_linked/core'],
