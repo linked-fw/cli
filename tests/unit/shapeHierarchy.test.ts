@@ -286,7 +286,7 @@ describe('the shape hierarchy check, one fixture per finding kind', () => {
     ]);
   });
 
-  test('override-not-tightened: a widening override warns and the build passes', async () => {
+  test('override-not-tightened: a widening override of a decorated shape fails the build', async () => {
     fixture({
       shapes: {
         Shelter: shapeClass('Shelter', {
@@ -305,13 +305,12 @@ describe('the shape hierarchy check, one fixture per finding kind', () => {
     expect(await findingsOf()).toEqual([
       expect.objectContaining({
         kind: 'override-not-tightened',
-        severity: 'warning',
+        severity: 'error',
         shape: 'https://linked.cm/shape/fixture/Garage',
       }),
     ]);
-    const result = await checkShapeHierarchyStep(dir);
-    expect(typeof result).toBe('string');
-    expect(result).toMatch(/^1 warning:\n {2}warning override-not-tightened fixture\/Garage: /);
+    const result = (await checkShapeHierarchyStep(dir)) as {error: string};
+    expect(result.error).toMatch(/^1 error:\n {2}error override-not-tightened fixture\/Garage: /);
   });
 });
 

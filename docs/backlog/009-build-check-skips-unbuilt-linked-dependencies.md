@@ -30,10 +30,9 @@ builds packages.
 - At least: warn when a linked dependency registered nothing, so a false finding is explainable.
 - A test: a package whose dependency has only `src/` gets no false `extends-without-subclass`.
 
-## Also found: a unit test still expects a widening override to warn
+## Fixed: the unit test that expected a widening override to warn
 
-`tests/unit/shapeHierarchy.test.ts` "override-not-tightened: a widening override warns and the
-build passes" expects `severity: 'warning'`; core now reports `override-not-tightened` as an error
-for a decorated shape (core report 044), so the test fails on `store-inference` (it fails in the
-integration checkout too). The fixture should assert the error and a failing build, or use a
-data-only shape where the finding stays a warning.
+`tests/unit/shapeHierarchy.test.ts` expected `override-not-tightened` with `severity: 'warning'`
+and a passing build. Core reports it as an error for a decorated shape (core report 044), so the
+test failed. It now asserts the error and that `checkShapeHierarchyStep` fails the build
+("override-not-tightened: a widening override of a decorated shape fails the build"), and passes.
