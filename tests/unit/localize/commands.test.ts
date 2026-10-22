@@ -11,7 +11,8 @@ import {localize} from '../../../src/localize/localize.js';
 import {delocalize} from '../../../src/localize/delocalize.js';
 import {list} from '../../../src/localize/list.js';
 import {ensureAppSetup} from '../../../src/localize/app-setup.js';
-import {fail, makeConsumer, ok, rm, stubbed, test} from './helpers.js';
+import {adopt, localizeParked} from '../../../src/localize/adopt.js';
+import {fail, makeConsumer, ok, rm, stubbed, test, tmpdir} from './helpers.js';
 
 /**
  * An app, already set up for checkouts unless `setUp: false` -- the set-up
@@ -871,4 +872,43 @@ test('a leftover that clashes with a checkout of the same name refuses (exit 6) 
     ),
   );
   assert.equal(deps.calls.length, 0);
+});
+
+// --- a worktree sharing the main checkout's install ------------------------
+
+test('refuses in a worktree with symlinked node_modules; --list still works', (t) => {
+  const main = consumer(t, {dependencies: {'@x/a': '^1.0.0'}});
+  const wt = tmpdir('localize-worktree-');
+  t.after(() => rm(wt));
+  fs.copyFileSync(path.join(main, 'package.json'), path.join(wt, 'package.json'));
+  fs.symlinkSync(path.join(main, 'node_modules'), path.join(wt, 'node_modules'));
+  seedCheckout(wt, 'packages-local/x-b', {name: '@x/b', version: '1.0.0'});
+  seedCheckout(wt, '.packages-local.parked/x-c', {name: '@x/c', version: '1.0.0'});
+
+  const runs = {
+    localize: (deps) => localize(['@x/a'], {}, deps),
+    adopt: (deps) => adopt(['@x/b'], {}, deps),
+    parked: (deps) => localizeParked({}, deps),
+    delocalize: (deps) => delocalize([], {}, deps),
+  };
+  for (const [name, run] of Object.entries(runs)) {
+    const deps = stubbed(wt);
+    assert.equal(run(deps), 6, `${name}: ${deps.output()}`);
+    assert.match(
+      deps.output(),
+      new RegExp(`shares the install of ${main.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*Run this in`, 's'),
+      name,
+    );
+    assert.deepEqual(deps.calls, [], `${name} ran nothing`);
+  }
+  // Nothing moved.
+  assert.ok(fs.existsSync(path.join(wt, 'packages-local/x-b/package.json')));
+  assert.ok(fs.existsSync(path.join(wt, '.packages-local.parked/x-c/package.json')));
+
+  const read = stubbed(wt, (inv) =>
+    inv.cmd === 'git' && inv.args[0] === 'symbolic-ref' ? ok('main\n') : undefined,
+  );
+  assert.equal(list({}, read), 0, read.output());
+  assert.match(read.output(), /@x\/b/);
+  assert.equal(read.npmCalls().length, 0);
 });

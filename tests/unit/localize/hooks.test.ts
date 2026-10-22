@@ -674,6 +674,37 @@ test('post-checkout of a branch installs when the manifests changed, and only th
   );
 });
 
+test('skips install when node_modules is a symlink', (t) => {
+  // A worktree sharing the main checkout's install: npm there would relink it to this one.
+  const root = app(t);
+  member(root);
+  const PATH = fakeNpm(root);
+  const main = tmpdir('localize-hooks-main-');
+  t.after(() => rm(main));
+  fs.mkdirSync(path.join(main, 'node_modules'));
+  fs.symlinkSync(
+    path.join(main, 'node_modules'),
+    path.join(root, 'node_modules'),
+  );
+  const deps = twoCommits(root, 'package-lock.json', json(UPDATED));
+  const r = node(
+    GIT_HOOK,
+    ['post-checkout', deps.old, deps.new, '1'],
+    root,
+    baseEnv({PATH}),
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(npmCalls(root), []);
+  const real = fs.realpathSync(path.join(main, 'node_modules'));
+  assert.ok(
+    r.stderr.includes(
+      `[linked] skipped npm install: node_modules is a symlink to ${real} (a worktree sharing the main checkout's install). ` +
+        `Run npm install in ${path.dirname(real)} if the dependencies changed.`,
+    ),
+    r.stderr,
+  );
+});
+
 test('post-merge compares ORIG_HEAD with HEAD, and a failed install never fails git', (t) => {
   const root = app(t);
   member(root);
