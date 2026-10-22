@@ -126,6 +126,17 @@ describe('linked worktree add', () => {
     assert.equal(branchOf(path.join(app.dir, 'packages-local', '_linked-server')), 'overhaul--a1');
   });
 
+  test('add refuses --app-detached without --with', async () => {
+    const app = makeApp();
+    const result = await worktreeAdd(app.root, 'a1', {appDetached: true});
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /nothing to land/);
+    assert.match(result.messages.join('\n'), /another port, or pass --with/);
+    assert.equal(fs.existsSync(app.dir), false);
+    assert.equal(worktreeCount(app.root), 1);
+    assert.equal(hasBranch(app.root, 'overhaul--a1'), false);
+  });
+
   test('--dataset adds FUSEKI_DATASET and, when the app has the scripts, the clone commands', async () => {
     const app = makeApp();
     fs.mkdirSync(path.join(app.root, 'scripts'));
@@ -401,6 +412,24 @@ describe('linked worktree remove', () => {
     assert.notEqual(result.code, 0);
     assert.match(result.messages.join('\n'), /notes\.txt/);
     assert.equal(worktreeCount(app.root), 2);
+  });
+
+  test('remove puts the links back when git worktree remove fails', async () => {
+    const app = makeApp();
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server']})).code, 0);
+    const real = makeRun(app.root);
+    const run: Run = (cmd, args, opts) =>
+      args[0] === 'worktree' && args[1] === 'remove' && opts?.cwd === app.root
+        ? {status: 1, stdout: '', stderr: 'simulated remove failure'}
+        : real(cmd, args, opts);
+    const result = await worktreeRemove(app.root, 'a1', {force: true}, run);
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /simulated remove failure/);
+    assert.ok(fs.existsSync(app.dir));
+    assert.ok(isLink(path.join(app.dir, 'node_modules')));
+    assert.equal(fs.readlinkSync(path.join(app.dir, 'node_modules')), path.join(app.root, 'node_modules'));
+    assert.ok(isLink(path.join(app.dir, '.env')));
+    assert.equal(fs.readlinkSync(path.join(app.dir, '.env')), path.join(app.root, '.env'));
   });
 
   test('remove after landing removes worktrees and branches', async () => {

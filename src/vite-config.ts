@@ -808,6 +808,8 @@ export function viteCacheDir(appRoot: string): string | undefined {
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
   return defineConfig(async ({mode}) => {
     const isDev = mode === 'development';
+    // The app root: `linked start` runs Vite with `root: process.cwd()`.
+    const appRoot = process.cwd();
     const workspaces = isDev ? await discoverWorkspaces(opts.workspaceGlobs) : [];
     // STANDALONE = dev mode with no source-shipping workspaces discovered
     // (an app installed from npm outside the monorepo — its `@_linked/*` /
@@ -832,11 +834,11 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     // deps (e.g. `classnames` is inlined in `@_linked/react`), so native-ESM
     // serving needs no interop shim; their own third-party imports are listed by
     // the `linked:client-dep-includes` plugin.
-    const linkedDeps = isDev ? await installedLinkedDeps(process.cwd()) : [];
+    const linkedDeps = isDev ? await installedLinkedDeps(appRoot) : [];
     const devPort = process.env.PORT ?? opts.port;
     const clientDepIncludes =
       isDev && opts.clientDepIncludes !== false && process.env.LINKED_CLIENT_DEP_INCLUDES !== '0';
-    const cacheDir = viteCacheDir(process.cwd());
+    const cacheDir = viteCacheDir(appRoot);
     const config: UserConfig = {
       ...(cacheDir ? {cacheDir} : {}),
       server: {
@@ -943,7 +945,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
               name: 'linked:reload-log',
               configureServer(server) {
                 server.watcher.on('change', (file) => {
-                  const rel = file.replace(process.cwd() + '/', '');
+                  const rel = file.replace(appRoot + '/', '');
                   console.log(`[linked] reloaded ${rel}`);
                 });
               },
@@ -1020,7 +1022,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // like any other.
       resolve: {
         ...(isStandalone ? {conditions: ['module', 'node']} : {}),
-        dedupe: await dedupeFor(process.cwd(), isStandalone),
+        dedupe: await dedupeFor(appRoot, isStandalone),
       },
       // `ssr.external` is a minimal allowlist of
       // npm deps that genuinely can't (or shouldn't) go through Vite's

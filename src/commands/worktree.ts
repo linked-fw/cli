@@ -131,6 +131,12 @@ export async function worktreeAdd(
     return result;
   };
 
+  if (options.appDetached && !(options.with ?? []).length) {
+    return refuse(
+      'A detached app worktree with no package worktree has nothing to land.',
+      'To run another copy of the app, start the main checkout on another port, or pass --with.',
+    );
+  }
   if (fs.existsSync(dir)) return refuse(`${dir} already exists.`);
   // Inside the app root, the worktree's files would show up in the main
   // checkout (its git status, Vite's watcher, a workspace glob such as
@@ -586,6 +592,9 @@ export async function worktreeRemove(
   }
 
   for (const it of items) {
+    // The links unlinked below, so a failed `git worktree remove` can put them
+    // back and leave the worktree usable.
+    const unlinked: {path: string; target: string; type: 'dir' | 'file'}[] = [];
     for (const name of it.ours) {
       const p = path.join(it.dir, name);
       let stat: fs.Stats | undefined;
@@ -594,8 +603,17 @@ export async function worktreeRemove(
       } catch {
         continue;
       }
-      if (stat.isSymbolicLink()) fs.unlinkSync(p);
-      else if (name === '.vite-cache') fs.rmSync(p, {recursive: true, force: true});
+      if (stat.isSymbolicLink()) {
+        const target = fs.readlinkSync(p);
+        let type: 'dir' | 'file' = 'file';
+        try {
+          if (fs.statSync(p).isDirectory()) type = 'dir';
+        } catch {
+          /* dangling: a file link */
+        }
+        fs.unlinkSync(p);
+        unlinked.push({path: p, target, type});
+      } else if (name === '.vite-cache') fs.rmSync(p, {recursive: true, force: true});
       else if (name === 'packages-local') {
         try {
           fs.rmdirSync(p); // only once the package worktrees are gone, so empty
@@ -606,7 +624,16 @@ export async function worktreeRemove(
     }
     const args = ['worktree', 'remove', ...(force ? ['--force'] : []), it.dir];
     const r = run('git', args, {cwd: it.repoDir});
-    if (r.status !== 0) return refuse(`${it.label}: git ${args.join(' ')} failed: ${failed(r)}`);
+    if (r.status !== 0) {
+      for (const link of unlinked) {
+        try {
+          fs.symlinkSync(link.target, link.path, link.type);
+        } catch {
+          /* already back, or the dir is gone: the error below is what matters */
+        }
+      }
+      return refuse(`${it.label}: git ${args.join(' ')} failed: ${failed(r)}`);
+    }
     messages.push(`removed ${it.dir}`);
   }
 
