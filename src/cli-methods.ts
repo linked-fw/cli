@@ -46,6 +46,7 @@ import {
   type ShapeReferenceReport,
 } from './utils/shapeReferences.js';
 import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
+import {checkShapeHierarchyStep} from './utils/shapeHierarchy.js';
 
 import {spawnSync} from 'child_process';
 import {spawnCommand} from './utils/spawn.js';
@@ -1431,36 +1432,22 @@ export const createOntology = async (
     targetRegisterFile,
   );
 
-  //copy data files
+  // The ontology's data, Turtle. `loadData` reads it beside the compiled module
+  // (`../data/<name>.ttl`), and `linked build` copies it to lib/esm/data/.
   let targetDataFile = path.join(
     targetFolder,
     '..',
     'data',
-    hyphenName + '.json',
-  );
-  let targetDataFile2 = path.join(
-    targetFolder,
-    '..',
-    'data',
-    hyphenName + '.json.d.ts',
+    hyphenName + '.ttl',
   );
   fs.copySync(
-    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.json'),
+    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.ttl'),
     targetDataFile,
-  );
-  fs.copySync(
-    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.json.d.ts'),
-    targetDataFile2,
   );
 
-  await replaceVariablesInFiles(
-    targetFile,
-    targetRegisterFile,
-    targetDataFile,
-    targetDataFile2,
-  );
+  await replaceVariablesInFiles(targetFile, targetRegisterFile, targetDataFile);
   log(
-    `Prepared a new ontology data files in ${chalk.magenta(
+    `Prepared a new ontology data file in ${chalk.magenta(
       targetDataFile.replace(basePath, ''),
     )}`,
     `And an ontology accessor file in ${chalk.magenta(
@@ -1923,6 +1910,16 @@ export const depCheckStaged = async () => {
     });
   });
 };
+const readOwnPackageName = (packagePath: string): string | undefined => {
+  try {
+    const pack = JSON.parse(
+      fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
+    );
+    return typeof pack.name === 'string' ? pack.name : undefined;
+  } catch {
+    return undefined;
+  }
+};
 export const depCheck = async (packagePath: string = process.cwd()) => {
   // log('Checking depencies of ' + chalk.cyan(packagePath));
   return new Promise((resolve, reject) => {
@@ -1934,7 +1931,12 @@ export const depCheck = async (packagePath: string = process.cwd()) => {
         //especially things like @types/react, @types/react-dom, @types/node (they are added elsewhere?)
         // missing = missing.filter(m => m.indexOf('@types/') === 0);
         //currently react is not an explicit dependency, but we should add it as a peer dependency
-        missing.splice(missing.indexOf('react'), 1);
+        missing = missing.filter((dep) => dep !== 'react');
+        //a package importing its own name (e.g. from its tests) is a self-reference, not a missing dependency
+        const ownName = readOwnPackageName(packagePath);
+        if (ownName) {
+          missing = missing.filter((dep) => dep !== ownName);
+        }
 
         let missingLincdPackages = missing.filter((missingDep) => {
           return lincdPackages.some((lincdPackage) => {
@@ -2202,9 +2204,8 @@ export const buildBackend = async () => {
   await ensureEnvironmentLoaded();
 
   const appRoot = process.cwd();
-  const {buildBackendWithVite, copyBackendStylesheets} = await import(
-    './app-release/build-backend.js'
-  );
+  const {buildBackendWithVite, copyBackendStylesheets, copyBackendOntologyData} =
+    await import('./app-release/build-backend.js');
 
   // Step 1: Compile with Vite (it empties lib/ itself)
   const compileSpinner = ora({
@@ -2235,6 +2236,26 @@ export const buildBackend = async () => {
   } catch (e) {
     console.error(e);
     copySpinner.fail('Failed to copy CSS files');
+  }
+
+  // Step 3: Copy the app's own ontology data (Turtle), which its compiled
+  // ontology modules read beside themselves at runtime. Unlike the CSS copy,
+  // a failure here fails the build: a backend without its ontology data boots
+  // without its class hierarchy.
+  const ttlSpinner = ora({
+    discardStdin: true,
+    text: 'Copying ontology data',
+  }).start();
+
+  try {
+    const copied = await copyBackendOntologyData(appRoot, (dir) =>
+      getFiles(dir, '.ttl'),
+    );
+    ttlSpinner.succeed(`${copied} ontology data files copied`);
+  } catch (e) {
+    console.error(e);
+    ttlSpinner.fail('Failed to copy ontology data');
+    return;
   }
 
   return true;
@@ -2928,6 +2949,7 @@ export const buildPackage = async (
   target2,
   packagePath = process.cwd(),
   logResults: boolean = true,
+  options: BuildOptions = {},
 ) => {
   // Ensure packagePath is absolute and points to a directory containing package.json; if not, go up until we find one
   // First, resolve to absolute path
@@ -3054,7 +3076,7 @@ export const buildPackage = async (
     });
   };
 
-  planBuildSteps(pkgJson, packagePath).forEach(buildStep);
+  planBuildSteps(pkgJson, packagePath, options).forEach(buildStep);
 
   let success = await buildProcess.catch((err) => {
     let msg =
@@ -3098,6 +3120,11 @@ export const buildPackage = async (
   return success === true;
 };
 
+export type BuildOptions = {
+  /** Skip the shape hierarchy check; the reason is printed. */
+  skipShapeCheck?: string;
+};
+
 type BuildStep = {
   name: string;
   // true/undefined: success; {info}: success with a note; a string: success
@@ -3138,7 +3165,11 @@ const loadServerClass = async (): Promise<any> => {
   }
 };
 
-export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
+export const planBuildSteps = (
+  pkgJson,
+  packagePath: string,
+  options: BuildOptions = {},
+): BuildStep[] => {
   // Loading every shape module in a child process of its own is the slow part of
   // a build; the shape checks below share one run, started by the first to ask.
   let inspection: Promise<ShapeReferenceReport> | undefined;
@@ -3166,7 +3197,9 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
     apply: async () => {
       // Relative to src/ (glob's cwd), so the destination is a plain join: a pattern or a
       // prefix built from an absolute Windows path would not match.
-      const files = await glob('**/*.{json,d.ts,css,scss}', {
+      // `.ttl` is a package's ontology data, read next to its compiled module at runtime
+      // (`@_linked/core/ontology/loadOntologyFiles`), so it ships at the same relative path.
+      const files = await glob('**/*.{json,d.ts,css,scss,ttl}', {
         cwd: path.join(packagePath, 'src'),
       });
       let cjsPublished = false;
@@ -3287,6 +3320,13 @@ export const planBuildSteps = (pkgJson, packagePath: string): BuildStep[] => {
     // because apps load a package's shapes with `import '<pkg>/shapes/index'`.
     name: 'Checking shapes/index',
     apply: () => checkShapesIndex(packagePath, undefined, inspectShapes()),
+  },
+  {
+    // The package's shapes, with its own and its dependencies' ontology data
+    // registered, against the class hierarchy: an error fails the build.
+    name: 'Checking shape hierarchy',
+    apply: () =>
+      checkShapeHierarchyStep(packagePath, {skip: options.skipShapeCheck}),
   },
   {
     // A bundler drops the side-effect-only imports in shapes/index of a module

@@ -348,7 +348,9 @@ program
 program
   .command('build [target] [target2]', {isDefault: true})
   .action(async (target, target2, options) => {
-    const result = await buildPackage(target, target2, process.cwd(), !options?.silent);
+    const result = await buildPackage(target, target2, process.cwd(), !options?.silent, {
+      skipShapeCheck: options?.skipShapeCheck,
+    });
     if (result !== true) {
       process.exitCode = 1;
     }
@@ -356,6 +358,10 @@ program
   .option(
     '--silent',
     'No output to console unless errors occur. The exit code is unaffected: 0 when the build succeeds (warnings included), 1 when it fails',
+  )
+  .option(
+    '--skip-shape-check <reason>',
+    'Skip the shape hierarchy check (shapes against the class hierarchy). The reason is printed',
   );
 
 program

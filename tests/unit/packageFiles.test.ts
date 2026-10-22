@@ -121,8 +121,7 @@ describe('buildPackageFiles', () => {
       '.gitignore',
       '.npmignore',
       'package.json',
-      'src/data/planning.json',
-      'src/data/planning.json.d.ts',
+      'src/data/planning.ttl',
       'src/index.ts',
       'src/ontologies/planning.register.ts',
       'src/ontologies/planning.ts',
@@ -135,6 +134,12 @@ describe('buildPackageFiles', () => {
     );
     expect(out['src/ontologies/planning.ts']).toContain(
       `createNameSpace('https://acme.example/ont/planning/')`,
+    );
+    expect(out['src/ontologies/planning.register.ts']).toContain(
+      `linkedOntology(terms, ns, 'planning', loadData, ['../data/planning.ttl'])`,
+    );
+    expect(out['src/data/planning.ttl']).toContain(
+      `<https://acme.example/ont/planning/> a owl:Ontology .`,
     );
     for (const [file, content] of Object.entries(out)) {
       expect([file, content]).not.toEqual([

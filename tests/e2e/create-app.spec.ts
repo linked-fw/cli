@@ -2,7 +2,9 @@
 // against a fresh Fuseki container, then drive the Person CRUD flow.
 //
 // Self-contained: scaffolds into an OS tmpdir, installs deps from npm,
-// starts a Fuseki testcontainer, exercises the Person fixture. No
+// starts a Fuseki testcontainer on the inferring image (FUSEKI_IMAGE, default
+// `ghcr.io/linked-fw/fuseki:6.2.0-1`, published from linked-fw/fuseki's server/), checks that its
+// tdb2 dataset infers, then exercises the Person fixture. No
 // dependency on any parent monorepo. Companion `@_linked/*` packages
 // must be published to npm at compatible versions; if they aren't yet,
 // set SKIP_E2E=1 to skip this test.
@@ -26,6 +28,11 @@ import {
 } from './helpers/app.js';
 
 const APP_PORT = 4400 + (process.pid % 100); // avoid collision with a CN backend on 4040
+// The image every linked app runs on: Fuseki with RDFS inference over the stored
+// rdfs:subClassOf hierarchy. Build it locally with
+// `docker build -t linked-fuseki:dev <linked-fw/fuseki>/server`.
+const FUSEKI_IMAGE = process.env.FUSEKI_IMAGE || 'ghcr.io/linked-fw/fuseki:6.2.0-1';
+const ADMIN_AUTH = 'Basic ' + Buffer.from('admin:admin').toString('base64');
 
 let fuseki: StartedTestContainer;
 let app: ScaffoldedApp | undefined;
@@ -37,7 +44,7 @@ test.beforeAll(async () => {
   if (process.env.SKIP_E2E === '1') test.skip();
 
   // 1. Start a fresh Fuseki container with a random host port.
-  fuseki = await new GenericContainer('stain/jena-fuseki')
+  fuseki = await new GenericContainer(FUSEKI_IMAGE)
     .withExposedPorts(3030)
     .withEnvironment({ADMIN_PASSWORD: 'admin'})
     // Ready when Fuseki answers its own health endpoint, not when a log line matches: the
@@ -52,15 +59,15 @@ test.beforeAll(async () => {
   app = scaffoldApp('e2e-test-app');
   DATASET = `${app.name}-main`;
 
-  // 3. Create the dataset the app is pointed at below.
-  const adminAuth = Buffer.from('admin:admin').toString('base64');
+  // 3. Create the dataset the app is pointed at below. Only a tdb2 dataset gets the
+  // image's inferring template; a mem one stays plain.
   const resp = await fetch(`${fusekiUrl}/$/datasets`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      Authorization: `Basic ${adminAuth}`,
+      Authorization: ADMIN_AUTH,
     },
-    body: `dbName=${DATASET}&dbType=mem`,
+    body: `dbName=${DATASET}&dbType=tdb2`,
   });
   if (!resp.ok && resp.status !== 409) {
     throw new Error(`Failed to create dataset: ${resp.status} ${await resp.text()}`);
@@ -95,10 +102,9 @@ test.afterAll(async () => {
 
   // Drop the Fuseki dataset (idempotent).
   try {
-    const adminAuth = Buffer.from('admin:admin').toString('base64');
     await fetch(`${fusekiUrl}/$/datasets/${DATASET}`, {
       method: 'DELETE',
-      headers: {Authorization: `Basic ${adminAuth}`},
+      headers: {Authorization: ADMIN_AUTH},
     });
   } catch {
     // Container may be gone already; ignore.
@@ -110,6 +116,40 @@ test.afterAll(async () => {
   // Remove scaffolded app folder + its parent tmpdir.
   removeApp(app);
 }, /* timeout */ 2 * 60 * 1000);
+
+test('the dataset infers over its stored rdfs:subClassOf hierarchy', async () => {
+  const triples = `
+    <urn:linked-e2e:A> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <urn:linked-e2e:B> .
+    <urn:linked-e2e:a> a <urn:linked-e2e:A> .`;
+  const ask = 'ASK { <urn:linked-e2e:a> a <urn:linked-e2e:B> }';
+  const update = async (body: string) => {
+    const r = await fetch(`${fusekiUrl}/${DATASET}/update`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/sparql-update'},
+      body,
+    });
+    // Fuseki 6 answers a successful update with 204.
+    expect(r.ok, `${r.status} ${await r.text()}`).toBe(true);
+  };
+  const askAt = async (endpoint: string) => {
+    const r = await fetch(`${endpoint}?query=${encodeURIComponent(ask)}`, {
+      headers: {Accept: 'application/sparql-results+json'},
+    });
+    const text = await r.text();
+    expect(r.status, text).toBe(200);
+    return (JSON.parse(text) as {boolean: boolean}).boolean;
+  };
+
+  await update(`INSERT DATA {${triples}}`);
+  try {
+    // The dataset answers with the inferred type; `/stored` holds only what was written.
+    expect(await askAt(`${fusekiUrl}/${DATASET}/sparql`)).toBe(true);
+    expect(await askAt(`${fusekiUrl}/${DATASET}/stored`)).toBe(false);
+  } finally {
+    await update(`DELETE DATA {${triples}}`);
+  }
+  expect(await askAt(`${fusekiUrl}/${DATASET}/sparql`)).toBe(false);
+});
 
 test('Person fixture: add → edit → delete round-trip', async ({page}) => {
   await page.goto(`http://localhost:${APP_PORT}/`);

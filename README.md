@@ -40,6 +40,9 @@ live in its packages. A linked package is one of two kinds:
 - an **ontology package**, `<name>-ont` — exactly one ontology (`src/ontologies/<name>.ts`), no
   shapes, components or backend. Its ontology slug is `<name>` (without `-ont`), so its terms
   mint `https://linked.cm/ont/<name>/{Term}`, or `<uri_base>{Term}` when a namespace is given.
+  Its data is Turtle, `src/data/<name>.ttl` (starting as `<namespace> a owl:Ontology .`), which
+  `loadData` reads on the server through `@_linked/core/ontology/loadOntologyFiles`;
+  `create-ontology` scaffolds the same three files in an existing package.
 - an **asset package**, `<name>-assets` — shapes, components and a backend, and no ontology.
 
 `create-package` asks which on a terminal; `--kind ontology|assets|both` answers it (`both`
@@ -97,6 +100,7 @@ package goes in `./packages/`, `./modules/` or the current directory, and instal
 
 ```bash
 linked build                      # build the current package (tsc + checks)
+linked build --skip-shape-check "<reason>"  # the same without the shape hierarchy check
 linked build-app                  # build frontend + backend for the current app
 linked build-app --target web     # web release: build and write public/bundles/linked-release.json
 linked build-app --target capacitor  # Capacitor/local native build: local manifest only, never published
@@ -104,6 +108,27 @@ linked build-workspace            # build all linked packages in the workspace i
 linked build-updated              # incremental: only packages that changed since last build
 linked build-package <file>       # walk up from a file path to find its package and rebuild
 ```
+
+`linked build` copies the non-TypeScript files of `src/` that a package ships (`.json`, `.d.ts`,
+`.css`, `.scss` and `.ttl`) into `lib/esm/` at the same relative path, and into `lib/cjs/` when the
+package publishes CommonJS. A package's ontology data, `src/data/<file>.ttl`, therefore lands in
+`lib/esm/data/`, next to the compiled `lib/esm/ontologies/` modules that read it through
+`import.meta.url`. `linked build-app` copies the app's own `src/**/*.ttl` into `lib/` beside the
+compiled backend (a failed copy fails the build); framework and workspace packages stay external
+to the backend build and read their own `lib/esm/data/`.
+
+After compiling, `linked build` checks the package's shapes against the class hierarchy
+(**Checking shape hierarchy**). In one `node` process it loads the built package's `package.js`,
+`shapes/index.js` and ontology data (`ontologies/*.register.js`), and the ontology data of every
+linked dependency (dependencies and peerDependencies, transitively), then runs
+`@_linked/core/shapes/checkShapeHierarchy`. It reports a shape that extends another whose class its
+data does not make a superclass (`extends-without-subclass`), a subclass whose shape does not extend
+its superclass's shape (`subclass-without-extends`), a shape that inherits its parent's class instead
+of declaring its own (`borrowed-target-class`), a term in a mirrored standard's namespace the
+package's data does not define (`mirror-undefined-term`), and an override that widens what it
+inherits (`override-not-tightened`). Every finding is printed; an `error` fails the build, warnings
+alone do not. A package without shapes, or without a `@_linked/core` dependency, is not checked.
+`linked build --skip-shape-check "<reason>"` skips the check and prints the reason.
 
 `linked build` exits with code 1 whenever the build does not succeed, including when it is run in a `linkedApp` or
 in a package without `"linkedPackage": true` (it used to exit 0 there). A build that finishes with warnings still

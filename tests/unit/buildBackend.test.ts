@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import {
   assertNoInlinedWorkspaces,
+  copyBackendOntologyData,
   explainUnresolvedWorkspaceImport,
   findImportSpecifiers,
   packageRootsForApp,
@@ -271,5 +272,55 @@ describe('explainUnresolvedWorkspaceImport', () => {
     expect(
       explainUnresolvedWorkspaceImport('Unexpected token', externals)
     ).toBeNull();
+  });
+});
+
+describe('copyBackendOntologyData', () => {
+  let app: string;
+  const write = (rel: string, content: string) => {
+    const full = path.join(app, rel);
+    fs.mkdirSync(path.dirname(full), {recursive: true});
+    fs.writeFileSync(full, content);
+  };
+  const listTurtle = async (dir: string) => [
+    path.join(dir, 'data', 'x.ttl'),
+    path.join(dir, 'ontologies', 'y.ttl'),
+  ];
+
+  beforeEach(() => {
+    app = fs.mkdtempSync(path.join(os.tmpdir(), 'ttl-'));
+  });
+  afterEach(() => fs.rmSync(app, {recursive: true, force: true}));
+
+  test('copies src/**/*.ttl to lib/ at the same relative paths', async () => {
+    write('src/data/x.ttl', 'x');
+    write('src/ontologies/y.ttl', 'y');
+
+    expect(await copyBackendOntologyData(app, listTurtle)).toBe(2);
+    expect(fs.readFileSync(path.join(app, 'lib/data/x.ttl'), 'utf8')).toBe('x');
+    expect(fs.readFileSync(path.join(app, 'lib/ontologies/y.ttl'), 'utf8')).toBe('y');
+  });
+
+  test('copies only Turtle, whatever the lister returns', async () => {
+    write('src/data/x.ttl', 'x');
+    write('src/data/x.ttl.bak', 'old');
+
+    const copied = await copyBackendOntologyData(app, async (dir) => [
+      path.join(dir, 'data', 'x.ttl'),
+      path.join(dir, 'data', 'x.ttl.bak'),
+    ]);
+
+    expect(copied).toBe(1);
+    expect(fs.existsSync(path.join(app, 'lib/data/x.ttl.bak'))).toBe(false);
+  });
+
+  test('an app without Turtle copies nothing', async () => {
+    expect(await copyBackendOntologyData(app, async () => [])).toBe(0);
+    expect(fs.existsSync(path.join(app, 'lib'))).toBe(false);
+  });
+
+  test('fails on a copy error', async () => {
+    // Listed but missing: the copy itself fails, and so does the build.
+    await expect(copyBackendOntologyData(app, listTurtle)).rejects.toThrow(/ENOENT/);
   });
 });

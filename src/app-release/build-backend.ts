@@ -538,3 +538,31 @@ export const copyBackendStylesheets = async (
   );
   return cssFiles.length;
 };
+
+/**
+ * Copy `src`'s Turtle ontology data next to the compiled backend.
+ *
+ * The backend is compiled with `preserveModules` rooted at `src`, so
+ * `src/ontologies/x.ts` becomes `lib/ontologies/x.js` and reads its data
+ * through `import.meta.url` as `../data/x.ttl`: `lib/data/x.ttl` has to
+ * exist at the same relative path. Framework and workspace packages stay
+ * external to this build and read their own `lib/esm/data/`.
+ */
+export const copyBackendOntologyData = async (
+  appRoot: string,
+  listTurtleFiles: (dir: string) => Promise<string[]>
+): Promise<number> => {
+  const sourceFolder = path.join(appRoot, 'src');
+  const targetFolder = path.join(appRoot, 'lib');
+  const turtleFiles = (await listTurtleFiles(sourceFolder)).filter((file) =>
+    file.endsWith('.ttl')
+  );
+  await Promise.all(
+    turtleFiles.map((file) => {
+      const targetFile = path.join(targetFolder, path.relative(sourceFolder, file));
+      fs.mkdirpSync(path.dirname(targetFile));
+      return fs.copyFile(file, targetFile);
+    })
+  );
+  return turtleFiles.length;
+};

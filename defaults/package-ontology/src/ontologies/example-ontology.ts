@@ -1,13 +1,12 @@
 import type {NodeReferenceValue} from '@_linked/core/utils/NodeReference';
 import {createNameSpace} from '@_linked/core/utils/NameSpace';
+import {loadOntologyFiles} from '@_linked/core/ontology/loadOntologyFiles';
 
 /**
- * Load the data of this ontology into memory, thus adding the properties of the entities of this ontology to the local graph.
+ * Read this ontology's data (Turtle, `src/data/${hyphen_name}.ttl`) on the server. `linked build`
+ * copies it to `lib/esm/data/`, so the path relative to this module holds in both trees.
  */
-export var loadData = () => {
-  //@ts-ignore
-  return import('../data/${hyphen_name}.json',{ with: { type: "json" } }).then((data) => data.default);
-};
+export var loadData = () => loadOntologyFiles(import.meta.url, ['../data/${hyphen_name}.ttl']);
 
 /**
  * The namespace of this ontology, which can be used to create NamedNodes with IRIs not listed in this file

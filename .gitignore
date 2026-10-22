@@ -11,3 +11,6 @@ test-results/
 # (.d.ts not gitignored — hand-written type declarations like
 # src/plugins/colors.d.ts are legit sources.)
 src/**/*.js.map
+
+# A fake installed package of the ontology-app fixture ships its lib/ on purpose.
+!tests/fixtures/ontology-app/installed/probe-ont/lib/

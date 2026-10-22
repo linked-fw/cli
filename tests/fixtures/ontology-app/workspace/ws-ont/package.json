@@ -1,0 +1,12 @@
+{
+  "name": "ws-ont",
+  "version": "0.0.0",
+  "type": "module",
+  "linkedPackage": true,
+  "exports": {
+    "./*": {
+      "development": "./src/*.ts",
+      "import": "./lib/esm/*.js"
+    }
+  }
+}

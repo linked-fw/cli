@@ -66,8 +66,7 @@ describe('createPackage kinds', () => {
       '.gitignore',
       '.npmignore',
       'package.json',
-      'src/data/planning.json',
-      'src/data/planning.json.d.ts',
+      'src/data/planning.ttl',
       'src/index.ts',
       'src/ontologies/planning.register.ts',
       'src/ontologies/planning.ts',
@@ -87,12 +86,18 @@ describe('createPackage kinds', () => {
       `createNameSpace('https://linked.cm/ont/planning/')`,
     );
     expect(read(pkg, 'src/ontologies/planning.register.ts')).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, '../data/planning.json')`,
+      `linkedOntology(terms, ns, 'planning', loadData, ['../data/planning.ttl'])`,
+    );
+    expect(read(pkg, 'src/ontologies/planning.ts')).toContain(
+      `loadOntologyFiles(import.meta.url, ['../data/planning.ttl'])`,
     );
     expect(read(pkg, 'src/index.ts')).toContain(`./ontologies/planning.register.js`);
     expect(read(pkg, 'src/index.ts')).not.toContain(`import './shapes`);
-    expect(JSON.parse(read(pkg, 'src/data/planning.json'))['@context'].planning).toBe(
-      'https://linked.cm/ont/planning/',
+    expect(read(pkg, 'src/data/planning.ttl')).toContain(
+      `@prefix planning: <https://linked.cm/ont/planning/> .`,
+    );
+    expect(read(pkg, 'src/data/planning.ttl')).toContain(
+      `<https://linked.cm/ont/planning/> a owl:Ontology .`,
     );
 
     // No `${...}` placeholder survives.
