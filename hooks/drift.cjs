@@ -71,6 +71,21 @@ function satisfies(version, range) {
   return semver.satisfies(version, range);
 }
 
+/**
+ * The directory the installed tree was installed from: the app root, or -- in a git worktree whose
+ * `node_modules` is a symlink to the main checkout's -- the directory that holds the real
+ * `node_modules`. Its hidden lockfile's `packages-local/<x>` keys name checkouts there.
+ */
+function installRoot(appRoot) {
+  const nodeModules = path.join(appRoot, 'node_modules');
+  try {
+    if (!fs.lstatSync(nodeModules).isSymbolicLink()) return appRoot;
+    return path.dirname(fs.realpathSync(nodeModules));
+  } catch {
+    return appRoot;
+  }
+}
+
 /** Every drift in the installed tree, in a stable order. No install yet means none. */
 function driftProblems(appRoot) {
   const lock = readJson(
@@ -88,10 +103,11 @@ function driftProblems(appRoot) {
 
   const memberKey = new RegExp(`^${LOCAL_DIR}/[^/]+$`);
   const keys = Object.keys(packages).sort();
+  const lockRoot = installRoot(appRoot);
   for (const key of keys) {
     if (
       memberKey.test(key) &&
-      !fs.existsSync(path.join(appRoot, key, 'package.json'))
+      !fs.existsSync(path.join(lockRoot, key, 'package.json'))
     )
       problems.push({kind: 'missing-dir', dir: key});
   }

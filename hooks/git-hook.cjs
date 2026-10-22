@@ -8,9 +8,13 @@
 //   cannot show what is staged, it refuses too: a guard that cannot look does not let things by.
 // - post-merge, post-checkout: `npm install` when the dependency manifests changed, so the
 //   checkouts are linked again on top of the new lockfile. Nothing at all when this work tree has
-//   no checkouts (hooks are shared by every worktree of a repository). Never fails the git command.
+//   no checkouts (hooks are shared by every worktree of a repository), and no install in a worktree
+//   whose node_modules is a symlink to the main checkout's: it would relink that install to this
+//   worktree's checkouts. Never fails the git command.
 'use strict';
 const {execFileSync, spawnSync} = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const {LEAK, localMembers, manifestPathspecs} = require('./manifests.cjs');
 const {npmCommand} = require('./platform.cjs');
@@ -96,6 +100,15 @@ function installIfChanged(oldRev, newRev) {
   );
   if (diff.status !== 1) return 0;
 
+  const shared = sharedNodeModules();
+  if (shared) {
+    process.stderr.write(
+      `[linked] skipped npm install: node_modules is a symlink to ${shared} (a worktree sharing the main checkout's install). ` +
+        `Run npm install in ${path.dirname(shared)} if the dependencies changed.\n`,
+    );
+    return 0;
+  }
+
   process.stderr.write(
     `[git hook] dependency manifests changed (${oldRev.slice(0, 9)}..${newRev.slice(0, 9)}): npm install\n`,
   );
@@ -115,6 +128,21 @@ function installIfChanged(oldRev, newRev) {
     `[git hook] npm install done in ${Math.round((Date.now() - start) / 1000)}s\n`,
   );
   return 0;
+}
+
+/** The real path of `<root>/node_modules` when it is a symlink (a worktree sharing another's install), else ''. */
+function sharedNodeModules() {
+  const nodeModules = path.join(root, 'node_modules');
+  try {
+    if (!fs.lstatSync(nodeModules).isSymbolicLink()) return '';
+  } catch {
+    return '';
+  }
+  try {
+    return fs.realpathSync(nodeModules);
+  } catch {
+    return fs.readlinkSync(nodeModules); // dangling: still not this worktree's install to rewrite
+  }
 }
 
 // git exports the variables that locate this repository to its hooks; npm would hand them to every

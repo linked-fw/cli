@@ -25,6 +25,7 @@ const makeProgram = () => {
     .action(() => {});
   program.command('build-app').action(() => {});
   program.command('app-doctor').action(() => {});
+  program.command('doctor').action(() => {});
   program.command('register-local', {hidden: true}).action(() => {});
   program
     .command('package')
@@ -59,10 +60,9 @@ describe('unknown command', () => {
     expect(run(['build-al']).error).toContain('Did you mean "build-all"?');
   });
 
-  test('doctor points at its new name', () => {
-    expect(run(['doctor']).error).toBe(
-      'Unknown command "doctor".\nDid you mean "app-doctor"? ("doctor" was renamed)\nRun "linked help" for the list.',
-    );
+  test('doctor is a command of its own, not a rename of app-doctor', () => {
+    expect(run(['doctor']).error).toBeUndefined();
+    expect(run(['doctr']).error).toContain('Did you mean "doctor"?');
   });
 
   test('yarn says it was removed', () => {

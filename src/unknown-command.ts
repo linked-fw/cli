@@ -1,14 +1,5 @@
 import type {Command} from 'commander';
 
-/**
- * Commands that no longer exist under their old name. Checked before the
- * edit-distance suggestion so a rename points at its new name even when the
- * two words are far apart.
- */
-const RENAMED: Record<string, string> = {
-  doctor: 'app-doctor',
-};
-
 const REMOVED: Record<string, string> = {
   yarn: 'removed — use npm',
 };
@@ -64,7 +55,7 @@ export const suggestCommand = (
 
 /**
  * `build` is the default command, so commander hands any word it does not
- * recognise to `build` as its target — `linked doctor` then fails with a
+ * recognise to `build` as its target — `linked frobnicate` then fails with a
  * misleading build error. The default should only apply when no command is
  * given at all.
  *
@@ -83,9 +74,7 @@ export const unknownCommandError = (
     return undefined;
   }
   const lines = [`Unknown command "${first}".`];
-  if (RENAMED[first]) {
-    lines.push(`Did you mean "${RENAMED[first]}"? ("${first}" was renamed)`);
-  } else if (REMOVED[first]) {
+  if (REMOVED[first]) {
     lines.push(`"${first}" was ${REMOVED[first]}.`);
   } else {
     const suggestion = suggestCommand(first, commandNames(program, false));

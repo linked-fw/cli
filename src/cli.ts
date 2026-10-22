@@ -595,6 +595,114 @@ program
     return runAppDoctor();
   });
 
+const doctor = program
+  .command('doctor')
+  .description(
+    'Diagnostics for how the dev server loads packages. For checks on how an app uses linked packages, see app-doctor.',
+  );
+
+doctor
+  .command('resolve')
+  .description(
+    'Run in an app. For every source workspace and installed @_linked package: the directory Vite\'s dev SSR runner loads it from (or "external" when Vite leaves it to Node), the directory Node resolves it to, and whether Vite bundles it. Flags "overlay" when the two differ (a worktree\'s own checkout) and "two-copies" when they differ for a package Node also loads during linked start (@_linked/cli, and every @_linked package the app\'s vite.config imports). Exits 1 on "two-copies".',
+  )
+  .option('--json', 'Print the rows as JSON: name, vite, node, bundled, flag.')
+  .action(async (options) => {
+    const {runDoctorResolve} = await import('./commands/doctor.js');
+    return runDoctorResolve(options);
+  });
+
+const branch = program
+  .command('branch')
+  .description(
+    'One integration branch across the app and its packages-local/ checkouts. The target it lands in is recorded per repo as git config branch.<name>.linked-target.',
+  );
+
+branch
+  .command('status')
+  .description(
+    'Run in an app. Per repo (the root and each packages-local/ checkout): branch, its target, dirty, commits ahead/behind the target and the root\'s integration branch. Flags "off-branch" for a repo on neither the integration branch nor its target.',
+  )
+  .option('--json', 'Print the integration branch and the rows as JSON.')
+  .action(async (options) => {
+    const {runBranchStatus} = await import('./commands/branch.js');
+    return runBranchStatus(options);
+  });
+
+branch
+  .command('start <name> [packages...]')
+  .description(
+    'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when: any of them has uncommitted or untracked changes; --target is missing in a repo where <name> has to be created; <name> equals the target; <name> contains "--" (it separates agent branches); or another worktree has <name> checked out. If a switch fails partway, the repos already switched go back: each to its previous branch, a branch the run created is deleted (kept, with its sha printed, when it moved or another branch forked from it), and the target entry is restored.',
+  )
+  .requiredOption('--target <branch>', 'The branch the work lands in, e.g. main or dev.')
+  .action(async (name: string, packages: string[], options) => {
+    const {runBranchStart} = await import('./commands/branch.js');
+    return runBranchStart(name, packages, options);
+  });
+
+const worktree = program
+  .command('worktree')
+  .description(
+    "An agent's worktree of the app (default <parent of the app root>/wt/<agent>) with a nested worktree of each package it changes, on the branch <base>--<agent>. The base is the root's integration branch, or its current branch. node_modules is shared with the main checkout.",
+  );
+
+worktree
+  .command('add <agent>')
+  .description(
+    "Run in an app. Create the app worktree on <base>--<agent> (or detached with --app-detached), symlink node_modules and the gitignored .env files, and add a worktree of each --with package in its packages-local/. A --with checkout not on the base joins it (created from the target), refusing, with nothing changed, when it has changes. Prints the start command.",
+  )
+  .option('--with <packages>', 'Comma-separated packages-local/ checkouts to change: @_linked/core, core or _linked-core.')
+  .option('--app-detached', 'Check the app out detached at the base tip: for work that changes only packages.')
+  .option('--port <n>', 'The port for the printed start command.')
+  .option('--dataset <name>', 'A dataset of its own for the printed start command (FUSEKI_DATASET).')
+  .option('--dir <path>', 'Where to put the worktree.')
+  .action(async (agent: string, options) => {
+    const {runWorktreeAdd} = await import('./commands/worktree.js');
+    return runWorktreeAdd(agent, options);
+  });
+
+worktree
+  .command('list')
+  .description(
+    "Run in an app. The app's agent worktrees (on <base>--<agent>, or detached with a package worktree on one) with their nested package worktrees: branch or detached, and whether each branch has landed in the base.",
+  )
+  .option('--all', 'List every worktree of the app, not only agent worktrees.')
+  .option('--json', 'Print the base and the worktrees as JSON.')
+  .action(async (options) => {
+    const {runWorktreeList} = await import('./commands/worktree.js');
+    return runWorktreeList(options);
+  });
+
+worktree
+  .command('remove <agent>')
+  .description(
+    "Run in an app. Find the agent's app worktree by its branch <base>--<agent> (a detached one by its package worktrees on that branch, or at the default dir), remove its package worktrees, then the app worktree, then delete its landed agent branches. Refuses, removing nothing, while a branch has not landed or a worktree has changes.",
+  )
+  .option('--force', 'Remove even when a worktree has changes or a branch has not landed; unlanded branches are kept and their sha printed.')
+  .option('--delete-unlanded', 'Also delete agent branches that have not landed (git branch -D), printing the sha each was at.')
+  .option('--dir <path>', 'The app worktree directory, instead of finding it by its branch.')
+  .action(async (agent: string, options) => {
+    const {runWorktreeRemove} = await import('./commands/worktree.js');
+    return runWorktreeRemove(agent, options);
+  });
+
+const release = program
+  .command('release')
+  .description(
+    "Releasing an integration branch: PRs per repo to its target from branches named <integration>--<what>, framework repos first, the app last.",
+  );
+
+release
+  .command('plan')
+  .description(
+    'Run in an app on an integration branch. Per repo on it, in dependency order with the app last: commits, reports and changesets the target lacks, each new report\'s "## PR" section, the release PRs (head <integration>--*) in stack order with their state (via gh), and the next action: open PRs, waiting, merge target back, done or nothing to release. Warns when a changesets repo adds no changeset, and when origin/<target> has commits the local target lacks. It compares against the local target branches and never fetches: fetch and fast-forward them first. Changes nothing.',
+  )
+  .option('--json', 'Print the plan as JSON.')
+  .action(async (options) => {
+    const {runReleasePlan} = await import('./commands/release.js');
+    return runReleasePlan(options);
+  });
+
 program
   .command('setup-publish')
   .description(
