@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.53.0
+
+### Minor Changes
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`d769c01`](https://github.com/linked-fw/cli/commit/d769c0125144b600174cb1168961236cccbfb4c7) Thanks [@flyon](https://github.com/flyon)! - `linked branch status` and `linked branch start` manage one integration branch across an app and its `packages-local/` checkouts. `status` shows per repo the branch, its target, dirty, ahead/behind the target and the integration branch, and flags a repo on neither as `off-branch`. `start <name> --target <b> [packages...]` switches the app root and the named checkouts, creating the branch from the target where needed, and records the target. It refuses, switching nothing, on a dirty tree, a target missing where the branch has to be created, a name equal to the target or containing `--`, or a branch another worktree has checked out; a switch that fails partway puts the repos already switched back (a created branch that moved or was forked from since is kept, and its sha printed).
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`a78c520`](https://github.com/linked-fw/cli/commit/a78c52024e952a46260e32ecfd00d15dae4b313f) Thanks [@flyon](https://github.com/flyon)! - `linked doctor resolve [--json]` shows where Vite and Node resolve each `@_linked` package. A package Vite takes from another directory than Node is flagged `overlay`, or `two-copies` when Node also loads it during `linked start` (`@_linked/cli` and the `@_linked/*` packages the app's `vite.config` imports); it exits 1 on `two-copies`.
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`e2ed539`](https://github.com/linked-fw/cli/commit/e2ed5394371c4eec8dc7a88ada7d13379df8c615) Thanks [@flyon](https://github.com/flyon)! - `linked release plan [--json]` shows, per repo on the integration branch in dependency order (the app last), the commits, reports (with their `## PR` section) and changesets the target lacks, the release PRs (head `<integration>--*`) in stack order with their state, and the next action. It warns when a changesets repo adds no changeset (merging would not publish) and when `origin/<target>` has commits the local target lacks; it compares against the local targets and never fetches.
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`ee341a8`](https://github.com/linked-fw/cli/commit/ee341a85629f0099e7f2e55dc0fc26dee0c232f5) Thanks [@flyon](https://github.com/flyon)! - `@_linked/cli/integration/repos`: the repo model behind `linked branch`, `linked worktree` and `linked release` — an app's checkouts (`listRepos`), the target recorded per integration branch (`getTarget`, `setTarget`, git config `branch.<name>.linked-target`), `aheadBehind`, `integrationOf` and `agentBranch` (`<integration>--<agent>`).
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`6bd82cd`](https://github.com/linked-fw/cli/commit/6bd82cd8807e429bf85c80a5bb8de052206694ba) Thanks [@flyon](https://github.com/flyon)! - `linked worktree add|list|remove`: an agent's worktree of the app on `<base>--<agent>`, with a nested worktree of each package it changes, sharing the main checkout's install.
+
+  - `add <agent> [--with pkgs] [--app-detached] [--port] [--dataset] [--dir]` symlinks `node_modules` (also each package's nested one) and the gitignored `.env*` files (to their real path, never private keys), switches a `--with` checkout that is not on the base onto it, and prints the start command with paths quoted. Every precondition is checked before anything changes (including the agent name, and `--with` for `--app-detached`); a later failure undoes what the run created, never removes a directory it did not create, and keeps a base branch another agent moved or forked from.
+  - `list [--all] [--json]` shows the agent worktrees and whether each branch has landed; `--all` adds every other worktree.
+  - `remove <agent> [--force] [--delete-unlanded] [--dir]` finds the worktree by its agent branch (a detached one by its package worktrees) and refuses while a branch has not landed or a worktree has changes. `--force` removes it anyway and keeps unlanded branches, printing their sha; `--delete-unlanded` deletes them. When `git worktree remove` fails, the worktree's links are put back.
+
+### Patch Changes
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`ee000d5`](https://github.com/linked-fw/cli/commit/ee000d5125e4ca327f23c20e39e7cc7720913b43) Thanks [@flyon](https://github.com/flyon)! - The git hooks no longer run `npm install` in a worktree whose `node_modules` is a symlink: it would rewrite the main checkout's install.
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`9674682`](https://github.com/linked-fw/cli/commit/967468276246289d1306908e0c8fb7198664b7d5) Thanks [@flyon](https://github.com/flyon)! - The dev server no longer loads a second copy of `@_linked/cli`. Vite's SSR runner never bundles it, even when the CLI is a source workspace: its imports go to Node, which resolves them to the `lib/` files the running CLI already loaded.
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`a0c86ce`](https://github.com/linked-fw/cli/commit/a0c86ce01c72ed26a4b902e62e3e34f6d90b18f0) Thanks [@flyon](https://github.com/flyon)! - `linked localize` and `linked delocalize` refuse (exit 6) in a worktree whose `node_modules` is a symlink, where their install would rewrite the main checkout's, and name the checkout to run them in; `--list` still works there. `linked doctor` is no longer reported as a rename of `app-doctor`.
+
+- [#307](https://github.com/linked-fw/cli/pull/307) [`a285454`](https://github.com/linked-fw/cli/commit/a285454854a5cb09813ff03e7cfc654c609c4d02) Thanks [@flyon](https://github.com/flyon)! - `linked start` works from a git worktree whose `node_modules` is a symlink: Vite gets its own cache dir (`.vite-cache/` in the app root) instead of re-optimizing the main checkout's, and the drift check no longer reports every localized package as gone.
+
 ## 1.52.2
 
 ### Patch Changes
