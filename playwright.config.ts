@@ -3,7 +3,7 @@
 // The specs scaffold a fresh app to a tmpdir with this build and install this
 // build into it (tests/e2e/helpers/app.ts; build first).
 // - create-app.spec.ts spins up a Fuseki container via testcontainers on the
-//   inferring image (FUSEKI_IMAGE, default `linked-fuseki:dev`), checks that its
+//   inferring image (FUSEKI_IMAGE, default `ghcr.io/linked-fw/fuseki:6.2.0-1`), checks that its
 //   tdb2 dataset infers, runs `npm start` and drives a Person CRUD flow in the
 //   browser. Requires Docker and the image.
 // - dual-copy.spec.ts boots the app without Fuseki, reads its output (the
