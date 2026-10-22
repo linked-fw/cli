@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.54.0
+
+### Minor Changes
+
+- [#309](https://github.com/linked-fw/cli/pull/309) [`8115794`](https://github.com/linked-fw/cli/commit/811579468a2d3c0b68bea8946fae7f3113c82b68) Thanks [@flyon](https://github.com/flyon)! - `linked build` checks the package's shapes against the class hierarchy after compiling: it loads the built package's `package.js`, `shapes/index.js` and ontology data, registers the ontology data of the package and its linked dependencies through `@_linked/core/ontology/registerInstalled`, and runs `@_linked/core/shapes/checkShapeHierarchy`. Every finding is printed and an `error` (an `extends` its data does not back, a subclass whose shape does not extend its superclass's shape, a borrowed target class, an undefined term in a mirrored namespace) fails the build. `--skip-shape-check "<reason>"` skips the check and prints the reason. A package without shapes or without a `@_linked/core` dependency is not checked; a core without `shapes/checkShapeHierarchy` or `ontology/registerInstalled` warns and skips.
+
+  The build's dependency check no longer drops the last missing dependency from its warning when `react` is not among them.
+
+- [#309](https://github.com/linked-fw/cli/pull/309) [`11a1362`](https://github.com/linked-fw/cli/commit/11a1362a0adb7ab113e46afbaaf3a3066e66bc59) Thanks [@flyon](https://github.com/flyon)! - `linked build` ships a package's Turtle ontology data: `src/**/*.ttl` is copied into `lib/esm/` (and `lib/cjs/` when CommonJS is published) at the same relative path, so `src/data/x.ttl` becomes `lib/esm/data/x.ttl`. `linked build-app` copies the app's own `src/**/*.ttl` into `lib/` beside the compiled backend, and fails the build when that copy fails.
+
+  New ontology packages are scaffolded in Turtle (`create-package --kind ontology`, `create-ontology`, `buildPackageFiles`): `src/data/<name>.ttl` replaces the `.json` and `.json.d.ts` files, `loadData` calls `@_linked/core/ontology/loadOntologyFiles(import.meta.url, ['../data/<name>.ttl'])`, and the register module passes `['../data/<name>.ttl']` to `linkedOntology`. The scaffold needs a `@_linked/core` that exports `ontology/loadOntologyFiles`.
+
+### Patch Changes
+
+- [#309](https://github.com/linked-fw/cli/pull/309) [`58fd31e`](https://github.com/linked-fw/cli/commit/58fd31eed0b621bf96ba9a3471b37f58715652e9) Thanks [@flyon](https://github.com/flyon)! - The build's dependency check no longer reports a package's own name (imported from its tests, for example) as a missing dependency.
+
 ## 1.53.0
 
 ### Minor Changes
