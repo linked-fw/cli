@@ -42,6 +42,23 @@ describe('depCheck', () => {
     expect(result).not.toContain('- react');
   });
 
+  test("never reports the package's own name, imported from its tests", async () => {
+    fixture("import {Parser} from 'n3';\nexport const p = new Parser();\n");
+    fs.mkdirSync(path.join(dir, 'tests'));
+    fs.writeFileSync(
+      path.join(dir, 'tests', 'index.test.ts'),
+      "import {p} from '@test/depcheck/index';\nimport {q} from '@test/depcheck';\nexport const a = [p, q];\n",
+    );
+    const result = await depCheck(dir);
+    expect(result).toContain('- n3');
+    expect(result).not.toContain('@test/depcheck');
+  });
+
+  test('passes when its own name is the only missing dependency', async () => {
+    fixture("import {p} from '@test/depcheck/index';\nexport const a = p;\n");
+    expect(await depCheck(dir)).toBe(true);
+  });
+
   test('passes when react is the only missing dependency', async () => {
     fixture("import React from 'react';\nexport const a = React;\n");
     expect(await depCheck(dir)).toBe(true);

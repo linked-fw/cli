@@ -1910,6 +1910,16 @@ export const depCheckStaged = async () => {
     });
   });
 };
+const readOwnPackageName = (packagePath: string): string | undefined => {
+  try {
+    const pack = JSON.parse(
+      fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
+    );
+    return typeof pack.name === 'string' ? pack.name : undefined;
+  } catch {
+    return undefined;
+  }
+};
 export const depCheck = async (packagePath: string = process.cwd()) => {
   // log('Checking depencies of ' + chalk.cyan(packagePath));
   return new Promise((resolve, reject) => {
@@ -1922,6 +1932,11 @@ export const depCheck = async (packagePath: string = process.cwd()) => {
         // missing = missing.filter(m => m.indexOf('@types/') === 0);
         //currently react is not an explicit dependency, but we should add it as a peer dependency
         missing = missing.filter((dep) => dep !== 'react');
+        //a package importing its own name (e.g. from its tests) is a self-reference, not a missing dependency
+        const ownName = readOwnPackageName(packagePath);
+        if (ownName) {
+          missing = missing.filter((dep) => dep !== ownName);
+        }
 
         let missingLincdPackages = missing.filter((missingDep) => {
           return lincdPackages.some((lincdPackage) => {
