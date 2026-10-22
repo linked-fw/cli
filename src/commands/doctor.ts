@@ -47,8 +47,8 @@ export function linkedImports(source: string): string[] {
  * one of them is a second instance in the same process:
  * - `@_linked/cli`: the `linked` bin is the CLI, loaded from its `lib/`;
  * - every `@_linked/*` package the app's `vite.config.*` imports: Node loads
- *   the config, and so those packages, natively when Vite starts (CN's imports
- *   `@_linked/auth/utils/cookieNames`).
+ *   the config, and so those packages, natively when Vite starts (e.g. a
+ *   config that imports `@_linked/auth/utils/cookieNames`).
  */
 export function nodeLoaded(cwd: string): string[] {
   const names = new Set(['@_linked/cli']);

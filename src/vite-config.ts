@@ -375,8 +375,9 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
  * not set up for localizing yet). That's what lets a STANDALONE app (not
  * itself a workspace root — e.g. a per-branch clone under /apps) resolve a
  * linked package's `.tsx` sources with extension probing, instead of falling
- * through to the package's
- * `development → ./src/*.ts` export (which misses `.tsx` like LinkedServer). A
+ * through to the package's exports, which point at `lib/esm` (and a
+ * `development → ./src/*.ts` wildcard, where an app package declares one,
+ * misses `.tsx` files like LinkedServer). A
  * prod/ejected app installs PUBLISHED packages (no `src/`) → not registered,
  * resolved via each package's `lib`.
  *
@@ -520,7 +521,7 @@ async function libTargetToSource(
  * Without it such a specifier falls through to Vite, which picks the package's
  * `lib/esm` copy while the rest of the package comes from src: two instances of
  * every module-level registry. It must not depend on a `development` -> src
- * condition, because src/ is not published and packages do not declare one.
+ * condition: src/ is not published, and the framework packages declare none.
  */
 async function resolveViaWorkspaceExports(
   ws: WorkspaceEntry,
@@ -870,12 +871,12 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       plugins: [
         // Direct workspace specifier resolver.
         //
-        // The package.json `"./*": { "development": "./src/*.ts" }` wildcard
-        // can't express "try .ts, fall back to .tsx" (Node's exports spec
-        // resolves to a single literal path). For React-heavy packages like
-        // @_linked/primitives, @_linked/server-utils, and @_linked/auth,
-        // most files are .tsx — the wildcard fails before any Vite plugin
-        // gets a chance to fix it up.
+        // The framework packages' exports point only at `lib/esm` (they declare
+        // no `development` condition), so Vite's own resolver would load the
+        // built copy. An exports wildcard could not reach source
+        // anyway: it resolves to one literal path and can't express "try .tsx,
+        // then .ts", and React-heavy packages such as @_linked/primitives,
+        // @_linked/server-utils and @_linked/auth are mostly .tsx.
         //
         // This plugin intercepts BARE workspace specifiers like
         // `@_linked/foo/bar` and `pkg-name/utils/Baz.js` BEFORE Vite's
@@ -990,26 +991,27 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       },
       // STANDALONE resolve conditions.
       //
-      // The published `@_linked/*` / `lincd-*` packages export
+      // A package may export
       //   "development": "./src/*.ts",  "import": "./lib/esm/*.js"
-      // In dev, Vite expands its special `development|production` condition
-      // token to `development`, so it resolves these to `./src/*.ts` — which
-      // doesn't exist in a lib-only npm install → boot crash
-      // ("Failed to load @_linked/server/shapes/LinkedServer").
+      // (the framework packages don't; some app workspace packages, such as
+      // the app-react-native template's, do). In dev, Vite expands its special
+      // `development|production` condition token to `development`, so it
+      // resolves such a package to `./src/*.ts` — which doesn't exist in a
+      // lib-only npm install → boot crash.
       //
       // Dropping the dev/prod token from the condition list means Vite never
       // adds `development`; `import` (always appended last by Vite) wins, so
-      // these packages resolve to `./lib/esm/*.js`. We start from Vite's
+      // every package resolves to `./lib/esm/*.js`. We start from Vite's
       // default SERVER conditions (`module`, `node`, `development|production`)
       // minus the dev/prod token. This governs BOTH the plugin pipeline
       // (`resolve.conditions`) and the SSR module runner used by
       // `ssrLoadModule('@_linked/server/shapes/LinkedServer')` in
       // commands/start.ts (`ssr.resolve.conditions`).
       //
-      // WORKSPACE-GATED: only applied standalone. In monorepo dev the packages
-      // ship `src`, and we WANT `development → src` for HMR — so we leave
-      // conditions at Vite's defaults there (undefined = untouched), keeping
-      // CN dev byte-for-byte unchanged.
+      // WORKSPACE-GATED: only applied standalone. With source workspaces,
+      // `linked:resolve-workspace-ts` maps them to `src/` (no condition is
+      // involved), and the conditions stay at Vite's defaults (undefined =
+      // untouched), so a package that declares `development → src` gets it.
       //
       // DEDUPE, standalone only: its two context-holding packages, even when
       // they are not found on disk, so the two `ssrLoadModule` loads
@@ -1027,9 +1029,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
       // `ssr.external` is a minimal allowlist of
       // npm deps that genuinely can't (or shouldn't) go through Vite's
       // SSR transform. Workspace packages (`@_linked/*`, `lincd-*`) are
-      // DELIBERATELY removed so Vite resolves them via each package's
-      // `development → ./src/*.ts` conditional export and HMR works on
-      // source changes.
+      // DELIBERATELY left out so Vite bundles them, `linked:resolve-workspace-ts`
+      // maps them to `src/`, and HMR works on source changes.
       //
       // "Multiple LINCD" warnings may resurface during the interim until
       // LINCD eradication completes (accepted).
@@ -1047,17 +1048,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // instance of each workspace package (breaking the single-`src`-instance
         // invariant — `LinkedStorage` state set on one instance, read on the
         // other → "No query dispatch configured"). Force the workspace packages
-        // to be BUNDLED so they resolve via each package's `development → src`.
+        // to be BUNDLED so `linked:resolve-workspace-ts` maps them to `src/`.
         //
-        // WORKSPACE-GATED: only force-bundle when workspaces are actually
-        // present (the monorepo / CN + CN's workspace-member clones, where the
-        // `@_linked/*` packages have `src` on disk). A STANDALONE app (CLI-
-        // created, no workspaces) installs `@_linked/*` from npm as lib-only —
-        // those have NO `src`, so bundling them via the `development → src`
-        // condition fails ("Failed to load @_linked/server/shapes/LinkedServer").
-        // Leaving them EXTERNAL lets Node resolve `import → lib/esm`. Single-
-        // instance is not a concern standalone (one node_modules copy each) and
-        // core's query dispatch is global-backed regardless.
         // STANDALONE: bundle every `@_linked/*` package except core and the CLI
         // (`STANDALONE_SSR_BUNDLED`). The runner then evaluates each framework
         // package once. Bundling only some of them left a split: an external
@@ -1104,7 +1096,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // condition list, defaulting to `resolve.conditions`. Set it
         // explicitly so `development` is excluded there too and the lib-only
         // packages resolve via `import → lib/esm`. Omitted (defaults kept) in
-        // workspace mode so monorepo SSR still resolves `development → src`.
+        // workspace mode, where source workspaces reach `src/` through
+        // `linked:resolve-workspace-ts`.
         ...(isStandalone
           ? {resolve: {conditions: ['module', 'node']}}
           : {}),

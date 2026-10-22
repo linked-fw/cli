@@ -23,7 +23,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
-import {integrationOf, agentBranch, getTarget, listRepos, setTarget, type RepoInfo} from '../integration/repos.js';
+import {
+  agentBranch,
+  currentBranch,
+  getTarget,
+  integrationOf,
+  listRepos,
+  setTarget,
+  type RepoInfo,
+} from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {
@@ -85,12 +93,6 @@ function realish(p: string): string {
 function isInside(parent: string, child: string): boolean {
   const rel = path.relative(parent, child);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
-}
-
-function currentBranch(run: Run, dir: string): string | null {
-  const r = run('git', ['symbolic-ref', '--short', '-q', 'HEAD'], {cwd: dir});
-  const branch = r.stdout.trim();
-  return r.status === 0 && branch ? branch : null;
 }
 
 /** The branch agents of this app fork from: the integration branch, else the root's branch. */

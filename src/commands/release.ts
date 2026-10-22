@@ -16,7 +16,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
-import {getTarget, integrationOf, listRepos, type Integration, type RepoInfo} from '../integration/repos.js';
+import {
+  getTarget,
+  git,
+  integrationOf,
+  listRepos,
+  type Integration,
+  type RepoInfo,
+} from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {refExists} from './branch.js';
@@ -111,14 +118,6 @@ export interface ReleasePlanOptions {
   run?: Run;
   /** Runs `gh`; the default spawns it. It may throw (e.g. ENOENT) or return a non-zero status. */
   gh?: Run;
-}
-
-function git(run: Run, cwd: string, args: string[]): string {
-  const r = run('git', args, {cwd});
-  if (r.status !== 0) {
-    throw new Error(`git ${args.join(' ')} failed in ${cwd}: ${(r.stderr || r.stdout).trim()}`);
-  }
-  return r.stdout.trim();
 }
 
 const lines = (s: string): string[] => s.split('\n').map((l) => l.trim()).filter(Boolean);

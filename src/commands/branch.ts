@@ -397,6 +397,7 @@ export async function branchStart(
             }
           }
         }
+        // A kept branch keeps the target entry that goes with it.
         if (keep) return;
         run(
           'git',

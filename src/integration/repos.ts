@@ -35,8 +35,8 @@ export interface Integration {
   target: string;
 }
 
-/** Run git in `cwd`; throws with git's own message when it fails. */
-function git(run: Run, cwd: string, args: string[]): string {
+/** Run git in `cwd` and return its trimmed stdout; throws with git's own message when it fails. */
+export function git(run: Run, cwd: string, args: string[]): string {
   const r = run('git', args, {cwd});
   if (r.status !== 0) {
     throw new Error(
@@ -47,7 +47,7 @@ function git(run: Run, cwd: string, args: string[]): string {
 }
 
 /** The checked-out branch in `dir`, or null when HEAD is detached. */
-function currentBranch(run: Run, dir: string): string | null {
+export function currentBranch(run: Run, dir: string): string | null {
   const r = run('git', ['symbolic-ref', '--short', '-q', 'HEAD'], {cwd: dir});
   const branch = r.stdout.trim();
   return r.status === 0 && branch ? branch : null;
