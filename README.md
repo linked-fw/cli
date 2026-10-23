@@ -100,7 +100,7 @@ package goes in `./packages/`, `./modules/` or the current directory, and instal
 
 ```bash
 linked build                      # build the current package (tsc + checks)
-linked build --skip-shape-check "<reason>"  # the same without the shape hierarchy check
+linked build --skip-shape-check "<reason>"  # the same without the shape hierarchy check and shapes.ttl
 linked build-app                  # build frontend + backend for the current app
 linked build-app --target web     # web release: build and write public/bundles/linked-release.json
 linked build-app --target capacitor  # Capacitor/local native build: local manifest only, never published
@@ -128,7 +128,19 @@ of declaring its own (`borrowed-target-class`), a term in a mirrored standard's 
 package's data does not define (`mirror-undefined-term`), and an override that widens what it
 inherits (`override-not-tightened`). Every finding is printed; an `error` fails the build, warnings
 alone do not. A package without shapes, or without a `@_linked/core` dependency, is not checked.
-`linked build --skip-shape-check "<reason>"` skips the check and prints the reason.
+`linked build --skip-shape-check "<reason>"` skips the check, and the `shapes.ttl` step below, and
+prints the reason.
+
+Then it writes the package's shapes as Turtle to `lib/esm/data/shapes.ttl` (**Writing
+shapes.ttl**). A `node` process loads the built `package.js` and `shapes/index.js` (every shape
+module when there is no index) and calls `packageShapesTurtle(<package name>)` from the
+`@_linked/core/shapes/shapesToTurtle` that the package resolves, so the file holds the same bytes
+an app's server generates in process: shapes as declared, in core's fixed order. The server syncs
+the package's shape graph (`{package IRI}/graph/shapes`) from this file by a content hash. A
+package that registers no shapes, or has no `@_linked/core` dependency, gets no file (one left by an
+earlier build is removed); a core without `shapes/shapesToTurtle` warns and writes none; a shape
+module that throws fails the build. With `--skip-shape-check` the step is skipped with a warning.
+Whenever no new file is written, one left by an earlier build is removed.
 
 `linked build` exits with code 1 whenever the build does not succeed, including when it is run in a `linkedApp` or
 in a package without `"linkedPackage": true` (it used to exit 0 there). A build that finishes with warnings still

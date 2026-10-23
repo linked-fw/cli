@@ -361,7 +361,7 @@ program
   )
   .option(
     '--skip-shape-check <reason>',
-    'Skip the shape hierarchy check (shapes against the class hierarchy). The reason is printed',
+    'Skip the shape hierarchy check (shapes against the class hierarchy) and writing shapes.ttl. The reason is printed',
   );
 
 program
