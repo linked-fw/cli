@@ -54,7 +54,7 @@
     }
   },
   "dependencies": {
-    "@_linked/core": "^2.37.0"
+    "@_linked/core": "^2.38.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",
