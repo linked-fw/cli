@@ -3,6 +3,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+// ora is ESM-only, which Jest's CommonJS loader cannot require.
+jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
+
+import {planBuildSteps} from '../../src/cli-methods.js';
 import {
   collectShapesTurtleInputs,
   generateShapesTurtle,
@@ -220,6 +224,30 @@ describe('Writing shapes.ttl', () => {
     write('lib/esm/shapes/index.js', "import './Animal.js';\nimport './Broken.js';\n");
     const result = (await writeShapesTurtleStep(dir)) as {error: string};
     expect(result.error).toMatch(/^loading file:.*shapes\/index\.js: Error: boom/);
+    expect(fs.existsSync(target())).toBe(false);
+  });
+
+  test('a failed generation removes an earlier shapes.ttl', async () => {
+    fixture({shapes: {Animal: animal}});
+    write('lib/esm/shapes/Broken.js', "throw new Error('boom');\n");
+    write('lib/esm/shapes/index.js', "import './Animal.js';\nimport './Broken.js';\n");
+    write(SHAPES_TURTLE_PATH, 'stale\n');
+    const result = (await writeShapesTurtleStep(dir)) as {error: string};
+    expect(result.error).toMatch(/boom/);
+    expect(fs.existsSync(target())).toBe(false);
+  });
+
+  test('--skip-shape-check skips the step, removes an earlier shapes.ttl and says so', async () => {
+    fixture({shapes: {Animal: animal}});
+    write(SHAPES_TURTLE_PATH, 'stale\n');
+    const message = 'skipped with --skip-shape-check (pending the data fix): no shapes.ttl written';
+    expect(await writeShapesTurtleStep(dir, {skip: 'pending the data fix'})).toBe(message);
+    expect(fs.existsSync(target())).toBe(false);
+    write(SHAPES_TURTLE_PATH, 'stale\n');
+    const step = planBuildSteps({}, dir, {skipShapeCheck: 'pending the data fix'}).find(
+      (s) => s.name === 'Writing shapes.ttl',
+    )!;
+    expect(await step.apply()).toBe(message);
     expect(fs.existsSync(target())).toBe(false);
   });
 });

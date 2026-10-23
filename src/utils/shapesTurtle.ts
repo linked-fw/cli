@@ -172,14 +172,23 @@ export const generateShapesTurtle = async (
 /**
  * Build step. Writes `lib/esm/data/shapes.ttl` when the package registers shapes; otherwise makes
  * sure there is none. A core that cannot generate the file warns; a module that throws fails.
+ * `skip` (from `--skip-shape-check "<reason>"`) skips the step: no file, and the warning says why.
+ * Whenever no new file is written, an earlier one is removed, so a stale `shapes.ttl` never ships.
  */
 export const writeShapesTurtleStep = async (
   packagePath: string,
-  {timeoutMs}: {timeoutMs?: number} = {},
+  {skip, timeoutMs}: {skip?: string; timeoutMs?: number} = {},
 ): Promise<true | string | {info: string} | {error: string}> => {
   const target = path.join(packagePath, SHAPES_TURTLE_PATH);
+  if (skip !== undefined) {
+    fs.rmSync(target, {force: true});
+    return `skipped with --skip-shape-check (${skip}): no shapes.ttl written`;
+  }
   const outcome = await generateShapesTurtle(packagePath, {timeoutMs});
-  if ('error' in outcome) return {error: outcome.error};
+  if ('error' in outcome) {
+    fs.rmSync(target, {force: true});
+    return {error: outcome.error};
+  }
   if ('turtle' in outcome && outcome.turtle !== undefined) {
     fs.mkdirSync(path.dirname(target), {recursive: true});
     fs.writeFileSync(target, outcome.turtle);

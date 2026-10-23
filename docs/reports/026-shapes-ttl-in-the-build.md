@@ -139,3 +139,16 @@ build`):
 None. One note for the master (core's, not a cli change): `npm pack --dry-run` in core lists
 `lib/esm/tests/fixtures/core-shapes.ttl` (27.6 kB) beside `lib/esm/data/shapes.ttl`, because the
 copy step copies every `src/**/*.ttl`; R2's `grep '\.ttl'` tarball check will show both.
+
+## Review fixes
+
+- `--skip-shape-check` now skips **Writing shapes.ttl** too. It removes any earlier
+  `lib/esm/data/shapes.ttl` and warns `skipped with --skip-shape-check (<reason>): no shapes.ttl written`.
+- A failed generation removes the earlier `shapes.ttl` before it fails the step, so a stale file never
+  ships. Both cases are tested in `shapesTurtle.test.ts` (the skip through `planBuildSteps`). The
+  README, the `--skip-shape-check` help text and the changeset are updated.
+
+Gate (worktree `named-graphs--fixsc`): `npm run build` exit 0, `5.37s user 0.62s system 90% cpu
+6.629 total`. `npm run test:unit` → `Test Suites: 89 passed, 89 total` / `Tests: 984 passed, 984
+total`, `1:10.05 total`. `FUSEKI_IMAGE=ghcr.io/linked-fw/fuseki:6.2.0-2 npm run test:e2e` →
+`6 passed (1.4m)`, `1:22.68 total`.

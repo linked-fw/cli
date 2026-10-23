@@ -8,5 +8,7 @@
 an app's server generates in process for its shape graph. A package that registers no shapes gets
 no file, and a file left by an earlier build is removed. A package built against a core without
 `shapes/shapesToTurtle` (before the shape-graph release) gets a warning and no file.
+`--skip-shape-check` skips this step too, with a warning. Whenever no new file is written (no
+shapes, skipped, or a failed generation), a file left by an earlier build is removed.
 
 Breaking: none. Packages released with this cli ship `lib/esm/data/shapes.ttl` in their tarball.
