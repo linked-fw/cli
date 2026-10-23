@@ -130,6 +130,16 @@ inherits (`override-not-tightened`). Every finding is printed; an `error` fails 
 alone do not. A package without shapes, or without a `@_linked/core` dependency, is not checked.
 `linked build --skip-shape-check "<reason>"` skips the check and prints the reason.
 
+Then it writes the package's shapes as Turtle to `lib/esm/data/shapes.ttl` (**Writing
+shapes.ttl**). A `node` process loads the built `package.js` and `shapes/index.js` (every shape
+module when there is no index) and calls `packageShapesTurtle(<package name>)` from the
+`@_linked/core/shapes/shapesToTurtle` that the package resolves, so the file holds the same bytes
+an app's server generates in process: shapes as declared, in core's fixed order. The server syncs
+the package's shape graph (`{package IRI}/graph/shapes`) from this file by a content hash. A
+package that registers no shapes, or has no `@_linked/core` dependency, gets no file (one left by an
+earlier build is removed); a core without `shapes/shapesToTurtle` warns and writes none; a shape
+module that throws fails the build.
+
 `linked build` exits with code 1 whenever the build does not succeed, including when it is run in a `linkedApp` or
 in a package without `"linkedPackage": true` (it used to exit 0 there). A build that finishes with warnings still
 exits 0.
