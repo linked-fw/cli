@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.55.0
+
+### Minor Changes
+
+- [#311](https://github.com/linked-fw/cli/pull/311) [`59fa184`](https://github.com/linked-fw/cli/commit/59fa1841f0497309e9c8e6a58369f1851c171ae0) Thanks [@flyon](https://github.com/flyon)! - The CLI and the `defaults/package` template depend on `@_linked/core` `^2.38.0` (named graphs and
+  the graph registry). The e2e's default `FUSEKI_IMAGE` is `ghcr.io/linked-fw/fuseki:6.2.0-2`, the
+  image that builds its class hierarchy from the graph registry.
+
+  Breaking changes:
+
+  - `@_linked/core` 2.38 requires `ghcr.io/linked-fw/fuseki:6.2.0-2`, or a store that builds its
+    hierarchy from the graph registry: on `6.2.0-1` classes declared in package graphs do not infer.
+  - Packages created from `defaults/package` start on `@_linked/core` `^2.38.0`.
+
 ## 1.54.0
 
 ### Minor Changes
