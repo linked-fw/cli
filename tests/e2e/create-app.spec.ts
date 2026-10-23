@@ -3,7 +3,7 @@
 //
 // Self-contained: scaffolds into an OS tmpdir, installs deps from npm,
 // starts a Fuseki testcontainer on the inferring image (FUSEKI_IMAGE, default
-// `ghcr.io/linked-fw/fuseki:6.2.0-1`, published from linked-fw/fuseki's server/), checks that its
+// `ghcr.io/linked-fw/fuseki:6.2.0-2`, published from linked-fw/fuseki's server/), checks that its
 // tdb2 dataset infers, then exercises the Person fixture. No
 // dependency on any parent monorepo. Companion `@_linked/*` packages
 // must be published to npm at compatible versions; if they aren't yet,
@@ -31,7 +31,7 @@ const APP_PORT = 4400 + (process.pid % 100); // avoid collision with a CN backen
 // The image every linked app runs on: Fuseki with RDFS inference over the stored
 // rdfs:subClassOf hierarchy. Build it locally with
 // `docker build -t linked-fuseki:dev <linked-fw/fuseki>/server`.
-const FUSEKI_IMAGE = process.env.FUSEKI_IMAGE || 'ghcr.io/linked-fw/fuseki:6.2.0-1';
+const FUSEKI_IMAGE = process.env.FUSEKI_IMAGE || 'ghcr.io/linked-fw/fuseki:6.2.0-2';
 const ADMIN_AUTH = 'Basic ' + Buffer.from('admin:admin').toString('base64');
 
 let fuseki: StartedTestContainer;
