@@ -78,6 +78,34 @@ function cliUnderTest(packDir: string): string {
   return join(packDir, tarball);
 }
 
+/**
+ * Installs the `@_linked/core` an e2e runs against: `E2E_CORE` as an npm spec
+ * (default `@_linked/core@latest`), or, when it names a directory, that built
+ * checkout packed. Returns what was installed.
+ */
+export function installCore(app: ScaffoldedApp): string {
+  const wanted = process.env.E2E_CORE || '@_linked/core@latest';
+  let spec = wanted;
+  if (existsSync(join(wanted, 'package.json'))) {
+    const before = new Set(readdirSync(app.root));
+    execFileSync('npm', ['pack', '--silent', '--pack-destination', app.root], {
+      cwd: resolve(wanted),
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
+    const tarball = readdirSync(app.root).find(
+      (f) => !before.has(f) && /^_linked-core-.*\.tgz$/.test(f),
+    );
+    if (!tarball) throw new Error(`npm pack left no core tarball in ${app.root}`);
+    spec = join(app.root, tarball);
+  }
+  execFileSync('npm', ['install', '--no-audit', '--no-fund', spec], {
+    cwd: app.dir,
+    stdio: 'inherit',
+  });
+  console.log(`[e2e] app ${app.dir} runs @_linked/core from ${spec}`);
+  return spec;
+}
+
 export function removeApp(app: ScaffoldedApp | undefined): void {
   if (app && existsSync(app.root)) rmSync(app.root, {recursive: true, force: true});
 }

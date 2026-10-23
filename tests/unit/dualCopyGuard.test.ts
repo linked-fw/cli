@@ -2,6 +2,7 @@ import path from 'path';
 import {pathToFileURL} from 'url';
 import {
   createLinkedFileMatcher,
+  createPackageFileMatcher,
   installDualCopyGuard,
   type RegisterHooks,
 } from '../../src/utils/dual-copy-guard';
@@ -263,5 +264,38 @@ describe('installDualCopyGuard', () => {
     expect(logs).toEqual([
       '[linked] dual-copy guard: off (Node v22.10.0 has no module.registerHooks)',
     ]);
+  });
+});
+
+describe('createPackageFileMatcher', () => {
+  it('matches any package under node_modules, scoped or not, with its root', () => {
+    const match = createPackageFileMatcher(() => null);
+    const file = path.join(APP, 'node_modules/@acme/pets/lib/esm/x.js');
+    expect(match(file)).toEqual({
+      name: '@acme/pets',
+      root: path.join(APP, 'node_modules/@acme/pets'),
+      subpath: 'lib/esm/x.js',
+    });
+    expect(match(path.join(APP, 'node_modules/react/index.js'))).toEqual({
+      name: 'react',
+      root: path.join(APP, 'node_modules/react'),
+      subpath: 'index.js',
+    });
+  });
+
+  it('finds a package outside node_modules by its nearest named package.json', () => {
+    const {read} = fakeReadPackageName();
+    const match = createPackageFileMatcher(read);
+    expect(match(path.join(LOCAL, 'lib/esm/utils/Server.js'))).toEqual({
+      name: '@_linked/server-utils',
+      root: LOCAL,
+      subpath: 'lib/esm/utils/Server.js',
+    });
+    expect(match(path.resolve('/cn/src/App.tsx'))).toEqual({
+      name: '@semantu/create-now',
+      root: path.resolve('/cn'),
+      subpath: 'src/App.tsx',
+    });
+    expect(match(path.resolve('/nowhere/x.js'))).toBeNull();
   });
 });

@@ -13,13 +13,15 @@
 //   - Server changes still need full process restart for now (server HMR
 //     deferred to vite-node migration)
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {importFile, isPathInside} from '../utils/platform.js';
 import fsExtra from 'fs-extra';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
 import {isBundled, packageNameOf, type SsrMatcher} from '../utils/ssrBundled.js';
+import {createPackageFileMatcher, type PackageFile} from '../utils/dual-copy-guard.js';
+import {libTargetToSource, RESOLVE_WORKSPACE_PLUGIN} from '../utils/sourceFile.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
 import {keepDevServerAlive} from '../plugins/keep-dev-server-alive.js';
@@ -355,12 +357,18 @@ function installShortcuts(opts: {url: string; onRestart: () => void}): void {
   );
 }
 
-/** The global core's `loadStores` reads its module loader from (cli report 014). */
+/**
+ * Where core's `importPackageModule` (`loadStores`, `registerInstalledOntologies`)
+ * reads the host's module loader from (cli report 014).
+ */
 export const STORE_LOADER_KEY = Symbol.for('@_linked/core:importModule');
 
-/** The parts of a Vite dev server the store loader uses. */
+/** The parts of a Vite dev server the module loader uses. */
 export type StoreLoaderVite = {
-  config: {ssr?: {noExternal?: true | SsrMatcher | SsrMatcher[]}};
+  config: {
+    ssr?: {noExternal?: true | SsrMatcher | SsrMatcher[]};
+    plugins?: readonly {name: string; api?: unknown}[];
+  };
   ssrLoadModule: (url: string) => Promise<Record<string, any>>;
   environments: {
     ssr: {
@@ -374,40 +382,119 @@ export type StoreLoaderVite = {
   };
 };
 
+/** A source workspace: a package Vite resolves to its `src/`. */
+export type SourceWorkspace = {name: string; srcDir: string};
+
+export type StoreLoaderOptions = {
+  /**
+   * The source workspaces; defaults to what `linked:resolve-workspace-ts`
+   * exposes on the server's plugins, else to `discoverSourceWorkspaces`.
+   */
+  sourceWorkspaces?: readonly SourceWorkspace[];
+  /**
+   * Finds the source workspaces when the server's plugins expose none (a
+   * `vite.config` built by another copy of the CLI, or without
+   * `createViteConfig`); defaults to `discoverWorkspaces` of `cwd`.
+   */
+  discoverSourceWorkspaces?: () => Promise<readonly SourceWorkspace[]>;
+  /** Finds the package of a file; defaults to the dual-copy guard's matcher. */
+  packageOf?: (file: string) => PackageFile | null;
+};
+
 /**
- * The loader `linked start` hands core's `loadStores` for the stores a datasets
- * file names. A native `import()` in core is Node's, so a store from a package
- * the SSR runner bundles (`@_linked/server/shapes/quadstores/RemoteDataset`)
- * would be a second copy of the class the app imports. This gives each store
- * the copy the app's own import gets: the runner's for a bundled package,
- * Node's for an external one, at the file Vite's SSR resolver picks (its
- * conditions can differ from Node's own resolution). Not `ssrLoadModule` for
- * both: Vite transforms an entry it is handed even when its package is
- * external, which would make a Vite copy of an external store (`FusekiStore`)
- * next to the app's Node copy.
+ * The source workspaces the dev resolver plugin of `vite` maps to `src/`, or
+ * null when no plugin exposes them.
+ */
+export function sourceWorkspacesOf(vite: StoreLoaderVite): SourceWorkspace[] | null {
+  const plugin = vite.config.plugins?.find(
+    (p) => p?.name === RESOLVE_WORKSPACE_PLUGIN,
+  );
+  const api = plugin?.api as {sourceWorkspaces?: SourceWorkspace[]} | undefined;
+  return Array.isArray(api?.sourceWorkspaces) ? api.sourceWorkspaces : null;
+}
+
+const LIB_ESM = 'lib/esm/';
+
+/**
+ * The loader `linked start` installs for core's `importPackageModule`: stores a
+ * datasets file names (`loadStores`) by package specifier, and ontology
+ * register modules (`registerInstalledOntologies`) by absolute file path. A
+ * native `import()` in core is Node's, so a module of a package the SSR runner
+ * bundles (`@_linked/server/shapes/quadstores/RemoteDataset`,
+ * `.../@_linked/server/lib/esm/ontologies/server.register.js`) would be a
+ * second copy of what the app imports. This gives each module the copy the
+ * app's own import gets:
+ *
+ * - A specifier: the runner's for a bundled package, Node's for an external
+ *   one, at the file Vite's SSR resolver picks (its conditions can differ from
+ *   Node's own resolution).
+ * - An absolute path (or `file:` URL) is mapped to its package with the
+ *   dual-copy guard's matcher. External, or in no package: Node's, by its
+ *   `file:` URL. Bundled: the runner's; for a source workspace a
+ *   `lib/esm/<p>.js` file is replaced by the `src/<p>.ts(x)` the app's imports
+ *   of it resolve to, when that file exists.
+ *
+ * Never `ssrLoadModule` for an external package: Vite transforms an entry it is
+ * handed even when its package is external, which would make a Vite copy of an
+ * external module (`FusekiStore`) next to the app's Node copy.
  */
 export function createStoreLoader(
   vite: StoreLoaderVite,
   cwd: string,
   nativeImport: (specifier: string) => Promise<unknown> = (specifier) =>
     import(specifier),
-): (specifier: string) => Promise<unknown> {
-  return async (specifier: string) => {
-    const noExternal = vite.config.ssr?.noExternal;
-    const list = Array.isArray(noExternal)
-      ? noExternal
-      : typeof noExternal === 'string' || noExternal instanceof RegExp
-        ? [noExternal]
-        : [];
-    if (noExternal === true || isBundled(packageNameOf(specifier), list)) {
-      return vite.ssrLoadModule(specifier);
+  options: StoreLoaderOptions = {},
+): (target: string) => Promise<unknown> {
+  const noExternal = vite.config.ssr?.noExternal;
+  const list = Array.isArray(noExternal)
+    ? noExternal
+    : typeof noExternal === 'string' || noExternal instanceof RegExp
+      ? [noExternal]
+      : [];
+  const bundled = (name: string) =>
+    noExternal === true || isBundled(name, list);
+  const packageOf = options.packageOf ?? createPackageFileMatcher();
+  const discover =
+    options.discoverSourceWorkspaces ??
+    (async () => (await import('../vite-config.js')).discoverWorkspaces([], cwd));
+  // Read once, on the first file: the plugins are final by then.
+  let sourceWorkspaces: Promise<readonly SourceWorkspace[]> | undefined =
+    options.sourceWorkspaces && Promise.resolve(options.sourceWorkspaces);
+
+  const loadFile = async (file: string): Promise<unknown> => {
+    const pkg = packageOf(file);
+    if (!pkg || !bundled(pkg.name)) {
+      return nativeImport(pathToFileURL(file).href);
+    }
+    sourceWorkspaces ??= (async () => sourceWorkspacesOf(vite) ?? (await discover()))();
+    const workspace = (await sourceWorkspaces).find((w) => w.name === pkg.name);
+    if (workspace && pkg.subpath.startsWith(LIB_ESM)) {
+      const source = await libTargetToSource(
+        workspace.srcDir,
+        pkg.subpath.slice(LIB_ESM.length),
+      );
+      if (source) return vite.ssrLoadModule(toViteId(source));
+    }
+    return vite.ssrLoadModule(toViteId(file));
+  };
+
+  return async (target: string) => {
+    if (target.startsWith('file:')) return loadFile(fileURLToPath(target));
+    if (path.isAbsolute(target)) return loadFile(target);
+    if (bundled(packageNameOf(target))) {
+      return vite.ssrLoadModule(target);
     }
     const resolved = await vite.environments.ssr.pluginContainer.resolveId(
-      specifier,
+      target,
       path.join(cwd, 'index.js'),
     );
-    return nativeImport(resolved ? pathToFileURL(resolved.id).href : specifier);
+    return nativeImport(resolved ? pathToFileURL(resolved.id).href : target);
   };
+}
+
+/** Vite's ids use `/`, on Windows too. */
+function toViteId(file: string): string {
+  return file.split(path.sep).join('/');
 }
 
 function restartProcess(): void {
@@ -461,9 +548,10 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   const vite = await createViteServer(await resolveViteServerConfig(cwd, apiOnly));
   configureLinkedServer(linkedConfig.server, vite, cwd, apiOnly);
 
-  // Stores named in a datasets file load through this server's runner or
-  // Node, whichever gives the app's own copy (see createStoreLoader). Set
-  // before the storage file loads; a core without the hook ignores it.
+  // Package modules core discovers (stores named in a datasets file, ontology
+  // register modules) load through this server's runner or Node, whichever
+  // gives the app's own copy (see createStoreLoader). Set before the storage
+  // file loads; a core without the hook ignores it.
   (globalThis as Record<symbol, unknown>)[STORE_LOADER_KEY] =
     createStoreLoader(vite, cwd);
 

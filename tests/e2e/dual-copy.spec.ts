@@ -2,10 +2,12 @@
 // framework package under `linked start` (cli reports 015 to 017).
 //
 // Scaffolds an app from the template with the local build, installs this
-// build into it (helpers/app.ts, E2E_CLI to pick another) and boots it twice:
+// build into it (helpers/app.ts, E2E_CLI to pick another) and boots it:
 // on its committed FusekiStore with nothing answering, and with `appData` a
-// RemoteDataset at a dead url. Each boot must print the guard's `on` line and
-// no `TWO COPIES` line. Then the browser side (report 021): with
+// RemoteDataset at a dead url, then once more checking that the ontology
+// phase's register modules load once. Each boot must print the guard's `on`
+// line and no `TWO COPIES` line. The app runs the core E2E_CORE names
+// (helpers/app.ts `installCore`). Then the browser side (report 021): with
 // `@_linked/shape-ui` installed (it ships `src/` with `.tsx` imported from `.ts`
 // and `.tsx`), headless Chromium loads `/` and no `@_linked/*` script module may
 // be requested in two forms (plain and `?v=`, two paths, or the optimizer and
@@ -13,7 +15,7 @@
 // (.github/workflows/dual-copy-e2e.yml).
 import {test, expect} from '@playwright/test';
 import {execFileSync} from 'node:child_process';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {linkedModuleCopies} from './helpers/moduleCopies.js';
 import {
@@ -21,6 +23,7 @@ import {
   exited,
   guardLines,
   installApp,
+  installCore,
   removeApp,
   scaffoldApp,
   startApp,
@@ -36,6 +39,8 @@ const APP_PORT = 4500 + (process.pid % 100);
 const ORIGIN = `http://localhost:${APP_PORT}`;
 
 let app: ScaffoldedApp | undefined;
+/** The `@_linked/core` the app runs (helpers/app.ts `installCore`, E2E_CORE). */
+let core = '';
 
 // Not serial: a failing boot must not hide the other one's result. The two tests
 // run in file order on one worker (the RemoteDataset one rewrites the app).
@@ -47,7 +52,8 @@ const pristine: Record<string, string> = {};
 test.beforeAll(async () => {
   app = scaffoldApp('e2e-dual-copy');
   installApp(app);
-  for (const file of ['linked.backend.datasets.json', 'linked.backend.storage.ts']) {
+  core = installCore(app);
+  for (const file of ['linked.backend.datasets.json', 'linked.backend.storage.ts', 'src/App.tsx']) {
     pristine[file] = readFileSync(join(app.dir, file), 'utf8');
   }
 }, /* timeout */ 6 * 60 * 1000);
@@ -145,6 +151,42 @@ test('a RemoteDataset appData is the class the app imports, and so is its error'
     expect(output).toContain(`Could not reach the data server at ${DEAD_URL}`);
     // The template's message, not the error's stack.
     expect(output).not.toMatch(/RemoteDatasetUnreachableError[^\n]*\n\s+at /);
+    expectOneCopy(output);
+  } finally {
+    await stopApp(run);
+  }
+});
+
+// Core's `registerInstalledOntologies` imports every built
+// `lib/esm/ontologies/*.register.js` it finds by absolute path, through the
+// loader `linked start` installs (core's `importPackageModule`). Core installed
+// from npm is Node's, and the template bundles `@_linked/server` and the other
+// framework packages (STANDALONE_SSR_BUNDLED): a native import of their register
+// modules was a second copy of each, TWO COPIES lines at boot. The ontology
+// phase registers before the sync, so it runs with no Fuseki too; its shape
+// check line marks that it ran. The app runs the core E2E_CORE names (default
+// `@_linked/core@latest`; a path to a built checkout is packed), which must have
+// `utils/importPackageModule`.
+test('ontology registration loads the register modules of the bundled server once (core from npm)', async () => {
+  const dir = app!.dir;
+  for (const [file, text] of Object.entries(pristine)) writeFileSync(join(dir, file), text);
+  expect(
+    existsSync(join(dir, 'node_modules/@_linked/core/lib/esm/utils/importPackageModule.js')),
+    `the installed core (${core}) has no utils/importPackageModule: set E2E_CORE to one that has`,
+  ).toBe(true);
+  expect(
+    existsSync(join(dir, 'node_modules/@_linked/server/lib/esm/ontologies/server.register.js')),
+    'the installed server has no built register module: the check has nothing to look at',
+  ).toBe(true);
+
+  let run: AppRun | undefined;
+  try {
+    run = startApp(app!, bootEnv());
+    const status = await waitForHttp(`${ORIGIN}/`, run, 150_000);
+    expect(status, run.output()).not.toBe(0);
+    const output = run.output();
+    expect(output).toContain('[LinkedServer] shape check:');
+    expect(output).not.toContain('Could not import the ontology register module');
     expectOneCopy(output);
   } finally {
     await stopApp(run);

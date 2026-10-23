@@ -18,6 +18,9 @@ import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
+import {isFile, libTargetToSource, RESOLVE_WORKSPACE_PLUGIN} from './utils/sourceFile.js';
+
+export {RESOLVE_WORKSPACE_PLUGIN};
 import {
   discoverInstalledLinkedPackages,
   isLinkedPackageJson,
@@ -485,31 +488,6 @@ export async function discoverWorkspaces(
   return out;
 }
 
-const isFile = async (p: string): Promise<boolean> =>
-  fsExtra
-    .stat(p)
-    .then((st) => st.isFile())
-    .catch(() => false);
-
-/**
- * Map a `lib/esm` file back to its source under `srcDir`: `.js`/`.jsx` probe
- * `.tsx` then `.ts`, anything else (css, json, ...) is taken literally.
- */
-async function libTargetToSource(
-  srcDir: string,
-  rel: string,
-): Promise<string | null> {
-  if (/\.jsx?$/.test(rel)) {
-    const base = path.join(srcDir, rel.replace(/\.jsx?$/, ''));
-    for (const ext of ['.tsx', '.ts']) {
-      if (await isFile(base + ext)) return base + ext;
-    }
-    return null;
-  }
-  const literal = path.join(srcDir, rel);
-  return (await isFile(literal)) ? literal : null;
-}
-
 /**
  * The name-based lookup's fallback: resolve `subpath` (`.` or `./x/y`) through
  * the workspace's own `exports` under `import`/`default`, and map a
@@ -622,6 +600,9 @@ export async function resolveSourceSibling(
   // on to its own relative imports; outside one, Vite resolves it as before.
   return inRegisteredSrc && (await isFile(base)) ? base : null;
 }
+
+/** What that plugin exposes on its `api`: the source workspaces it resolves. */
+export type ResolveWorkspaceApi = {sourceWorkspaces: WorkspaceEntry[]};
 
 /**
  * Packages whose entry `linked start` hands to `vite.ssrLoadModule` by name
@@ -886,8 +867,11 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
         // from within workspace `src/` trees.
         isDev
           ? ({
-              name: 'linked:resolve-workspace-ts',
+              name: RESOLVE_WORKSPACE_PLUGIN,
               enforce: 'pre',
+              // `linked start`'s module loader maps a source package's
+              // `lib/esm` file to the `src/` file this plugin resolves it to.
+              api: {sourceWorkspaces: workspaces} satisfies ResolveWorkspaceApi,
               async resolveId(id, importer, options) {
                 if (id.startsWith('\0')) return null;
 

@@ -51,16 +51,20 @@ function readPackageNameFromDisk(dir: string): string | null {
   }
 }
 
+/** A package a file belongs to: its name, its root directory and the file's path inside it. */
+export type PackageFile = {name: string; root: string; subpath: string};
+
 /**
- * Finds the `@_linked/*` package of a resolved file URL. A file under
- * `/node_modules/@_linked/<name>/` is matched by its path. A file outside
- * `node_modules` (a localized checkout's realpath under `packages-local/`, a
- * source workspace) belongs to the nearest `package.json` above it that has a
- * `name`; lookups are cached per directory.
+ * Finds the package of an absolute file path. A file under
+ * `/node_modules/<name>/` (the innermost `node_modules`) is matched by its
+ * path. A file outside `node_modules` (a localized checkout's realpath under
+ * `packages-local/`, a source workspace) belongs to the nearest `package.json`
+ * above it that has a `name`; lookups are cached per directory. `subpath` uses
+ * `/` on every platform.
  */
-export function createLinkedFileMatcher(
+export function createPackageFileMatcher(
   readPackageName: ReadPackageName = readPackageNameFromDisk,
-): (url: string) => LinkedFile | null {
+): (file: string) => PackageFile | null {
   // directory -> the package root at or above it, with its name (null: none)
   const roots = new Map<string, {dir: string; name: string} | null>();
 
@@ -88,21 +92,38 @@ export function createLinkedFileMatcher(
     return found;
   }
 
-  return (url: string) => {
-    if (!url.startsWith('file:')) return null;
-    const file = fileURLToPath(url);
+  return (file: string) => {
     const posix = file.split(path.sep).join('/');
     const nm = posix.lastIndexOf('/node_modules/');
     if (nm !== -1) {
-      const m = /^\/node_modules\/(@_linked\/[^/]+)\/(.+)$/.exec(
+      const m = /^\/node_modules\/((?:@[^/]+\/)?[^/]+)\/(.+)$/.exec(
         posix.slice(nm),
       );
-      return m ? {name: m[1], subpath: m[2]} : null;
+      if (!m) return null;
+      // Separators are one character either way, so the lengths agree.
+      const root = file.slice(0, nm + '/node_modules/'.length + m[1].length);
+      return {name: m[1], root, subpath: m[2]};
     }
     const root = rootOf(path.dirname(file));
-    if (!root || !root.name.startsWith('@_linked/')) return null;
+    if (!root) return null;
     const subpath = path.relative(root.dir, file).split(path.sep).join('/');
-    return {name: root.name, subpath};
+    return {name: root.name, root: root.dir, subpath};
+  };
+}
+
+/**
+ * Finds the `@_linked/*` package of a resolved file URL (see
+ * {@link createPackageFileMatcher}); null for any other package or URL.
+ */
+export function createLinkedFileMatcher(
+  readPackageName: ReadPackageName = readPackageNameFromDisk,
+): (url: string) => LinkedFile | null {
+  const packageOf = createPackageFileMatcher(readPackageName);
+  return (url: string) => {
+    if (!url.startsWith('file:')) return null;
+    const file = packageOf(fileURLToPath(url));
+    if (!file || !file.name.startsWith('@_linked/')) return null;
+    return {name: file.name, subpath: file.subpath};
   };
 }
 

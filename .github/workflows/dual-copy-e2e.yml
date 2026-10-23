@@ -52,7 +52,7 @@ jobs:
             echo "$EVENT: always runs."
             exit 0
           fi
-          pattern='^(src/vite-config\.ts|src/commands/start\.ts|src/utils/(ssrBundled|dual-copy-guard)\.ts|src/lifecycle\.ts|src/app-release/app-assets-store\.ts|src/commands/build-app\.ts|package-lock\.json|tests/e2e/.*|playwright\.config\.ts|\.github/workflows/dual-copy-e2e\.yml)$'
+          pattern='^(src/vite-config\.ts|src/commands/start\.ts|src/utils/(ssrBundled|dual-copy-guard|sourceFile)\.ts|src/lifecycle\.ts|src/app-release/app-assets-store\.ts|src/commands/build-app\.ts|package-lock\.json|tests/e2e/.*|playwright\.config\.ts|\.github/workflows/dual-copy-e2e\.yml)$'
           touched=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -E "$pattern" || true)
           if [ -n "$touched" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
