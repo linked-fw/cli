@@ -15,7 +15,10 @@ import {
   OntologyNameCollisionError,
   ontologyTermDoc,
 } from '../../src/utils/ontologyModules.js';
-import {ontologyTermsFromTurtle} from '../../src/utils/ontologyTerms.js';
+import {
+  ontologyTermsFromQuads,
+  ontologyTermsFromTurtle,
+} from '../../src/utils/ontologyTerms.js';
 import {
   checkOntologyModulesStep,
   generatePackageOntologies,
@@ -37,6 +40,13 @@ describe('the identifier rule', () => {
     ['yield', 'yield_'],
     ['class', 'class_'],
     ['eval', 'eval_'],
+    // bound by a CommonJS build, or overwritten by core's linkedOntology
+    ['__esModule', '__esModule_'],
+    ['exports', 'exports_'],
+    ['require', 'require_'],
+    ['module', 'module_'],
+    ['_data', '_data_'],
+    ['_ns', '_ns_'],
     ['null', 'null_'],
     // a leading digit gets a leading _
     ['3DModel', '_3DModel'],
@@ -109,6 +119,22 @@ describe('the doc line', () => {
     expect(doc('line\\nbreak\nand separator')).toBe('line break and separator');
   });
 
+  test('a cut never splits a surrogate pair, and lone surrogates are replaced', () => {
+    const text = doc('中'.repeat(159) + '\u{20000}\u{20000}\u{20000}')!;
+    expect(text).toBe('中'.repeat(159) + '\u{20000}…');
+    expect(doc('a\uD840b')).toBe('a\uFFFDb');
+  });
+
+  test('a module with no terms imports nothing', () => {
+    const module = generateOntologyTermsModule({
+      prefix: 'ex',
+      namespace: 'https://example.test/ex/',
+      dataFiles: ['../data/ex.ttl'],
+      terms: [],
+    });
+    expect(module).not.toMatch(/import/);
+  });
+
   test('a long text is cut on a word boundary at 160 characters', () => {
     const text = doc('word '.repeat(60));
     expect(text!.length).toBeLessThanOrEqual(161);
@@ -179,6 +205,7 @@ describe('the modules', () => {
       {localName: 'b', comment: 'B.'},
       {localName: 'a'},
       {localName: 'C'},
+      {localName: 'b', comment: 'Another B.'},
     ];
     expect(generateOntologyModules(spec(a))).toEqual(
       generateOntologyModules(spec([...a].reverse())),
@@ -200,6 +227,33 @@ describe('the modules', () => {
     expect(await label(`"Ding"@de, "Thing"@en, "Plain"`)).toBe('Thing');
     expect(await label(`"Ding"@de, "Plain"`)).toBe('Plain');
     expect(await label(`"Chose"@fr, "Ding"@de`)).toBe('Ding'); // then by language tag
+  });
+
+  test('a browser passes its own Parser; the selection is the same pure function', async () => {
+    const quads = [
+      {
+        subject: {termType: 'NamedNode', value: 'https://example.test/ex/T'},
+        predicate: {
+          termType: 'NamedNode',
+          value: 'http://www.w3.org/2000/01/rdf-schema#label',
+        },
+        object: {termType: 'Literal', value: 'T label', language: ''},
+      },
+    ];
+    class Parser {
+      parse() {
+        return quads;
+      }
+    }
+    const viaParser = await ontologyTermsFromTurtle(
+      [{name: 'x', text: ''}],
+      'https://example.test/ex/',
+      {Parser},
+    );
+    expect(viaParser).toEqual(
+      ontologyTermsFromQuads(quads, 'https://example.test/ex/'),
+    );
+    expect(viaParser.terms).toEqual([{localName: 'T', label: 'T label'}]);
   });
 
   test('a Turtle error names the file', async () => {
@@ -255,6 +309,11 @@ describe('the package configuration', () => {
     [{'bad prefix': {namespace: 'https://x.test/'}}, /prefix must be/],
     [{x: 'https://x.test/'}, /must be an object with a "namespace"/],
     [{x: {namespace: 'not an iri'}}, /namespace must be an IRI/],
+    [{x: {namespace: 'https://x.test/ont'}}, /ending in \/, # or :/],
+    [
+      {Ex: {namespace: 'https://x.test/'}, ex: {namespace: 'https://y.test/'}},
+      /differ only in case/,
+    ],
     [
       {x: {namespace: 'https://x.test/', data: ['../up.ttl']}},
       /data must list/,

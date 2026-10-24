@@ -29,7 +29,9 @@ interface N3Module {
 let n3: Promise<N3Module> | undefined;
 const loadN3 = (): Promise<N3Module> => {
   const specifier = 'n3';
-  return (n3 ??= import(specifier) as Promise<N3Module>);
+  return (n3 ??= import(
+    /* @vite-ignore */ /* webpackIgnore: true */ specifier
+  ) as Promise<N3Module>);
 };
 
 /** One Turtle document and the name it is reported under. */
@@ -37,6 +39,13 @@ export interface TurtleSource {
   /** Names the document in errors (`src/data/schema.ttl`). */
   name: string;
   text: string;
+}
+
+/** A quad as n3 (or any RDF/JS parser) gives it; only these fields are read. */
+export interface OntologyQuad {
+  subject: N3Term;
+  predicate: N3Term;
+  object: N3Term;
 }
 
 export interface OntologyTermsResult {
@@ -50,48 +59,40 @@ export interface OntologyTermsResult {
 }
 
 /**
- * The terms in `namespace` among the subjects of `sources`. A subject is a term when its IRI is
- * the namespace followed by a non-empty local name without `/`, `#` or `?`; the namespace IRI
- * itself (the ontology) and blank nodes are not terms. Of several labels or comments, the English
- * one wins, then one without a language, then the first in code-unit order, so the result does
- * not depend on statement order.
+ * The terms in `namespace` among the subjects of `quads`. Pure: a browser that parses Turtle
+ * itself gets the same selection `linked build` checks against.
+ *
+ * A subject is a term when its IRI is the namespace followed by a non-empty local name without
+ * `/`, `#` or `?`; the namespace IRI itself (the ontology) and blank nodes are not terms. Of
+ * several labels or comments, the English one wins, then one without a language, then by
+ * language tag and value, so the result does not depend on statement order.
  */
-export async function ontologyTermsFromTurtle(
-  sources: TurtleSource[],
+export function ontologyTermsFromQuads(
+  quads: Iterable<OntologyQuad>,
   namespace: string,
-): Promise<OntologyTermsResult> {
-  const {Parser} = await loadN3();
+): OntologyTermsResult {
   type Literal = {value: string; language: string};
   const subjects = new Map<string, {labels: Literal[]; comments: Literal[]}>();
   const skipped = new Set<string>();
-  for (const source of sources) {
-    let quads;
-    try {
-      quads = new Parser({format: 'text/turtle'}).parse(source.text);
-    } catch (error) {
-      throw new Error(
-        `Could not parse ${source.name}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+  for (const {subject, predicate, object} of quads) {
+    if (
+      subject.termType !== 'NamedNode' ||
+      !subject.value.startsWith(namespace)
+    ) {
+      continue;
     }
-    for (const {subject, predicate, object} of quads) {
-      if (
-        subject.termType !== 'NamedNode' ||
-        !subject.value.startsWith(namespace)
-      )
-        continue;
-      const localName = subject.value.slice(namespace.length);
-      if (!localName) continue;
-      if (/[/#?]/.test(localName)) {
-        skipped.add(subject.value);
-        continue;
-      }
-      let entry = subjects.get(localName);
-      if (!entry) subjects.set(localName, (entry = {labels: [], comments: []}));
-      if (object.termType !== 'Literal') continue;
-      const literal = {value: object.value, language: object.language ?? ''};
-      if (predicate.value === LABEL) entry.labels.push(literal);
-      else if (predicate.value === COMMENT) entry.comments.push(literal);
+    const localName = subject.value.slice(namespace.length);
+    if (!localName) continue;
+    if (/[/#?]/.test(localName)) {
+      skipped.add(subject.value);
+      continue;
     }
+    let entry = subjects.get(localName);
+    if (!entry) subjects.set(localName, (entry = {labels: [], comments: []}));
+    if (object.termType !== 'Literal') continue;
+    const literal = {value: object.value, language: object.language ?? ''};
+    if (predicate.value === LABEL) entry.labels.push(literal);
+    else if (predicate.value === COMMENT) entry.comments.push(literal);
   }
   const terms = [...subjects.entries()]
     .sort(([a], [b]) => compare(a, b))
@@ -104,6 +105,32 @@ export async function ontologyTermsFromTurtle(
       return term;
     });
   return {terms, skipped: [...skipped].sort(compare)};
+}
+
+/**
+ * {@link ontologyTermsFromQuads} over parsed Turtle. `n3` is loaded on first use; a browser
+ * bundle passes its own statically imported `Parser` (`{Parser}` from `n3`) instead, since a
+ * bare dynamic import does not resolve there.
+ */
+export async function ontologyTermsFromTurtle(
+  sources: TurtleSource[],
+  namespace: string,
+  options: {Parser?: N3Module['Parser']} = {},
+): Promise<OntologyTermsResult> {
+  const Parser = options.Parser ?? (await loadN3()).Parser;
+  const quads: OntologyQuad[] = [];
+  for (const source of sources) {
+    try {
+      // A loop, not `push(...)`: schema.org has more quads than a call takes arguments.
+      for (const quad of new Parser({format: 'text/turtle'}).parse(source.text))
+        quads.push(quad);
+    } catch (error) {
+      throw new Error(
+        `Could not parse ${source.name}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return ontologyTermsFromQuads(quads, namespace);
 }
 
 const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);

@@ -52,6 +52,17 @@ export function readOntologyConfigs(
       `${where} must be an object of {"<prefix>": {"namespace": "<IRI>"}}.`,
     );
   }
+  // Prefixes equal but for case would write the same files on a case-insensitive file system.
+  const seen = new Map<string, string>();
+  for (const prefix of Object.keys(raw)) {
+    const other = seen.get(prefix.toLowerCase());
+    if (other) {
+      throw new Error(
+        `${where}: the prefixes "${other}" and "${prefix}" differ only in case.`,
+      );
+    }
+    seen.set(prefix.toLowerCase(), prefix);
+  }
   return Object.entries(raw as Record<string, unknown>)
     .map(([prefix, entry]): OntologyConfig => {
       const at = `${where}.${prefix}`;
@@ -66,10 +77,11 @@ export function readOntologyConfigs(
       const {namespace, data} = entry as {namespace?: unknown; data?: unknown};
       if (
         typeof namespace !== 'string' ||
-        !/^[a-z][a-z0-9+.-]*:\S+$/i.test(namespace)
+        !/^[a-z][a-z0-9+.-]*:\S*[/#:]$/i.test(namespace)
       ) {
+        // Ending in a separator, so `…/ont` cannot claim `…/ontology` as the term `ology`.
         throw new Error(
-          `${at}.namespace must be an IRI, such as "https://example.org/ont/".`,
+          `${at}.namespace must be an IRI ending in /, # or :, such as "https://example.org/ont/".`,
         );
       }
       const files = data === undefined ? [`${prefix}.ttl`] : data;
