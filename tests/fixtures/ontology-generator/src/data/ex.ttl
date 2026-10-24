@@ -1,0 +1,37 @@
+@prefix ex: <https://example.test/ex/> .
+@prefix other: <https://example.test/other#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<https://example.test/ex/> a owl:Ontology ;
+  rdfs:label "The example ontology" .
+
+ex:Thing a owl:Class ;
+  rdfs:label "Thing" ;
+  rdfs:comment "A <b>thing</b>, e.g. a [[Widget]] or a [gadget](https://example.test/g) with */ inside.\\n\\nMore detail."@en ;
+  rdfs:comment "Ein Ding."@de .
+
+ex:Widget a owl:Class ;
+  rdfs:subClassOf ex:Thing ;
+  rdfs:label "Widget" .
+
+ex:default a owl:DatatypeProperty ;
+  rdfs:label "default value" .
+
+ex:3DModel a owl:Class ;
+  rdfs:comment "@deprecated-looking text that must not become a tag." .
+
+<https://example.test/ex/odd-name.x> a owl:ObjectProperty ;
+  rdfs:comment "Odd characters become underscores." .
+
+ex:ns a owl:DatatypeProperty ;
+  rdfs:comment "A term named like the namespace binding." .
+
+ex:longComment a owl:DatatypeProperty ;
+  rdfs:comment "This comment is deliberately long and has no full stop for a very long while so that the generator has to cut it at the character limit on a word boundary and add an ellipsis" .
+
+<https://example.test/ex/sub/Deeper> a owl:Class .
+
+other:Elsewhere a owl:Class .
+
+[] a owl:Class ; rdfs:label "A blank node is not a term" .

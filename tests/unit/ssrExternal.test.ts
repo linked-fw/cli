@@ -7,6 +7,7 @@ import {
   isSsrNodeSpecifier,
   ssrExternal,
   ssrNodeShim,
+  ssrNodeShimId,
   ssrNoExternal,
   SSR_ENTRY_PACKAGES,
   SSR_NODE_PACKAGES,
@@ -130,6 +131,16 @@ describe('ssr.noExternal', () => {
     // The root is only imported whole for its shapes; Node's copy would load
     // the release tooling and, through it, a Node copy of @_linked/core.
     expect(await shim('@_linked/cli')).toBe('export {};\n');
+    // The shim's own re-export resolves past the shim. Under `linked start` Vite externalizes it
+    // before resolving; under Vitest (which inlines @_linked/*) it reaches the resolver, and the
+    // shim re-exporting itself was an empty module (create-now backlog 130).
+    const shimId = ssrNodeShim('@_linked/cli/utils').id;
+    expect(await plugin.resolveId.call({}, '@_linked/cli/utils', shimId, {ssr: true})).toBe(
+      path.join(cli, 'src', 'utils.ts'),
+    );
+    expect(ssrNodeShimId('@_linked/cli/utils', shimId, true)).toBeUndefined();
+    expect(ssrNodeShimId('@_linked/cli/utils', '/app/src/a.ts', true)).toBe(shimId);
+    expect(ssrNodeShimId('@_linked/cli/utils', undefined, false)).toBeUndefined();
     // The browser still gets the source.
     expect(await plugin.resolveId.call({}, '@_linked/cli/utils', undefined, {ssr: false})).toBe(
       path.join(cli, 'src', 'utils.ts'),

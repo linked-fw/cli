@@ -146,6 +146,49 @@ Whenever no new file is written, one left by an earlier build is removed.
 in a package without `"linkedPackage": true` (it used to exit 0 there). A build that finishes with warnings still
 exits 0.
 
+### Ontology accessor modules
+
+```bash
+linked generate-ontology          # write src/ontologies/<prefix>.ts, .data.ts and .register.ts from src/data/*.ttl
+linked generate-ontology --check  # write nothing; exit 1 when a module is out of date
+```
+
+A package declares its ontologies in `package.json`, one entry per prefix. `data` names files in
+`src/data/` and defaults to `["<prefix>.ttl"]`; a package with several namespaces has several
+entries:
+
+```json
+"linkedOntologies": {
+  "rdf": {"namespace": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"},
+  "rdfs": {"namespace": "http://www.w3.org/2000/01/rdf-schema#"},
+  "schema": {"namespace": "http://schema.org/", "data": ["schema.ttl", "schema-added.ttl"]}
+}
+```
+
+Each prefix gets three committed modules in `src/ontologies/`:
+
+- `<prefix>.ts`: one `export const Term = /*#__PURE__*/ ns('Term')` per subject of its data files
+  in its namespace (enumeration members and individuals included), sorted by name, each with a
+  one-line JSDoc from `rdfs:comment` (else `rdfs:label`). Nothing else, so consumers write
+  `import * as schema from '@_linked/schema/ontologies/schema'` and `schema.Person`, and a bundler
+  keeps only the terms used. A subject whose remainder after the namespace holds `/`, `#` or `?`
+  is not a term, and the command lists it.
+- `<prefix>.data.ts`: `ns`, `dataFiles`, `loadData`, `_ontologyResource` and `Prefix.add`.
+- `<prefix>.register.ts`: the `linkedOntology(...)` call; `src/index.ts` imports it.
+
+A term's export name is its local name made a valid identifier by one rule: a character that
+cannot appear in an identifier becomes `_` (`ISO639-2` → `ISO639_2`), a leading digit gets a leading
+`_` (`3DModel` → `_3DModel`), and a reserved word gets a trailing `_` (`yield` → `yield_`). There is
+no alias map. Two terms that the rule gives one name are refused, naming both. The output is
+deterministic: the same Turtle gives the same bytes.
+
+`linked build` starts with **Checking ontology modules**: when a module differs from what the data
+generates, or is missing, the build fails and says to run `linked generate-ontology`. A package
+without `linkedOntologies` is not checked.
+
+The generator itself is `@_linked/cli/utils/ontologyModules` (pure, browser-safe: it takes the
+terms as data) and `@_linked/cli/utils/ontologyTerms` (reads them from Turtle with `n3`).
+
 ### App release / production runtime
 
 ```bash
@@ -427,6 +470,9 @@ The CLI recognizes two flags in `package.json`:
   "linkedApp": true          // marks a deployable app; build-workspace skips it
 }
 ```
+
+A package can also declare its ontologies under `"linkedOntologies"` (see
+[Ontology accessor modules](#ontology-accessor-modules)).
 
 The legacy `lincd: true` / `lincdApp: true` flags are no longer read. Migrate to `linkedPackage` / `linkedApp`.
 

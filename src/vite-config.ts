@@ -673,6 +673,25 @@ export function ssrNodeShim(id: string): {id: string; code: string} {
   return {id: SSR_NODE_SHIM + id, code};
 }
 
+/**
+ * The shim module `resolveId` gives an SSR import of `id`, or undefined to resolve it as usual.
+ *
+ * The shim's own re-export (`export * from '@_linked/cli/x'`) resolves as usual. Under `linked
+ * start` it never gets here: `ssr.external` names the cli, so Vite externalizes the import to Node
+ * before resolving it. Under Vitest, which inlines `@_linked/*`, it does get here, and handing it
+ * the shim again made the shim re-export itself: an empty module, so a cli helper imported in an
+ * app's Vitest run was `undefined` (create-now backlog 130).
+ */
+export function ssrNodeShimId(
+  id: string,
+  importer: string | undefined,
+  ssr: boolean | undefined,
+): string | undefined {
+  if (!ssr || !isSsrNodeSpecifier(id)) return undefined;
+  if (importer?.startsWith(SSR_NODE_SHIM)) return undefined;
+  return ssrNodeShim(id).id;
+}
+
 /** The `ssr.external` allowlist; see the comment at `ssr` in `createViteConfig`. */
 const SSR_EXTERNAL = ['react', 'react-dom', 'react-dom/server', 'react-router-dom', 'scheduler', 'express'];
 
@@ -892,7 +911,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
                 if (id.startsWith('\0')) return null;
 
                 // SSR: `@_linked/cli` is Node's (see ssrNodeShim).
-                if (options?.ssr && isSsrNodeSpecifier(id)) return ssrNodeShim(id).id;
+                const shim = ssrNodeShimId(id, importer, options?.ssr);
+                if (shim) return shim;
 
                 // `./Sibling.js` → `.tsx` / `.ts` from source, workspace or
                 // installed (see resolveSourceSibling).

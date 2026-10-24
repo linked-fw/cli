@@ -1,0 +1,5 @@
+@prefix ex: <https://example.test/ex/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+ex:Widget rdfs:comment "A widget, from the second file." .
+ex:Added a rdfs:Class .
