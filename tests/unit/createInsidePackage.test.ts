@@ -16,6 +16,7 @@ import {
   createShape,
 } from '../../src/cli-methods';
 import {CreatePackageError} from '../../src/utils/createPackageLocation';
+import {staleOntologyModules} from '../../src/utils/generateOntology';
 
 describe('create-shape and friends need a src/package.ts', () => {
   let app: string;
@@ -74,16 +75,38 @@ describe('create-shape and friends need a src/package.ts', () => {
     expect(read('data/planning.ttl')).toContain(
       '<https://linked.cm/ont/planning/> a owl:Ontology .',
     );
-    expect(read('ontologies/planning.ts')).toContain(
-      `loadOntologyFiles(import.meta.url, ['../data/planning.ttl'])`,
+    expect(read('ontologies/planning.data.ts')).toContain(
+      `export const dataFiles = ['../data/planning.ttl'];`,
     );
     expect(read('ontologies/planning.register.ts')).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, ['../data/planning.ttl'])`,
+      `linkedOntology(terms, ns, 'planning', loadData, dataFiles)`,
     );
     expect(read('index.ts')).toContain('./ontologies/planning.register.js');
-    for (const rel of ['data/planning.ttl', 'ontologies/planning.ts', 'ontologies/planning.register.ts']) {
+    expect(fs.readJsonSync(path.join(app, 'package.json')).linkedOntologies).toEqual({
+      planning: {namespace: 'https://linked.cm/ont/planning/'},
+    });
+    // What generate-ontology writes for that data: the first build finds them current.
+    expect(await staleOntologyModules(app)).toEqual([]);
+    for (const rel of [
+      'data/planning.ttl',
+      'ontologies/planning.ts',
+      'ontologies/planning.data.ts',
+      'ontologies/planning.register.ts',
+    ]) {
       expect([rel, read(rel)]).not.toEqual([rel, expect.stringContaining('${')]);
     }
+  });
+
+  test('create-ontology refuses a slug Turtle cannot use before writing anything', async () => {
+    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linkedPackage: true});
+    fs.outputFileSync(
+      path.join(app, 'src', 'package.ts'),
+      `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
+    );
+    jest.spyOn(process, 'cwd').mockReturnValue(app);
+    await expect(createOntology('3d', undefined, app)).rejects.toThrow(/start with a letter/);
+    expect(fs.existsSync(path.join(app, 'src', 'data'))).toBe(false);
+    expect(fs.readJsonSync(path.join(app, 'package.json')).linkedOntologies).toBeUndefined();
   });
 
   test('create-shape writes the shape in a package', async () => {

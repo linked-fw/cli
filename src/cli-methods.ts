@@ -72,7 +72,13 @@ import {
 } from './utils/packageKind.js';
 import type {PackageKind, ScaffoldKind} from './utils/packageKind.js';
 import {resolvePackageBaseUri} from './utils/packageBaseUri.js';
-import {buildPackageFiles, nameVariants} from './utils/packageFiles.js';
+import {
+  buildPackageFiles,
+  nameVariants,
+  checkScaffoldOntology,
+  ontologyScaffoldModules,
+  withOntologyEntry,
+} from './utils/packageFiles.js';
 import type {PackageFilesOptions} from './utils/packageFiles.js';
 import type {ResolvedBaseUri} from './utils/packageBaseUri.js';
 
@@ -1417,22 +1423,10 @@ export const createOntology = async (
 
   let {hyphenName, camelCaseName, underscoreName} = setNameVariables(prefix);
 
-  //copy ontology accessor file
+  const namespace = asNamespace(uriBase);
+  // Refused before anything is written: a name the modules, Turtle or build check cannot use.
+  checkScaffoldOntology(hyphenName, namespace);
   log("Creating files for ontology '" + prefix + "'");
-  let targetFile = path.join(targetFolder, hyphenName + '.ts');
-  let targetRegisterFile = path.join(targetFolder, hyphenName + '.register.ts');
-  fs.copySync(
-    defaultsDir('package-ontology', 'src', 'ontologies', 'example-ontology.ts'),
-    targetFile,
-  );
-
-  // The registration sibling. It has to be a separate module: registration needs the
-  // ontology module's whole export namespace, and a module cannot import itself once a
-  // bundler is involved -- Rollup elides the self-reference and the app dies at boot.
-  fs.copySync(
-    defaultsDir('package-ontology', 'src', 'ontologies', 'example-ontology.register.ts'),
-    targetRegisterFile,
-  );
 
   // The ontology's data, Turtle. `loadData` reads it beside the compiled module
   // (`../data/<name>.ttl`), and `linked build` copies it to lib/esm/data/.
@@ -1446,22 +1440,54 @@ export const createOntology = async (
     defaultsDir('package-ontology', 'src', 'data', 'example-ontology.ttl'),
     targetDataFile,
   );
+  await replaceVariablesInFiles(targetDataFile);
 
-  await replaceVariablesInFiles(targetFile, targetRegisterFile, targetDataFile);
+  // The accessor modules (terms, data, register), as `linked generate-ontology` writes them, and
+  // the `linkedOntologies` entry it reads, so `linked build` checks them against the Turtle.
+  const packageRoot = path.dirname(sourceFolder);
+  for (const [rel, content] of Object.entries(
+    ontologyScaffoldModules(hyphenName, namespace),
+  )) {
+    fs.outputFileSync(
+      path.join(sourceFolder, rel.replace(/^src\//, '')),
+      content,
+    );
+  }
+  const packageJsonPath = path.join(packageRoot, 'package.json');
+  const declared = fs.existsSync(packageJsonPath);
+  if (declared) {
+    fs.writeFileSync(
+      packageJsonPath,
+      withOntologyEntry(
+        fs.readFileSync(packageJsonPath, 'utf8'),
+        hyphenName,
+        namespace,
+      ),
+    );
+  }
+  let targetFile = path.join(targetFolder, hyphenName + '.ts');
   log(
     `Prepared a new ontology data file in ${chalk.magenta(
       targetDataFile.replace(basePath, ''),
     )}`,
-    `And an ontology accessor file in ${chalk.magenta(
-      targetFile.replace(basePath, ''),
-    )}`,
+    declared
+      ? `And its accessor modules in ${chalk.magenta(
+          targetFile.replace(basePath, ''),
+        )}, declared in ${chalk.magenta(
+          packageJsonPath.replace(basePath, ''),
+        )} "linkedOntologies" (regenerate them from the data with \`linked generate-ontology\`)`
+      : `And its accessor modules in ${chalk.magenta(
+          targetFile.replace(basePath, ''),
+        )}. No package.json next to ${chalk.magenta(
+          sourceFolder.replace(basePath, ''),
+        )}, so nothing declares them in "linkedOntologies" and \`linked build\` does not check them.`,
   );
 
   //if this is not a lincd app (but a lincd package instead)
   if (!sourceFolder.includes('frontend')) {
     //then also add an import to index
     // Import the register sibling, not the terms module: only the sibling calls
-    // linkedOntology(). See the comment in example-ontology.register.ts.
+    // linkedOntology(). See the comment in the generated <prefix>.register.ts.
     let indexPath = addLineToIndex(
       `import './ontologies/${hyphenName}.register.js';`,
       'ontologies',

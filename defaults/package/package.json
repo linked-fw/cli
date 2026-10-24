@@ -54,11 +54,11 @@
     }
   },
   "dependencies": {
-    "@_linked/core": "^2.39.0"
+    "@_linked/core": "^2.41.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",
-    "@_linked/cli": "^1.45.0",
+    "@_linked/cli": "^1.57.0",
     "typescript": "^5.7.3"
   }
 }

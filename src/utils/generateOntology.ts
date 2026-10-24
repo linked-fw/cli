@@ -34,6 +34,9 @@ export interface OntologyConfig {
   data: string[];
 }
 
+/** What a `linkedOntologies` namespace must be: an IRI ending in a separator. */
+export const ONTOLOGY_NAMESPACE = /^[a-z][a-z0-9+.-]*:\S*[/#:]$/i;
+
 /** The `package.json` key. */
 export const ONTOLOGIES_KEY = 'linkedOntologies';
 
@@ -77,7 +80,7 @@ export function readOntologyConfigs(
       const {namespace, data} = entry as {namespace?: unknown; data?: unknown};
       if (
         typeof namespace !== 'string' ||
-        !/^[a-z][a-z0-9+.-]*:\S*[/#:]$/i.test(namespace)
+        !ONTOLOGY_NAMESPACE.test(namespace)
       ) {
         // Ending in a separator, so `…/ont` cannot claim `…/ontology` as the term `ology`.
         throw new Error(
@@ -132,7 +135,7 @@ export async function generatePackageOntologies(
       }
       return {name, text: fs.readFileSync(full, 'utf8')};
     });
-    const {terms, skipped} = await ontologyTermsFromTurtle(
+    const {terms, skipped, ontology} = await ontologyTermsFromTurtle(
       sources,
       config.namespace,
     );
@@ -141,6 +144,7 @@ export async function generatePackageOntologies(
       namespace: config.namespace,
       dataFiles: config.data.map((file) => `../data/${file}`),
       terms,
+      ...(ontology === undefined ? {} : {ontology}),
     };
     generations.push({
       config,

@@ -27,6 +27,8 @@ import {
 } from './packageKind.js';
 import {withBaseUri} from './packageBaseUri.js';
 import {shippedDotfileName} from './shippedDotfiles.js';
+import {generateOntologyModules, ONTOLOGY_PREFIX} from './ontologyModules.js';
+import {ONTOLOGIES_KEY, ONTOLOGY_NAMESPACE} from './generateOntology.js';
 
 export interface PackageFilesOptions {
   /**
@@ -56,15 +58,68 @@ export type PackageFiles = Record<string, string>;
 /** The files whose `${…}` variables are filled; the rest are copied as they are. */
 const FILLED_FILES = ['src/index.ts', 'package.json', 'src/package.ts'];
 
-/** The ontology kind's example files, renamed to the ontology slug. */
-const EXAMPLE_ONTOLOGY_FILES = [
-  'src/ontologies/example-ontology.ts',
-  // The register sibling is what index.ts imports; without it the package keeps a literal
-  // `example-ontology.register.ts` full of unfilled `${...}` and nothing calls linkedOntology().
-  'src/ontologies/example-ontology.register.ts',
-  'src/data/example-ontology.ttl',
-];
+/**
+ * The ontology kind's example files, renamed to the ontology slug. Its accessor modules are not
+ * templates: they are generated ({@link ontologyScaffoldModules}).
+ */
+const EXAMPLE_ONTOLOGY_FILES = ['src/data/example-ontology.ttl'];
 const FILLED_ONTOLOGY_FILES = EXAMPLE_ONTOLOGY_FILES;
+
+/**
+ * The accessor modules of a new ontology with no terms yet (`src/ontologies/<prefix>.ts`,
+ * `.data.ts`, `.register.ts`), exactly as `linked generate-ontology` writes them for its
+ * scaffolded Turtle (`src/data/<prefix>.ttl`, which declares only the ontology), so the first
+ * `linked build` finds them current.
+ */
+export function ontologyScaffoldModules(
+  prefix: string,
+  namespace: string,
+): PackageFiles {
+  return generateOntologyModules({
+    prefix,
+    namespace,
+    dataFiles: [`../data/${prefix}.ttl`],
+    terms: [],
+  });
+}
+
+/**
+ * `package.json` text with the ontology's `linkedOntologies` entry added (`data` left to its
+ * default, `["<prefix>.ttl"]`).
+ */
+export function withOntologyEntry(
+  packageJson: string,
+  prefix: string,
+  namespace: string,
+): string {
+  const pkg = JSON.parse(packageJson);
+  const entries = pkg[ONTOLOGIES_KEY] ?? {};
+  // An existing entry (its own `data` list, say) is the package's; it is kept.
+  if (entries[prefix]) return packageJson;
+  pkg[ONTOLOGIES_KEY] = {...entries, [prefix]: {namespace}};
+  // The file's own indentation and line endings are kept.
+  const indent = /^[ \t]+(?=")/m.exec(packageJson)?.[0] ?? '  ';
+  const eol = packageJson.includes('\r\n') ? '\r\n' : '\n';
+  return JSON.stringify(pkg, null, indent).replace(/\n/g, eol) + eol;
+}
+
+/**
+ * Refuses an ontology the scaffold cannot write: a slug that cannot name the modules or be a
+ * Turtle prefix (it must start with a letter: `@prefix 3d:` is not Turtle), or a namespace that
+ * is not an IRI ending in `/`, `#` or `:` (what `linkedOntologies` accepts).
+ */
+export function checkScaffoldOntology(prefix: string, namespace: string): void {
+  if (!ONTOLOGY_PREFIX.test(prefix) || !/^[a-z]/i.test(prefix)) {
+    throw new Error(
+      `${JSON.stringify(prefix)} cannot name an ontology: start with a letter, then letters and digits, with single hyphens or underscores between them.`,
+    );
+  }
+  if (!ONTOLOGY_NAMESPACE.test(namespace)) {
+    throw new Error(
+      `${JSON.stringify(namespace)} is not an ontology namespace: use an IRI ending in /, # or :, such as "https://example.org/ont/".`,
+    );
+  }
+}
 
 /**
  * This package's `defaults/` folder. The built module sits in `lib/esm/utils/`
@@ -180,6 +235,15 @@ export function buildPackageFiles(
       content;
   }
 
+  if (kind === 'ontology') {
+    checkScaffoldOntology(hyphenName, variables.uri_base);
+    Object.assign(files, ontologyScaffoldModules(hyphenName, variables.uri_base));
+    files['package.json'] = withOntologyEntry(
+      files['package.json'],
+      hyphenName,
+      variables.uri_base,
+    );
+  }
   if (baseUri) {
     files['src/package.ts'] = withBaseUri(files['src/package.ts'], baseUri);
   }

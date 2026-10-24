@@ -14,5 +14,5 @@ export const loadData = () => loadOntologyFiles(import.meta.url, dataFiles);
 export const ns = createNameSpace('https://example.test/other#');
 Prefix.add('other', 'https://example.test/other#');
 
-/** The ontology itself (its namespace IRI). */
-export const _ontologyResource = ns('');
+/** The ontology itself, as its data declares it (`a owl:Ontology`). */
+export const _ontologyResource = {id: 'https://example.test/other'};

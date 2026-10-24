@@ -4,6 +4,8 @@ import {linkedShape} from '../package.js';
 /**
  * Add the target class and properties of this shape, e.g.
  *
+ *   import * as schema from '@_linked/schema/ontologies/schema';
+ *
  *   static targetClass = schema.Product;
  *
  *   @literalProperty({path: schema.name, maxCount: 1})

@@ -16,6 +16,7 @@ import {
   ontologyTermDoc,
 } from '../../src/utils/ontologyModules.js';
 import {
+  ontologyIriOf,
   ontologyTermsFromQuads,
   ontologyTermsFromTurtle,
 } from '../../src/utils/ontologyTerms.js';
@@ -125,7 +126,7 @@ describe('the doc line', () => {
     expect(doc('a\uD840b')).toBe('a\uFFFDb');
   });
 
-  test('a module with no terms imports nothing', () => {
+  test('a module with no terms imports nothing and is still a module', () => {
     const module = generateOntologyTermsModule({
       prefix: 'ex',
       namespace: 'https://example.test/ex/',
@@ -133,6 +134,8 @@ describe('the doc line', () => {
       terms: [],
     });
     expect(module).not.toMatch(/import/);
+    // `import * as terms` from the register module needs a module (TS2306 otherwise).
+    expect(module).toMatch(/^export \{\};$/m);
   });
 
   test('a long text is cut on a word boundary at 160 characters', () => {
@@ -254,6 +257,46 @@ describe('the modules', () => {
       ontologyTermsFromQuads(quads, 'https://example.test/ex/'),
     );
     expect(viaParser.terms).toEqual([{localName: 'T', label: 'T label'}]);
+  });
+
+  test('_ontologyResource is the IRI the data declares with owl:Ontology', async () => {
+    const [ex, other] = await generatePackageOntologies(FIXTURE);
+    expect(ex.files['src/ontologies/ex.data.ts']).toContain(
+      "export const _ontologyResource = ns('');",
+    );
+    expect(other.files['src/ontologies/other.data.ts']).toContain(
+      "export const _ontologyResource = {id: 'https://example.test/other'};",
+    );
+    const ns = 'http://www.w3.org/2002/07/owl#';
+    expect(ontologyIriOf([ns, 'http://www.w3.org/2002/07/owl'], ns)).toBe(ns);
+    expect(ontologyIriOf(['http://www.w3.org/2002/07/owl'], ns)).toBe(
+      'http://www.w3.org/2002/07/owl',
+    );
+    // A declaration the namespace starts with; never an unrelated one (another vocabulary's).
+    expect(ontologyIriOf(['https://x.test/onto'], 'https://x.test/onto/terms#')).toBe(
+      'https://x.test/onto',
+    );
+    expect(ontologyIriOf(['http://purl.org/dc/terms/'], ns)).toBeUndefined();
+    expect(ontologyIriOf(['urn:x:'], 'urn:x:')).toBe('urn:x:');
+    expect(ontologyIriOf(['https://x.test/a', 'https://x.test/b'], ns)).toBeUndefined();
+    expect(ontologyIriOf([], ns)).toBeUndefined();
+    // Without a declaration the data module keeps the namespace.
+    expect(
+      generateOntologyModules({prefix: 'p', namespace: ns, dataFiles: [], terms: []})[
+        'src/ontologies/p.data.ts'
+      ],
+    ).toContain("export const _ontologyResource = ns('');");
+  });
+
+  test('a blank node typed owl:Ontology is not the ontology', () => {
+    const type = {termType: 'NamedNode', value: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'};
+    const ontology = {termType: 'NamedNode', value: 'http://www.w3.org/2002/07/owl#Ontology'};
+    expect(
+      ontologyTermsFromQuads(
+        [{subject: {termType: 'BlankNode', value: 'b0'}, predicate: type, object: ontology}],
+        'https://example.test/ex/',
+      ).ontology,
+    ).toBeUndefined();
   });
 
   test('a Turtle error names the file', async () => {
