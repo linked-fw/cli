@@ -251,6 +251,7 @@ describe('planBuildSteps', () => {
 
   test('every package checks imports and then rewrites the ESM output', () => {
     expect(names()).toEqual([
+      'Checking ontology modules',
       'Checking imports',
       'Compiling ESM',
       'Compiling CJS',

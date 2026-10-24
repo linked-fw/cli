@@ -39,6 +39,12 @@ import path from 'path';
 import 'require-extensions';
 import {unknownCommandError} from './unknown-command.js';
 import {installDriftHook} from './localize/drift-hook.js';
+import {
+  generatePackageOntologies,
+  ONTOLOGIES_KEY,
+  staleOntologyModules,
+  writePackageOntologies,
+} from './utils/generateOntology.js';
 
 /**
  * Run an async command action and report a failure the way the rest of this
@@ -305,6 +311,48 @@ program
   .argument(
     '[uribase]',
     "Optional argument to set the URI base for the URI's of all entities in your ontology. Leave blank to use the URI's provided by lincd.org once you register this package",
+  );
+
+program
+  .command('generate-ontology')
+  .description(
+    `Writes src/ontologies/<prefix>.ts, <prefix>.data.ts and <prefix>.register.ts for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/. Run it from the package folder`,
+  )
+  .option(
+    '--check',
+    'Write nothing; exit 1 when a module differs from what the data generates',
+  )
+  .action((options: {check?: boolean}) =>
+    runAppCommand(async () => {
+      let dir = process.cwd();
+      while (!fs.existsSync(path.join(dir, 'package.json'))) {
+        const parent = path.dirname(dir);
+        if (parent === dir) throw new Error('No package.json found here or above.');
+        dir = parent;
+      }
+      const generations = await generatePackageOntologies(dir);
+      if (!generations.length) {
+        throw new Error(
+          `package.json has no "${ONTOLOGIES_KEY}". Declare each ontology as {"<prefix>": {"namespace": "<IRI>", "data": ["<file>.ttl"]}}.`,
+        );
+      }
+      for (const g of generations) {
+        console.log(
+          `${g.config.prefix}: ${g.termCount} terms from ${g.config.data.map((f) => 'src/data/' + f).join(', ')}` +
+            (g.skipped.length ? ` (${g.skipped.length} subjects under the namespace are not terms: ${g.skipped.slice(0, 3).join(', ')}${g.skipped.length > 3 ? ', …' : ''})` : ''),
+        );
+      }
+      if (options.check) {
+        const stale = await staleOntologyModules(dir, generations);
+        if (stale.length) {
+          throw new Error(`Out of date: ${stale.join(', ')}. Run \`linked generate-ontology\`.`);
+        }
+        console.log('Every ontology module is current.');
+        return;
+      }
+      const changed = await writePackageOntologies(dir, generations);
+      console.log(changed.length ? `Wrote ${changed.join(', ')}` : 'Every ontology module is current.');
+    }),
   );
 
 program.command('app [action]', {hidden: true}).action(() => {

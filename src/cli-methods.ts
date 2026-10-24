@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import {checkOntologyModulesStep} from './utils/generateOntology.js';
 import {exec} from 'child_process';
 import depcheck from 'depcheck';
 import {getEnvFile} from 'env-cmd/dist/get-env-vars.js';
@@ -3177,6 +3178,12 @@ export const planBuildSteps = (
   const inspectShapes = () =>
     (inspection ??= inspectShapeReferences(packagePath));
   return [
+  {
+    // The committed accessor modules must be what the package's Turtle generates
+    // (`linked generate-ontology`); a package without `linkedOntologies` passes.
+    name: 'Checking ontology modules',
+    apply: () => checkOntologyModulesStep(packagePath),
+  },
   {
     name: 'Checking imports',
     apply: () => checkImports(packagePath + '/src'),
