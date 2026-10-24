@@ -41,8 +41,12 @@ live in its packages. A linked package is one of two kinds:
   shapes, components or backend. Its ontology slug is `<name>` (without `-ont`), so its terms
   mint `https://linked.cm/ont/<name>/{Term}`, or `<uri_base>{Term}` when a namespace is given.
   Its data is Turtle, `src/data/<name>.ttl` (starting as `<namespace> a owl:Ontology .`), which
-  `loadData` reads on the server through `@_linked/core/ontology/loadOntologyFiles`;
-  `create-ontology` scaffolds the same three files in an existing package.
+  `loadData` reads on the server through `@_linked/core/ontology/loadOntologyFiles`. The package
+  declares it in `package.json` `"linkedOntologies"`, and its accessor modules
+  (`src/ontologies/<name>.ts`, `.data.ts`, `.register.ts`) are the ones `linked
+  generate-ontology` writes (see [Ontology accessor modules](#ontology-accessor-modules)): add terms
+  to the Turtle and run it. `create-ontology` scaffolds the same files and entry in an existing
+  package.
 - an **asset package**, `<name>-assets` — shapes, components and a backend, and no ontology.
 
 `create-package` asks which on a terminal; `--kind ontology|assets|both` answers it (`both`
@@ -174,6 +178,9 @@ Each prefix gets three committed modules in `src/ontologies/`:
   keeps only the terms used. A subject whose remainder after the namespace holds `/`, `#` or `?`
   is not a term, and the command lists it.
 - `<prefix>.data.ts`: `ns`, `dataFiles`, `loadData`, `_ontologyResource` and `Prefix.add`.
+  `_ontologyResource` is the ontology's own IRI as its data declares it with `a owl:Ontology`: the
+  namespace, else the namespace without its trailing `#` or `/` (`http://www.w3.org/2002/07/owl`),
+  else the only declaration the namespace starts with; otherwise the namespace.
 - `<prefix>.register.ts`: the `linkedOntology(...)` call; `src/index.ts` imports it.
 
 A term's export name is its local name made a valid identifier by one rule: a character that

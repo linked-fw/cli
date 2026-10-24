@@ -8,7 +8,8 @@
  *   with a one-line JSDoc from its `rdfs:comment` (else `rdfs:label`), and nothing else, so
  *   `import * as p from '<pkg>/ontologies/<p>'` is a namespace of terms only and tree-shakes
  *   (every initializer is annotated pure);
- * - `<p>.data.ts`, the **data module**: `ns`, `dataFiles`, `loadData`, `_ontologyResource` and the
+ * - `<p>.data.ts`, the **data module**: `ns`, `dataFiles`, `loadData`, `_ontologyResource` (the
+ *   ontology's IRI as its `owl:Ontology` declares it, else the namespace) and the
  *   `Prefix.add` registration of the prefix;
  * - `<p>.register.ts`, the **register module**: the `linkedOntology` call, which needs the terms
  *   module's whole namespace and so cannot live in it (see the comment it carries).
@@ -44,6 +45,11 @@ export interface OntologyModuleSpec {
   dataFiles: string[];
   /** The terms, in any order. */
   terms: OntologyTerm[];
+  /**
+   * The ontology's own IRI, as its data declares it with `a owl:Ontology`
+   * (`ontologyTermsFromQuads` finds it). Defaults to the namespace.
+   */
+  ontology?: string;
 }
 
 /** A prefix that names an ontology's modules: letters and digits, single `-`/`_` between. */
@@ -311,6 +317,9 @@ export function generateOntologyTermsModule(spec: OntologyModuleSpec): string {
       `export const ${name} = /*#__PURE__*/ ${nsLocal}(${quote(term.localName)});`,
     );
   }
+  // Without terms the file must still be a module, or `import * as terms` from the register
+  // module fails to compile (TS2306).
+  if (!terms.length) lines.push('', 'export {};');
   return lines.join('\n') + '\n';
 }
 
@@ -340,8 +349,15 @@ export function generateOntologyDataModule(
     `export const ns = createNameSpace(${quote(spec.namespace)});`,
     `Prefix.add(${quote(spec.prefix)}, ${quote(spec.namespace)});`,
     '',
-    '/** The ontology itself (its namespace IRI). */',
-    "export const _ontologyResource = ns('');",
+    ...(spec.ontology === undefined || spec.ontology === spec.namespace
+      ? [
+          '/** The ontology itself (its namespace IRI). */',
+          "export const _ontologyResource = ns('');",
+        ]
+      : [
+          '/** The ontology itself, as its data declares it (`a owl:Ontology`). */',
+          `export const _ontologyResource = {id: ${quote(spec.ontology)}};`,
+        ]),
     '',
   ].join('\n');
 }

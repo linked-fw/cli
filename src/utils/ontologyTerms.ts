@@ -11,6 +11,8 @@ import type {OntologyTerm} from './ontologyModules.js';
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#';
 const LABEL = `${RDFS}label`;
 const COMMENT = `${RDFS}comment`;
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const OWL_ONTOLOGY = 'http://www.w3.org/2002/07/owl#Ontology';
 
 /** The part of `n3` this module uses. */
 interface N3Term {
@@ -56,6 +58,30 @@ export interface OntologyTermsResult {
    * `/`, `#` or `?` (a deeper path, not a local name). Sorted.
    */
   skipped: string[];
+  /**
+   * The ontology's own IRI, as the data declares it with `a owl:Ontology` (see
+   * {@link ontologyIriOf}); absent when no declaration belongs to the namespace.
+   */
+  ontology?: string;
+}
+
+/**
+ * The IRI of the ontology a namespace belongs to, among the subjects typed `owl:Ontology`: the
+ * namespace itself (`http://schema.org/`), else the namespace without its trailing `#` or `/`
+ * (`http://www.w3.org/2002/07/owl` for `…/owl#`), else the only declaration the namespace starts
+ * with (`https://x.test/onto` for `https://x.test/onto/terms#`). `undefined` otherwise: a
+ * declaration unrelated to the namespace (another vocabulary's, copied in) is never taken.
+ */
+export function ontologyIriOf(
+  declared: Iterable<string>,
+  namespace: string,
+): string | undefined {
+  const iris = new Set(declared);
+  if (iris.has(namespace)) return namespace;
+  const bare = namespace.replace(/[#/]$/, '');
+  if (bare !== namespace && iris.has(bare)) return bare;
+  const containing = [...iris].filter((iri) => namespace.startsWith(iri));
+  return containing.length === 1 ? containing[0] : undefined;
 }
 
 /**
@@ -74,7 +100,16 @@ export function ontologyTermsFromQuads(
   type Literal = {value: string; language: string};
   const subjects = new Map<string, {labels: Literal[]; comments: Literal[]}>();
   const skipped = new Set<string>();
+  const ontologies = new Set<string>();
   for (const {subject, predicate, object} of quads) {
+    if (
+      subject.termType === 'NamedNode' &&
+      predicate.value === RDF_TYPE &&
+      object.termType === 'NamedNode' &&
+      object.value === OWL_ONTOLOGY
+    ) {
+      ontologies.add(subject.value);
+    }
     if (
       subject.termType !== 'NamedNode' ||
       !subject.value.startsWith(namespace)
@@ -104,7 +139,13 @@ export function ontologyTermsFromQuads(
       if (comment !== undefined) term.comment = comment;
       return term;
     });
-  return {terms, skipped: [...skipped].sort(compare)};
+  const result: OntologyTermsResult = {
+    terms,
+    skipped: [...skipped].sort(compare),
+  };
+  const ontology = ontologyIriOf(ontologies, namespace);
+  if (ontology !== undefined) result.ontology = ontology;
+  return result;
 }
 
 /**

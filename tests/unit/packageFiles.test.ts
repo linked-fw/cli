@@ -9,7 +9,8 @@ import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
 import {createPackage} from '../../src/cli-methods';
-import {buildPackageFiles} from '../../src/utils/packageFiles';
+import {buildPackageFiles, withOntologyEntry} from '../../src/utils/packageFiles';
+import {staleOntologyModules} from '../../src/utils/generateOntology';
 
 // Every file under a folder: relative `/`-path → content.
 const files = (root: string): Record<string, string> => {
@@ -123,6 +124,7 @@ describe('buildPackageFiles', () => {
       'package.json',
       'src/data/planning.ttl',
       'src/index.ts',
+      'src/ontologies/planning.data.ts',
       'src/ontologies/planning.register.ts',
       'src/ontologies/planning.ts',
       'src/package.ts',
@@ -132,12 +134,15 @@ describe('buildPackageFiles', () => {
     expect(out['src/package.ts']).toContain(
       `linkedPackage('planning-ont', {baseUri: "https://acme.example/"})`,
     );
-    expect(out['src/ontologies/planning.ts']).toContain(
+    expect(out['src/ontologies/planning.data.ts']).toContain(
       `createNameSpace('https://acme.example/ont/planning/')`,
     );
     expect(out['src/ontologies/planning.register.ts']).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, ['../data/planning.ttl'])`,
+      `linkedOntology(terms, ns, 'planning', loadData, dataFiles)`,
     );
+    expect(JSON.parse(out['package.json']).linkedOntologies).toEqual({
+      planning: {namespace: 'https://acme.example/ont/planning/'},
+    });
     expect(out['src/data/planning.ttl']).toContain(
       `<https://acme.example/ont/planning/> a owl:Ontology .`,
     );
@@ -147,6 +152,43 @@ describe('buildPackageFiles', () => {
         expect.stringContaining('${'),
       ]);
     }
+  });
+
+  test('the scaffolded ontology modules are what generate-ontology writes for its data', async () => {
+    const out = buildPackageFiles('planning-ont', 'ontology', {
+      baseUri: 'https://acme.example/',
+    });
+    for (const [file, content] of Object.entries(out)) {
+      fs.outputFileSync(path.join(tmp, file), content);
+    }
+    expect(await staleOntologyModules(tmp)).toEqual([]);
+  });
+
+  test('a hyphenated slug: the scaffold passes the module check too', async () => {
+    const out = buildPackageFiles('@acme/lego-planning-ont', 'ontology');
+    expect(JSON.parse(out['package.json']).linkedOntologies).toEqual({
+      'lego-planning': {namespace: 'https://linked.cm/ont/lego-planning/'},
+    });
+    for (const [file, content] of Object.entries(out)) {
+      fs.outputFileSync(path.join(tmp, file), content);
+    }
+    expect(await staleOntologyModules(tmp)).toEqual([]);
+  });
+
+  test('a slug or namespace the scaffold cannot use is refused', () => {
+    expect(() => buildPackageFiles('3d-ont', 'ontology')).toThrow(/start with a letter/);
+    expect(() =>
+      buildPackageFiles('planning-ont', 'ontology', {uriBase: 'ex.test/x'}),
+    ).toThrow(/not an ontology namespace/);
+  });
+
+  test('withOntologyEntry keeps an existing entry and the file\'s formatting', () => {
+    const own = '{\r\n    "name": "x",\r\n    "linkedOntologies": {"p": {"namespace": "https://x.test/", "data": ["a.ttl"]}}\r\n}\r\n';
+    expect(withOntologyEntry(own, 'p', 'https://other.test/')).toBe(own);
+    const added = withOntologyEntry('{\r\n    "name": "x"\r\n}\r\n', 'q', 'https://q.test/');
+    expect(added).toBe(
+      '{\r\n    "name": "x",\r\n    "linkedOntologies": {\r\n        "q": {\r\n            "namespace": "https://q.test/"\r\n        }\r\n    }\r\n}\r\n',
+    );
   });
 
   test('dependencies are added to the template manifest, which keeps its own', () => {
