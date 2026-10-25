@@ -1,12 +1,17 @@
 // Locating installed packages the way Node does, shared by the Vite config
 // helper and `linked app-doctor`.
 import fsExtra from 'fs-extra';
+import {globSync} from 'glob';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import {stripUserinfo} from './integration/credentials.js';
 import {EXIT_REFUSED, LocalizeError} from './localize/errors.js';
 import {normalizeGitUrl} from './localize/resolve.js';
+import {
+  isWorkspacePathNegated,
+  parseWorkspacePatterns,
+} from './workspace-globs.js';
 
 /**
  * Framework packages that MUST be single-instance per runtime — they hold
@@ -23,23 +28,57 @@ export const FRAMEWORK_PKG_PATTERNS: RegExp[] = [/^@_linked\//, /^lincd-/];
 export const isFrameworkPkg = (name: string): boolean =>
   FRAMEWORK_PKG_PATTERNS.some((re) => re.test(name));
 
+/**
+ * Is `dir` a workspace root, where a `node_modules` walk stops? Only when its
+ * `package.json` declares `workspaces` AND at least one of those globs matches
+ * a package directory that exists (a directory with a `package.json`, not
+ * excluded by a negation).
+ *
+ * Declaring the globs is not enough. An app made from the app template lists
+ * `packages-local/*` so it can localize packages standalone; run inside a
+ * parent workspace (CN's `packages-local/<app>`) with no checkouts of its own,
+ * it has nothing installed and npm hoisted its dependencies to the parent.
+ * Stopping at the app then missed the parent's `node_modules`: no localized
+ * package was registered as source, while Node walked up to the parent's
+ * symlinks and loaded the checkouts anyway — two copies of `@_linked/core`.
+ */
+export async function isWorkspaceRoot(dir: string): Promise<boolean> {
+  let json: any;
+  try {
+    json = await fsExtra.readJson(path.join(dir, 'package.json'));
+  } catch {
+    return false;
+  }
+  return hasWorkspaceMembers(dir, json?.workspaces);
+}
+
+/**
+ * Does the `workspaces` value of the `package.json` in `dir` match at least one
+ * package directory that exists: one with a `package.json`, not excluded by a
+ * negation? A glob whose base folder is missing or empty matches none. See
+ * {@link isWorkspaceRoot}.
+ */
+export function hasWorkspaceMembers(dir: string, workspaces: unknown): boolean {
+  const {patterns, negatedPatterns} = parseWorkspacePatterns(workspaces);
+  if (patterns.length === 0) return false;
+  const manifests = globSync(
+    patterns.map((p) => `${p.replace(/\/+$/, '')}/package.json`),
+    {cwd: dir, posix: true},
+  );
+  return manifests.some(
+    (manifest) =>
+      !isWorkspacePathNegated(path.posix.dirname(manifest), negatedPatterns),
+  );
+}
+
 // Resolve a dependency name to its installed package.json the way Node does:
 // look in `<dir>/node_modules/<name>`, then each parent directory's
 // node_modules, starting from the requiring package's directory. This finds
 // deps that npm/yarn workspaces HOISTED to the monorepo root (an app under
 // `services/api` whose dep lives in `<root>/node_modules`). The walk stops
-// after the nearest directory whose package.json declares `workspaces` (the
-// workspace root), or at the filesystem root. Returns null when the package
-// isn't installed (e.g. an optional dep) — we skip rather than throw.
-export async function isWorkspaceRoot(dir: string): Promise<boolean> {
-  try {
-    const json = await fsExtra.readJson(path.join(dir, 'package.json'));
-    return !!json.workspaces;
-  } catch {
-    return false;
-  }
-}
-
+// after the nearest workspace root ({@link isWorkspaceRoot}), or at the
+// filesystem root. Returns null when the package isn't installed (e.g. an
+// optional dep) — we skip rather than throw.
 export async function readInstalledPkg(
   name: string,
   fromDir: string,

@@ -10,7 +10,11 @@ import fs from 'fs-extra';
 import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
-import {isLinkedPackageJson, linkedKind} from './installed-packages.js';
+import {
+  hasWorkspaceMembers,
+  isLinkedPackageJson,
+  linkedKind,
+} from './installed-packages.js';
 import {LOCAL_DIR, localMembers} from './localize/members.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 // Shared with the CSS loader's mode resolution, which must pick the same profiles.
@@ -291,19 +295,31 @@ export function discoverLocalPackages(
   const {includeLocalPackagesDir = true, localPackagesDir = LOCAL_PACKAGES_DIR} =
     options;
 
+  // The root is a directory whose `workspaces` match a package that exists, the
+  // same rule the node_modules walk stops at (`hasWorkspaceMembers`). An app
+  // that lists `packages-local/*` with no checkout of its own, inside a parent
+  // workspace, belongs to that parent.
+  const isRoot = (dir: string, json: any): boolean =>
+    !!json?.workspaces && hasWorkspaceMembers(dir, json.workspaces);
   let pack = getPackageJSON(rootPath);
-  if (!pack || !pack.workspaces) {
+  if (!isRoot(rootPath, pack)) {
     const originalRoot = rootPath;
-    for (let i = 0; i <= 3; i++) {
+    const originalPack = pack;
+    let found = false;
+    for (let i = 1; i <= 3; i++) {
       rootPath = path.join(originalRoot, ...Array(i).fill('..'));
       pack = getPackageJSON(rootPath);
-      if (pack && pack.workspaces) break;
+      if (isRoot(rootPath, pack)) {
+        found = true;
+        break;
+      }
     }
-    if (!pack || !pack.workspaces) {
+    if (!found) {
       // Standalone apps (scaffolded with `linked create-app`) don't have
-      // workspaces — expected. Fall back to the original root so a
-      // `packages-local/` beside it is still found.
+      // workspaces, or none with members yet — expected. Fall back to the
+      // original root so a `packages-local/` beside it is still found.
       rootPath = originalRoot;
+      pack = originalPack;
     }
   }
 
