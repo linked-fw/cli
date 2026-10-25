@@ -7,11 +7,7 @@ module.exports = function (api) {
   return {
     // babel-preset-expo is installed nested under expo; resolve it from there, as Expo's own default config does.
     presets: [require.resolve('babel-preset-expo', { paths: [require.resolve('expo/package.json')] })],
-    // Metro rejects `import('x.json', { with: { type: 'json' } })`, used by every Linked ontology package, and
-    // Hermes cannot compile the `import(variable)` of core's Node-only paths (e.g. loadOntologyFiles).
-    plugins: [
-      require.resolve('./babel/stripJsonImportAttributes'),
-      require.resolve('./babel/rejectComputedImports'),
-    ],
+    // Metro rejects `import('x.json', { with: { type: 'json' } })`, used by every Linked ontology package.
+    plugins: [require.resolve('./babel/stripJsonImportAttributes')],
   };
 };

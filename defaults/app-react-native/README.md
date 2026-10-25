@@ -73,7 +73,8 @@ cd apps/mobile && npx expo export --platform ios --output-dir /tmp/export
   dependencies (e.g. `expo-asset` under `expo`). `unstable_conditionNames` covers `require()` of `@_linked/*`
   subpaths.
 - **Jest** maps `@_linked/*` to its ESM build with a scoped `moduleNameMapper`. A global
-  `customExportConditions` would break `@babel/runtime`. Add every workspace package to
+  `customExportConditions` would break `@babel/runtime`. The mapper skips export conditions, so under Jest
+  core's `loadOntologyFiles` is the Node module, not the `react-native` stub the app bundles. Add every workspace package to
   `transformIgnorePatterns`. The integration config restores Node's `fetch`, which jest-expo replaces with a
   stub that never sends a request.
 - **Render defaults.** `@_linked/react`'s root loader and error elements are `<svg>`, which crash on React
@@ -93,10 +94,8 @@ cd apps/mobile && npx expo export --platform ios --output-dir /tmp/export
   map `.js` specifiers to `.ts` source. No configuration is needed — `linked build` always adds `.js` to the
   relative specifiers in the emitted `lib/esm` JS and declarations. The app, Jest and the API in development
   consume `src/` through the `react-native` and `development` export conditions.
-- **Decorators** work with the stock `babel-preset-expo`. Two custom Babel plugins, each covered by a test in
+- **Decorators** work with the stock `babel-preset-expo`. One custom Babel plugin, covered by a test in
   `__tests__/`: `apps/mobile/babel/stripJsonImportAttributes.js` strips `with { type: 'json' }` from dynamic
-  `import()`, which Metro rejects and Linked ontology packages use; `apps/mobile/babel/rejectComputedImports.js`
-  turns an `import()` of a variable specifier (core's Node-only `loadOntologyFiles`, which a vocabulary's data
-  module imports) into a rejected promise naming the file, since Hermes cannot compile `import()`; it applies
-  under Jest too. After editing
-  `babel.config.js` or a plugin, restart with `npx expo start --clear`.
+  `import()`, which Metro rejects and Linked ontology packages use. Core's Node-only `loadOntologyFiles` needs
+  no plugin: Metro resolves it through core's `react-native` export condition to a stub that rejects. After
+  editing `babel.config.js` or the plugin, restart with `npx expo start --clear`.
