@@ -16,7 +16,7 @@
     "build": "linked build"
   },
   "dependencies": {
-    "@_linked/core": "2.42.1",
+    "@_linked/core": "2.43.0",
     "@_linked/schema": "1.9.1"
   },
   "devDependencies": {

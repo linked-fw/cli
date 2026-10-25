@@ -11,7 +11,7 @@
     "test:integration": "jest -c jest.integration.config.js --runInBand"
   },
   "dependencies": {
-    "@_linked/core": "2.42.1",
+    "@_linked/core": "2.43.0",
     "@_linked/react": "2.0.4",
     "@_linked/schema": "1.9.1",
     "@_linked/server": "3.12.1",
