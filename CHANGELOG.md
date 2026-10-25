@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.57.4
+
+### Patch Changes
+
+- [#324](https://github.com/linked-fw/cli/pull/324) [`4a0d31c`](https://github.com/linked-fw/cli/commit/4a0d31c4f5e05e1d53d06dc84c21b1cc395b95bb) Thanks [@flyon](https://github.com/flyon)! - The react-native template pins `@_linked/core` 2.43.0 and drops its `rejectComputedImports` Babel plugin. Core's `loadOntologyFiles` now has a `react-native` export condition that gives Metro a stub without `import()`, so Hermes compiles the bundle with the stock Babel config plus `stripJsonImportAttributes`.
+
 ## 1.57.3
 
 ### Patch Changes
