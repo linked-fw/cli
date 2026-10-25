@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.57.2
+
+### Patch Changes
+
+- [#320](https://github.com/linked-fw/cli/pull/320) [`ff520f5`](https://github.com/linked-fw/cli/commit/ff520f51fa7734917622e75634b3bc5eb2e80959) Thanks [@flyon](https://github.com/flyon)! - License: MIT (data under its original license)
+
 ## 1.57.1
 
 ### Patch Changes
