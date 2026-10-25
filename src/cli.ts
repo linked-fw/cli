@@ -658,7 +658,7 @@ const doctor = program
 doctor
   .command('resolve')
   .description(
-    'Run in an app. For every source workspace and installed @_linked package: the directory Vite\'s dev SSR runner loads it from (or "external" when Vite leaves it to Node), the directory Node resolves it to, and whether Vite bundles it. Flags "overlay" when the two differ (a worktree\'s own checkout) and "two-copies" when they differ for a package Node also loads during linked start (@_linked/cli, and every @_linked package the app\'s vite.config imports). Exits 1 on "two-copies".',
+    'Run in an app. For every source workspace and installed @_linked package: the directory Vite\'s dev SSR runner loads it from (or "external" when Vite leaves it to Node), the directory Node resolves it to, and whether Vite bundles it. Flags "overlay" when the two differ (a worktree\'s own copy that node_modules does not link to, such as the app\'s own packages/) and "two-copies" when they differ for a package Node also loads during linked start (@_linked/cli, and every @_linked package the app\'s vite.config imports). Exits 1 on "two-copies". In a worktree, also says when node_modules needs linked worktree relink.',
   )
   .option('--json', 'Print the rows as JSON: name, vite, node, bundled, flag.')
   .action(async (options) => {
@@ -697,13 +697,13 @@ branch
 const worktree = program
   .command('worktree')
   .description(
-    "An agent's worktree of the app (default <parent of the app root>/wt/<agent>) with a nested worktree of each package it changes, on the branch <base>--<agent>. The base is the root's integration branch, or its current branch. node_modules is shared with the main checkout.",
+    "An agent's worktree of the app (default <parent of the app root>/wt/<agent>) with a nested worktree of each package it changes, on the branch <base>--<agent>. The base is the root's integration branch, or its current branch. node_modules is a link farm into the main checkout's install, with the worktree's own packages-local/ checkouts linked in place of the main checkout's.",
   );
 
 worktree
   .command('add <agent>')
   .description(
-    "Run in an app. Create the app worktree on <base>--<agent> (or detached with --app-detached), symlink node_modules and the gitignored .env files, and add a worktree of each --with package in its packages-local/. A --with checkout not on the base joins it (created from the target), refusing, with nothing changed, when it has changes. Prints the start command.",
+    "Run in an app. Create the app worktree on <base>--<agent> (or detached with --app-detached), add a worktree of each --with package in its packages-local/, link the gitignored .env files, and make node_modules a link farm into the main checkout's install in which the --with packages link to the worktree's checkouts (so Vite, tsc and Node all load them). A --with checkout not on the base joins it (created from the target), refusing, with nothing changed, when it has changes. Prints the start command.",
   )
   .option('--with <packages>', 'Comma-separated packages-local/ checkouts to change: @_linked/core, core or _linked-core.')
   .option('--app-detached', 'Check the app out detached at the base tip: for work that changes only packages.')
@@ -738,6 +738,17 @@ worktree
   .action(async (agent: string, options) => {
     const {runWorktreeRemove} = await import('./commands/worktree.js');
     return runWorktreeRemove(agent, options);
+  });
+
+worktree
+  .command('relink [agent]')
+  .description(
+    "Rebuild an app worktree's node_modules link farm (the agent's, or the worktree it runs in): after an npm install in the main checkout, after adding a package worktree to its packages-local/ by hand, or to move a worktree whose node_modules is a symlink (made by an earlier cli) to the farm. Every package in its packages-local/ links to that checkout. A real install of the worktree's own is left alone.",
+  )
+  .option('--dir <path>', 'The app worktree directory, instead of the agent name or the current directory.')
+  .action(async (agent: string | undefined, options) => {
+    const {runWorktreeRelink} = await import('./commands/worktree.js');
+    return runWorktreeRelink(agent, options);
   });
 
 const release = program

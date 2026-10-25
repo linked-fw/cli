@@ -705,6 +705,37 @@ test('skips install when node_modules is a symlink', (t) => {
   );
 });
 
+test('skips install in the node_modules link farm of linked worktree add', (t) => {
+  // A real node_modules whose marker names the install it links into.
+  const root = app(t);
+  member(root);
+  const PATH = fakeNpm(root);
+  const main = tmpdir('localize-hooks-main-');
+  t.after(() => rm(main));
+  fs.mkdirSync(path.join(main, 'node_modules'));
+  fs.mkdirSync(path.join(root, 'node_modules'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'node_modules', '.linked-worktree.json'),
+    JSON.stringify({installRoot: main, overlays: {}}),
+  );
+  const deps = twoCommits(root, 'package-lock.json', json(UPDATED));
+  const r = node(
+    GIT_HOOK,
+    ['post-checkout', deps.old, deps.new, '1'],
+    root,
+    baseEnv({PATH}),
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(npmCalls(root), []);
+  assert.ok(
+    r.stderr.includes(
+      `[linked] skipped npm install: node_modules links into ${path.join(main, 'node_modules')} (a worktree sharing the main checkout's install). ` +
+        `Run npm install in ${main} if the dependencies changed, then linked worktree relink here.`,
+    ),
+    r.stderr,
+  );
+});
+
 test('post-merge compares ORIG_HEAD with HEAD, and a failed install never fails git', (t) => {
   const root = app(t);
   member(root);

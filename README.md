@@ -445,13 +445,15 @@ package, a nested copy of `@_linked/core`/`react`/`server-utils`, and a checkout
 
 One piece of work across the app and its `packages-local/` checkouts, on an integration branch
 with a target recorded per repo (`branch.<name>.linked-target`). Agents work in worktrees on
-`<integration>--<agent>` branches that share the main checkout's install, and land locally with
+`<integration>--<agent>` branches that share the main checkout's install (a `node_modules` link
+farm in which the worktree's own checkouts win), and land locally with
 `merge --ff-only`. Full guide: [docs/integration-branches-and-worktrees.md](docs/integration-branches-and-worktrees.md).
 
 ```bash
 linked branch start overhaul --target main core   # app + packages-local/_linked-core on `overhaul`
 linked branch status                              # per repo: branch, target, dirty, ahead/behind, off-branch
-linked worktree add agent1 --with core --port 4041  # ../wt/agent1 with its own core worktree
+linked worktree add agent1 --with core --port 4041  # ../wt/agent1 with its own core worktree; Vite, tsc and Node load it
+linked worktree relink                            # in a worktree: rebuild its node_modules link farm (after npm install in the main checkout)
 linked worktree list                              # agent worktrees and whether each branch has landed
 linked worktree remove agent1                     # refuses while a branch has not landed (--force, --delete-unlanded)
 linked release plan                               # per repo: commits, reports, changesets, release PRs, next action

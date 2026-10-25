@@ -66,6 +66,7 @@ import type {Member} from './members.js';
 import {checkoutNameFor, resolvePackage} from './resolve.js';
 import type {Deps, RunResult} from './run.js';
 import {linkDirectory} from '../utils/platform.js';
+import {sharedInstall} from './shared-install.js';
 
 /** A checkout's own build, run when its package.json has a `build` script. */
 export const DEFAULT_BUILD_COMMAND = 'npm run build';
@@ -630,30 +631,22 @@ export function defaultBuildCommand(
 }
 
 /**
- * Throw when `appRoot/node_modules` is a symlink: the app is a worktree that
- * shares another checkout's install, and an `npm install` here would rewrite
- * that checkout's `node_modules` (and relink its packages to this worktree's
- * checkouts). localize and delocalize install, so they run in the checkout
- * that owns the install, which the message names. Reading (`--list`) is fine.
+ * Throw when the app shares another checkout's install: a worktree whose
+ * `node_modules` is a symlink to it, or the link farm `linked worktree add`
+ * makes. An `npm install` here would rewrite that checkout's `node_modules`
+ * (and relink its packages to this worktree's checkouts), or replace the farm.
+ * localize and delocalize install, so they run in the checkout that owns the
+ * install, which the message names. Reading (`--list`) is fine.
  */
 export function refuseSharedInstall(appRoot: string): void {
+  const shared = sharedInstall(appRoot);
+  if (!shared) return;
   const nodeModules = path.join(appRoot, 'node_modules');
-  let isLink = false;
-  try {
-    isLink = fs.lstatSync(nodeModules).isSymbolicLink();
-  } catch {
-    return;
-  }
-  if (!isLink) return;
-  let owner: string;
-  try {
-    owner = path.dirname(fs.realpathSync(nodeModules));
-  } catch {
-    owner = `the target of ${nodeModules}`;
-  }
+  const what =
+    shared.layout === 'symlink' ? `${nodeModules} is a symlink` : `${nodeModules} links into another install`;
   throw new LocalizeError(
-    `${nodeModules} is a symlink: this worktree shares the install of ${owner}, and installing ` +
-      `here would rewrite it. Run this in ${owner} instead. Nothing was changed.`,
+    `${what}: this worktree shares the install of ${shared.installRoot}, and installing ` +
+      `here would rewrite it. Run this in ${shared.installRoot} instead. Nothing was changed.`,
     EXIT_REFUSED,
   );
 }

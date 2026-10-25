@@ -18,6 +18,7 @@ import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
+import {sharedInstall} from './localize/shared-install.js';
 import {
   discoverInstalledLinkedPackages,
   isLinkedPackageJson,
@@ -808,21 +809,15 @@ export async function installedLinkedDeps(cwd: string): Promise<string[]> {
 
 /**
  * Vite's dependency cache for the app at `appRoot`. Vite's default is
- * `node_modules/.vite`; when `node_modules` is a symlink -- a git worktree
- * sharing the main checkout's install -- that is the main checkout's cache, and
- * a worktree's dev server would re-optimize it from under the main one's. Such
- * an app gets `<appRoot>/.vite-cache` instead; otherwise `undefined` keeps the
- * default.
+ * `node_modules/.vite`; in a git worktree that shares the main checkout's
+ * install through a symlinked `node_modules`, that is the main checkout's
+ * cache, and a worktree's dev server would re-optimize it from under the main
+ * one's. A worktree sharing the install (a symlink, or the link farm of
+ * `linked worktree add`) gets `<appRoot>/.vite-cache` instead; otherwise
+ * `undefined` keeps the default.
  */
 export function viteCacheDir(appRoot: string): string | undefined {
-  try {
-    if (fsExtra.lstatSync(path.join(appRoot, 'node_modules')).isSymbolicLink()) {
-      return path.join(appRoot, '.vite-cache');
-    }
-  } catch {
-    /* no node_modules: the default */
-  }
-  return undefined;
+  return sharedInstall(appRoot) ? path.join(appRoot, '.vite-cache') : undefined;
 }
 
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {

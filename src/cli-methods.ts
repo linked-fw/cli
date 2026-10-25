@@ -1,4 +1,6 @@
 import chalk from 'chalk';
+import {makeBinsExecutable} from './utils/bin-modes.js';
+import {tscFlagsFor} from './localize/shared-install.js';
 import {checkOntologyModulesStep} from './utils/generateOntology.js';
 import {exec} from 'child_process';
 import depcheck from 'depcheck';
@@ -3306,6 +3308,14 @@ export const planBuildSteps = (
     },
   },
   {
+    // npm sets it when it links a bin; rewriting lib/ drops it.
+    name: 'Marking bin files executable',
+    apply: async () => {
+      const changed = makeBinsExecutable(packagePath);
+      return changed.length ? {info: changed.join(', ')} : true;
+    },
+  },
+  {
     // MUST run after 'Copying files to lib folder' and after 'Removing old
     // files from lib folder', because the rewrite resolves each specifier
     // against the files actually present in lib/esm:
@@ -3414,7 +3424,7 @@ export const compilePackageESM = async (packagePath = process.cwd()) => {
   if (!fs.existsSync(path.join(packagePath, 'tsconfig-esm.json'))) {
     return true;
   }
-  let compileCommand = `npx tsc -p tsconfig-esm.json`;
+  let compileCommand = `npx tsc -p tsconfig-esm.json${tscFlagsFor(packagePath)}`;
   return execPromise(compileCommand, false, false, {cwd: packagePath}).then(
     (res) => {
       return res === '';
@@ -3436,7 +3446,7 @@ export const compilePackageCJS = async (packagePath = process.cwd()) => {
   if (!fs.existsSync(path.join(packagePath, 'tsconfig-cjs.json'))) {
     return true;
   }
-  let compileCommand = `npx tsc -p tsconfig-cjs.json`;
+  let compileCommand = `npx tsc -p tsconfig-cjs.json${tscFlagsFor(packagePath)}`;
   return execPromise(compileCommand, false, false, {cwd: packagePath})
     .then((res) => {
       return res === '';

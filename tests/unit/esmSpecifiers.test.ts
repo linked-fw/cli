@@ -258,6 +258,7 @@ describe('planBuildSteps', () => {
       'Copying files to lib folder',
       'Dual package support',
       'Removing old files from lib folder',
+      'Marking bin files executable',
       'Rewriting ESM import specifiers',
       'Checking shape names',
       'Checking shape references',

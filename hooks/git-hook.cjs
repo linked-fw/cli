@@ -9,8 +9,9 @@
 // - post-merge, post-checkout: `npm install` when the dependency manifests changed, so the
 //   checkouts are linked again on top of the new lockfile. Nothing at all when this work tree has
 //   no checkouts (hooks are shared by every worktree of a repository), and no install in a worktree
-//   whose node_modules is a symlink to the main checkout's: it would relink that install to this
-//   worktree's checkouts. Never fails the git command.
+//   that shares the main checkout's install (node_modules a symlink to it, or the link farm of
+//   `linked worktree add`, see shared-install.cjs): it would rewrite that install or the farm.
+//   Never fails the git command.
 'use strict';
 const {execFileSync, spawnSync} = require('child_process');
 const fs = require('fs');
@@ -18,6 +19,7 @@ const path = require('path');
 
 const {LEAK, localMembers, manifestPathspecs} = require('./manifests.cjs');
 const {npmCommand} = require('./platform.cjs');
+const {sharedInstall} = require('./shared-install.cjs');
 
 const MANIFESTS = ['package.json', 'package-lock.json'];
 const NO_COMMIT = /^0+$/;
@@ -100,11 +102,16 @@ function installIfChanged(oldRev, newRev) {
   );
   if (diff.status !== 1) return 0;
 
-  const shared = sharedNodeModules();
+  const shared = sharedInstall(root);
   if (shared) {
+    const what =
+      shared.layout === 'symlink'
+        ? `node_modules is a symlink to ${path.join(shared.installRoot, 'node_modules')}`
+        : `node_modules links into ${path.join(shared.installRoot, 'node_modules')}`;
     process.stderr.write(
-      `[linked] skipped npm install: node_modules is a symlink to ${shared} (a worktree sharing the main checkout's install). ` +
-        `Run npm install in ${path.dirname(shared)} if the dependencies changed.\n`,
+      `[linked] skipped npm install: ${what} (a worktree sharing the main checkout's install). ` +
+        `Run npm install in ${shared.installRoot} if the dependencies changed` +
+        (shared.layout === 'farm' ? ', then linked worktree relink here.\n' : '.\n'),
     );
     return 0;
   }
@@ -128,21 +135,6 @@ function installIfChanged(oldRev, newRev) {
     `[git hook] npm install done in ${Math.round((Date.now() - start) / 1000)}s\n`,
   );
   return 0;
-}
-
-/** The real path of `<root>/node_modules` when it is a symlink (a worktree sharing another's install), else ''. */
-function sharedNodeModules() {
-  const nodeModules = path.join(root, 'node_modules');
-  try {
-    if (!fs.lstatSync(nodeModules).isSymbolicLink()) return '';
-  } catch {
-    return '';
-  }
-  try {
-    return fs.realpathSync(nodeModules);
-  } catch {
-    return fs.readlinkSync(nodeModules); // dangling: still not this worktree's install to rewrite
-  }
 }
 
 // git exports the variables that locate this repository to its hooks; npm would hand them to every

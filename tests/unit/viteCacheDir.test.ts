@@ -38,6 +38,18 @@ describe('Vite cacheDir', () => {
     expect(viteCacheDir(app)).toBe(path.join(app, '.vite-cache'));
   });
 
+  it('node_modules link farm → cacheDir under the app root', () => {
+    const main = tempRoot('vite-cache-main-');
+    fs.mkdirSync(path.join(main, 'node_modules'));
+    const app = tempRoot('vite-cache-farm-');
+    fs.mkdirSync(path.join(app, 'node_modules'));
+    fs.writeFileSync(
+      path.join(app, 'node_modules', '.linked-worktree.json'),
+      JSON.stringify({installRoot: main, overlays: {}}),
+    );
+    expect(viteCacheDir(app)).toBe(path.join(app, '.vite-cache'));
+  });
+
   it('real node_modules → default cacheDir', async () => {
     const app = tempRoot('vite-cache-app-');
     fs.mkdirSync(path.join(app, 'node_modules'));
