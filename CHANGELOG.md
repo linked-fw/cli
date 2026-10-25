@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.57.3
+
+### Patch Changes
+
+- [#322](https://github.com/linked-fw/cli/pull/322) [`5935503`](https://github.com/linked-fw/cli/commit/59355035c39cf42961f029739c296b5438158230) Thanks [@flyon](https://github.com/flyon)! - react-native template: pin the current `@_linked/*` releases (core 2.42.1, schema 1.9.1, server 3.12.1, react 2.0.4, cli 1.57.2), so its typecheck and iOS export pass again. The example shape's property is `name` (`schema.name`), and a Babel plugin turns an `import()` of a computed specifier into a rejected promise, which Hermes can compile.
+
 ## 1.57.2
 
 ### Patch Changes
