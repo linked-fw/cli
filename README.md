@@ -564,7 +564,7 @@ workspaces monorepo for Expo SDK 57 / React Native 0.86 / React 19.2 with an API
   eslint.config.js          flat config; keeps apps/mobile on @_linked/server subpath imports
   apps/mobile/              Expo app (ios/ and android/ are generated, not committed)
     App.tsx                 imports ./src/shell/env, @_linked/react/native, ./src/shell/storage
-    babel.config.js         registers babel/stripJsonImportAttributes.js
+    babel.config.js         registers babel/stripJsonImportAttributes.js and babel/rejectComputedImports.js
     src/shell/              env.ts (API URL), storage.ts (RemoteDataset)
     src/components/         PersonOverview / PersonPreview: example add/edit/delete screen
     __tests__/              unit tests; __tests__/integration/ runs against the API and Fuseki
@@ -595,8 +595,10 @@ The generated app:
   error elements (they crash on React Native).
 - **Person example.** `PersonOverview` and `PersonPreview` list, add, edit and delete `@_linked/schema`'s
   `Person` through `RemoteDataset` → API → Fuseki. A Jest integration test covers it.
-- **Babel plugin.** Metro rejects `import('x.json', { with: { type: 'json' } })`, which Linked ontology packages
-  use; `apps/mobile/babel/stripJsonImportAttributes.js` drops that options argument.
+- **Babel plugins.** Metro rejects `import('x.json', { with: { type: 'json' } })`, which Linked ontology packages
+  use; `apps/mobile/babel/stripJsonImportAttributes.js` drops that options argument. Hermes cannot compile an
+  `import()` that Metro leaves in the bundle, which it does for a variable specifier (core's Node-only
+  `loadOntologyFiles`); `apps/mobile/babel/rejectComputedImports.js` makes it a rejected promise.
 - **Before every PR.** The template ships no CI workflow. Its README has a checklist to run locally and paste
   into the PR:
 
