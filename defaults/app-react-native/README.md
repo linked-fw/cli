@@ -73,7 +73,8 @@ cd apps/mobile && npx expo export --platform ios --output-dir /tmp/export
   dependencies (e.g. `expo-asset` under `expo`). `unstable_conditionNames` covers `require()` of `@_linked/*`
   subpaths.
 - **Jest** maps `@_linked/*` to its ESM build with a scoped `moduleNameMapper`. A global
-  `customExportConditions` would break `@babel/runtime`. Add every workspace package to
+  `customExportConditions` would break `@babel/runtime`. The mapper skips export conditions, so under Jest
+  core's `loadOntologyFiles` is the Node module, not the `react-native` stub the app bundles. Add every workspace package to
   `transformIgnorePatterns`. The integration config restores Node's `fetch`, which jest-expo replaces with a
   stub that never sends a request.
 - **Render defaults.** `@_linked/react`'s root loader and error elements are `<svg>`, which crash on React
