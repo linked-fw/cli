@@ -251,6 +251,8 @@ describe('scaffoldReactNativeApp', () => {
       'apps/mobile/__tests__/stripJsonImportAttributes.test.ts',
       'apps/mobile/babel.config.js',
       'apps/mobile/babel/stripJsonImportAttributes.js',
+      'apps/mobile/babel/rejectComputedImports.js',
+      'apps/mobile/__tests__/rejectComputedImports.test.ts',
       'apps/mobile/__tests__/nativeDefaults.test.tsx',
       'apps/mobile/__tests__/integration/personOverview.test.tsx',
       'apps/mobile/__tests__/integration/productionWrites.test.ts',

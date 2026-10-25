@@ -23,8 +23,8 @@ const stubStore: any = {
 LinkedStorage.setDefaultDataset(stubStore);
 setQueryDispatch(stubStore);
 
-const ExampleLabel = linkedComponent(Example.select((s) => s.label), ({ label }: any) => (
-  <Text>{label}</Text>
+const ExampleName = linkedComponent(Example.select((s) => s.name), ({ name }: any) => (
+  <Text>{name}</Text>
 ));
 
 type Node = { type: string; children: (Node | string)[] | null };
@@ -45,7 +45,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 describe('@_linked/react/native render defaults', () => {
   test('a loading component renders only React Native elements', async () => {
     mode = 'loading';
-    await render(<ExampleLabel of={{ id: 'urn:example:loading' }} />);
+    await render(<ExampleName of={{ id: 'urn:example:loading' }} />);
 
     expect(lowercaseHostTypes(screen.toJSON() as any)).toEqual([]);
     expect(screen.getByTestId('linked-loader')).toBeTruthy();
@@ -55,7 +55,7 @@ describe('@_linked/react/native render defaults', () => {
     mode = 'error';
     // A subject of its own: @_linked/react shares one request per query and subject, so reusing the loading
     // test's subject would join its request, which never settles, and never reach the error state.
-    await render(<ExampleLabel of={{ id: 'urn:example:error' }} />);
+    await render(<ExampleName of={{ id: 'urn:example:error' }} />);
     // Let the rejected query settle and the component re-render into its error state.
     await act(flush);
 
