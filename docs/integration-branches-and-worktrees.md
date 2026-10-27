@@ -1,13 +1,14 @@
 ---
 summary: >
   Integration branches and worktrees across an app and its `packages-local/` checkouts:
-  `linked branch status|start`, `linked worktree add|list|relink|remove`, `linked release plan` and
-  `linked doctor resolve`. The model (one integration branch per piece of work with a target
+  `linked branch status|start|fork|merge`, `linked worktree add|list|relink|remove`,
+  `linked checkout`, `linked release plan` and `linked doctor resolve`. The model (one integration branch per piece of work with a target
   recorded per repo, agent branches `<integration>--<agent>`, landing by rebase plus
   `merge --ff-only`, releases from cut branches merged with merge commits), the shared-install
   rules (no `npm install` or `linked localize` in a worktree, whose `node_modules` links into the
-  main checkout's install), and
-  the limitations.
+  main checkout's install), branch checkouts of an app and its unpublished packages in a projects
+  root (`linked checkout`: bare base clones, worktrees, the branch rule, JSON, credentials only
+  through the environment), and the limitations.
 ---
 
 # Integration branches and worktrees
@@ -133,6 +134,59 @@ branch (or commit), a branch the run created is deleted, and the target entry is
 created branch that has moved, is checked out somewhere, or that another branch has forked from
 since is kept, with `kept <branch> at <sha>: <reason>`.
 
+### `linked branch fork <branch> <package> [--dir <app>] [--json]`
+
+In an app checkout (a [`linked checkout`](#linked-checkout-branch) worktree, or an app with
+`packages-local/` clones): creates `<branch>` in the checkout `<package>` names (npm name
+`acme-ont`, or `@_linked/core`, `core`, `_linked-core`) from its current head and pushes it
+(`push -u`). The usual case is a package `linked checkout` left detached at `origin/<default>`
+because its repo had no `<branch>`: the first change to it on a project branch forks the branch.
+
+It refuses (exit 6) when the checkout has changes, and when origin has `<branch>` already while
+the checkout is not on it (`linked checkout <branch>` switches it). On `<branch>` already it pushes
+what origin lacks, or does nothing (exit 0, `pushed: false`). A local `<branch>` that was never
+pushed is switched to and pushed.
+
+```json
+{"code": 0, "package": "acme-ont", "dir": "/srv/projects/acme-app/change-1/packages-local/acme-ont",
+ "branch": "change-1", "from": "4be1…", "pushed": true, "messages": ["acme-ont: created change-1 at 4be1…", "acme-ont: pushed change-1"]}
+```
+
+### `linked branch merge <branch> --into <default> [--mode push|update] [--dir <app>] [--json]`
+
+Lands `<branch>` in every repo of an app checkout that is on it: the `packages-local/` checkouts
+on `<branch>` in dependency order (their `dependencies`, `devDependencies`, `peerDependencies` and
+`linked.unpublishedPackages`), then the app. Checkouts on another branch or detached (fallbacks)
+are not part of it. It fetches each repo first and refuses, merging nothing, while one has
+changes, lacks `origin/<branch>` or `origin/<into>`, or has commits origin lacks (it merges
+`origin/<branch>`, so push first).
+
+- `--mode push` (default): per repo, `git merge --no-ff origin/<branch>` with the message
+  `Merge branch '<branch>' into <into>` in a temporary worktree detached at `origin/<into>`
+  (removed afterwards; the checkout stays on `<branch>`), then `git push origin HEAD:<into>`. One
+  merge commit per repo is the record that the branch landed, and reverts as one commit.
+- `--mode update`: per repo, merge `origin/<into>` into `<branch>` in the checkout and push
+  `<branch>`. For a protected `<into>` (required reviews, `enforce_admins`), which refuses the
+  push: the caller then lands each repo by a PR, in the order printed, for the repos whose
+  `landed` is false.
+
+Both stop at the first conflict (the merge is aborted, the files named, `result: "conflict"`) or
+refused push (`push-refused`); later repos are `skipped` and exit is 6. Repos merged before stay
+merged: a package landing before the app is harmless, since the app's default branch reads the
+package's default branch.
+
+```json
+{"code": 0, "branch": "change-1", "into": "main", "mode": "push", "messages": [],
+ "repos": [
+   {"name": "acme-ont", "dir": "…/packages-local/acme-ont", "repo": "https://github.com/org/acme-ont.git", "result": "merged", "sha": "9c1e…", "landed": true},
+   {"name": "acme-assets", "dir": "…/packages-local/acme-assets", "repo": "https://github.com/org/acme-assets.git", "result": "merged", "sha": "51aa…", "landed": true},
+   {"name": "acme-app", "dir": "…", "repo": "https://github.com/org/acme-app.git", "result": "merged", "sha": "e07b…", "landed": true}]}
+```
+
+`result` is `merged`, `up-to-date` (nothing to merge), `conflict` (with `files`),
+`push-refused` or `skipped`; `landed` says whether `origin/<into>` contains `origin/<branch>`
+after the run.
+
 ## `linked worktree`
 
 Run in the app's main checkout. The base is the root's integration branch, or its current branch
@@ -207,10 +261,137 @@ is deleted without following its links.
 | `--delete-unlanded` | also delete unlanded agent branches (`git branch -D`), printing the sha each was at |
 | `--dir <path>` | the app worktree directory, instead of finding it by its branch |
 
+`--json` prints `{code, messages}`.
+
 Pull every checkout the work touched before `remove` when the work landed through a PR rather
 than locally: an agent branch counts as landed only once the local base contains it. A
 squash-merged branch never does; remove it with `--delete-unlanded`. When `git worktree remove`
 fails, the links (and the farm) are put back so the worktree stays usable.
+
+### `linked worktree remove --branch <branch> [--dir <app>] [--force] [--json]`
+
+Removes a [`linked checkout`](#linked-checkout-branch) checkout: the package worktrees in its
+`packages-local/`, then the app worktree on `<branch>` (found among the worktrees of the
+repository it runs in, or `--dir`), then the landed local branches. Landed means contained in
+`origin/<default>` after a fetch (`git merge-base --is-ancestor`); a detached fallback has landed
+when its HEAD has. The base clones stay.
+
+It refuses, removing nothing, while a repo has not landed or has changes; `--force` removes them
+anyway and keeps the unlanded branches, printing their sha. It refuses even with `--force` while
+`packages-local/` holds anything that is not a package worktree of the checkout (a full clone, a
+`.repos/` monorepo clone): removing the app worktree would delete it with everything else. A
+branch landed by a squash merge never reads as landed; remove it with `--force`.
+
+```json
+{"code": 0, "removed": ["…/packages-local/acme-assets", "…/packages-local/acme-ont", "…/change-1"],
+ "kept": [], "branches": [{"repo": "https://github.com/org/acme-app.git", "branch": "change-1", "deleted": true, "sha": "e07b…"}],
+ "messages": []}
+```
+
+## `linked checkout <branch>`
+
+A branch checkout of an app and the packages it lists in `linked.unpublishedPackages`, made for a
+server that keeps one checkout per project branch (Create Now) — not for a developer's app (one
+clone with [`linked localize --listed`](localize.md#commands)) nor an agent's worktree (`linked
+worktree add`, which shares the main checkout's install).
+
+```sh
+LINKED_GIT_TOKEN=<short-lived token> npx linked checkout change-1 \
+  --repo https://github.com/org/acme-app.git --root /srv/projects --json
+```
+
+| flag | |
+|---|---|
+| `--repo <url>` | the app's `https://` git URL; default the `origin` of the app checkout it runs in |
+| `--root <dir>` | the projects root; default the current directory |
+| `--dir <dir>` | the app worktree; default `<root>/<name>/<branch>` with `/` as `__` |
+| `--from <ref>` | what a new app branch is created from: a branch of the remote, or a commit; default the remote's default branch |
+| `--no-install` | make the worktrees only: no install, no builds |
+| `--build <cmd>` | the build run in each package worktree that moved; default its own `npm run build` when it has a build script; `''` builds nothing |
+| `--json` | print the result (also on a refusal) |
+
+**Layout.**
+
+```
+<root>/.repos/<owner>/<name>.git                  bare base clone, one per repo (app and packages)
+<root>/<name>/<branch-dir>/                       the app worktree
+<root>/<name>/<branch-dir>/packages-local/<dir>/  a package worktree (<dir> as localize names it)
+```
+
+A base clone is `git clone --bare` with the fetch refspec `+refs/heads/*:refs/remotes/origin/*`,
+its copied local heads deleted, and `origin/HEAD` set from the remote: every worktree's branch is
+a local branch tracking `origin/<branch>`. Every run fetches each base clone once (`--prune`) and
+sets `origin/HEAD` again, so a renamed default branch is followed. Two orgs' repos of one name do
+not collide (`<owner>/<name>`).
+
+**Branch rule.** The app: on `<branch>` when origin has it; else created from `--from` and pushed
+(`created: true`). A package: on `<branch>` when its repo has it; else **detached at
+`origin/<default>`** (`fellBack: true`) — detached, because a branch can be checked out in one
+worktree only and two checkouts that both fall back would both need the default branch.
+[`linked branch fork`](#linked-branch-fork-branch-package---dir-app---json) turns a fallback into
+the branch. A branch another worktree of the base clone has checked out is refused.
+
+**The list, transitively.** From the app worktree's committed `package.json`, breadth first:
+each listed package's worktree is made, then its own `package.json` (on its branch, or its
+default when it fell back) is read for its list. The same name with the same repo is checked out
+once, with every `requiredBy`; with two repos it refuses (exit 6) before anything is installed.
+A repo whose `package.json` declares another name is refused and its new worktree removed. A
+listed name also in `dependencies` is warned about. An app whose `workspaces` lacks
+`"packages-local/*"` is refused: npm would not link the packages.
+
+**Install and builds.** One `npm install --no-audit --no-fund` in the app worktree — its own
+install, not a link farm — when a worktree was created, or moved and changed `package.json` or
+`package-lock.json`, or the app has no `node_modules` yet. The app's lock-at-rest hook puts the
+committed lockfile back. Then each package worktree that moved is built, in dependency order.
+The localize git hooks are written into the app's base clone, so every worktree of it runs them.
+
+**Re-runs.** A clean worktree behind origin is fast-forwarded (`updated`); one on its branch and
+equal to origin is `unchanged`; a fallback whose repo now has `<branch>` is `switched` to it; a
+fallback is moved to the new default tip (`updated`). Changes, unpushed or diverged commits, or
+another branch leave it as it is, `kept` with the `reason`. A package no list names any more is
+reported `unlisted: true` and never deleted. A new app branch a failed run left unpushed is
+pushed.
+
+**JSON.**
+
+```json
+{
+  "code": 0, "branch": "change-1", "root": "/srv/projects",
+  "app": {"name": "acme-app", "repo": "https://github.com/org/acme-app.git",
+          "dir": "/srv/projects/acme-app/change-1", "branch": "change-1", "created": true,
+          "head": "c51e…", "status": "created"},
+  "packages": [
+    {"name": "acme-ont", "repo": "https://github.com/org/acme-ont.git",
+     "dir": "/srv/projects/acme-app/change-1/packages-local/acme-ont", "branch": "main",
+     "detached": true, "fellBack": true, "head": "a91e…",
+     "requiredBy": ["acme-app", "acme-assets"], "status": "created"},
+    {"name": "acme-assets", "repo": "https://github.com/org/acme-assets.git",
+     "dir": "/srv/projects/acme-app/change-1/packages-local/acme-assets", "branch": "change-1",
+     "detached": false, "fellBack": false, "head": "0e82…", "requiredBy": ["acme-app"],
+     "status": "created"}
+  ],
+  "install": {"ran": true, "ok": true},
+  "builds": [{"name": "acme-ont", "result": "ok"}, {"name": "acme-assets", "result": "skipped"}],
+  "messages": ["…"]
+}
+```
+
+`status` is `created | updated | unchanged | switched | kept` (`kept` has a `reason`). Exit
+codes: 0; 2 usage (a bad branch name, a repo that is not `https:`/`file:`); 4 a remote could not
+be reached; 5 a build failed; 6 refused; 7 the install failed.
+
+**Credentials.** Only from the environment: put a short-lived token in `LINKED_GIT_TOKEN` (and,
+other than `x-access-token`, its user in `LINKED_GIT_USERNAME`). Remote git calls (clone, fetch,
+push, `remote set-head`) get `GIT_ASKPASS` set to the cli's `hooks/git-askpass.cjs`,
+`GIT_TERMINAL_PROMPT=0`, and through `GIT_CONFIG_COUNT` (never `-c`, which shows in `ps`) an empty
+`credential.helper` (so a keychain helper never stores the token) and `core.hooksPath` pointed at
+nothing, with `--no-verify` on pushes (so no hook runs with the token in its environment). Every
+other git call, the install and the builds run without the token. A URL with userinfo is used
+without it, with a warning; error text is scrubbed of the token. Nothing writes it to disk.
+Without `LINKED_GIT_TOKEN`, git's own credentials apply.
+
+**One run per base clone at a time.** Two concurrent runs for the same app can fail on git's ref
+locks in the shared base clone; a caller serialises them per app.
 
 ## `linked release plan [--json]`
 
@@ -279,5 +460,8 @@ Exits 1 when any row is `two-copies`, 0 otherwise. `--json` prints the rows
 - **Dependency changes** need a worktree with its own install (see Shared install).
 - **Data is shared.** Worktrees use the same data store unless started with a dataset of their
   own (`--dataset`).
+- **`linked checkout` does not lock.** Concurrent runs on one base clone are the caller's to
+  serialise.
+- **`linked worktree remove --branch` reads a squash merge as not landed**; use `--force`.
 - **Release PRs are matched by name.** Reusing an integration branch's name later counts the
   earlier release's PRs as well.

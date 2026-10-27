@@ -424,7 +424,18 @@ linked localize --list --check         # print only the drift; exit 1 when there
 linked delocalize @_linked/rdfs        # park it in .packages-local.parked/, back to the registry copy
 linked localize --parked               # take every parked checkout back
 linked delocalize @_linked/rdfs --purge  # delete it instead (exit 6 on unsaved work on any branch, a stash, or git failing)
+linked localize --listed               # clone what package.json lists in linked.unpublishedPackages (transitively)
 ```
+
+**Unpublished packages.** A package an app uses that is not on npm (a project's ontology or asset
+package in a private repo) is listed in the app's committed `package.json`:
+`"linked": {"unpublishedPackages": {"acme-ont": {"repo": "https://github.com/org/acme-ont.git"}}}`.
+A package lists its own the same way (an asset package lists its ontology package).
+`linked localize --listed` clones every listed package, transitively, that is not in
+`packages-local/` yet, on the app's branch where the package repo has it (else its default
+branch), then installs once. Once a package is published it moves into `dependencies` with a
+range. For private repos the token comes only from `LINKED_GIT_TOKEN` (see below); it is never
+put in a URL or written to disk.
 
 The first `linked localize` in an app sets it up — `"packages-local/*"` in `workspaces`, the
 lock-at-rest hook in `postinstall` and `dependencies`, `packages-local/` and
@@ -456,8 +467,26 @@ linked worktree add agent1 --with core --port 4041  # ../wt/agent1 with its own 
 linked worktree relink                            # in a worktree: rebuild its node_modules link farm (after npm install in the main checkout)
 linked worktree list                              # agent worktrees and whether each branch has landed
 linked worktree remove agent1                     # refuses while a branch has not landed (--force, --delete-unlanded)
+linked branch fork change-1 acme-ont              # in an app checkout: create and push change-1 in that package checkout
+linked branch merge change-1 --into main          # packages in dependency order, then the app: --no-ff merge, push main
+linked branch merge change-1 --into main --mode update  # protected main: merge main into change-1, push it, land by PRs
 linked release plan                               # per repo: commits, reports, changesets, release PRs, next action
 linked doctor resolve                             # where Vite and Node load each @_linked package; exit 1 on two copies
+```
+
+**Branch checkouts** (a server making one checkout per project branch, such as Create Now):
+`linked checkout <branch>` in a projects root makes one bare base clone per repo
+(`<root>/.repos/<owner>/<name>.git`), the app as a worktree on `<branch>` (created from `--from`
+and pushed when the remote lacks it) and each package of `linked.unpublishedPackages` as a
+worktree in its `packages-local/` (on `<branch>` where its repo has it, else detached at
+`origin/<default>`), then installs once in the app worktree. `--json` prints what it did.
+Credentials come only from `LINKED_GIT_TOKEN`: remote git calls get it through `GIT_ASKPASS`
+(`hooks/git-askpass.cjs`) with credential helpers and git hooks off; the install, the builds and
+every local git call run without it.
+
+```bash
+linked checkout change-1 --repo https://github.com/org/acme-app.git --root /srv/projects --json
+linked worktree remove --branch change-1 --dir /srv/projects/acme-app/change-1  # once every repo has landed
 ```
 
 ### Registry / dev utilities

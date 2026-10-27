@@ -35,18 +35,47 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
   uses that are not on npm in its committed `package.json`:
   `"linked": { "unpublishedPackages": { "<npm name>": { "repo": "<https git url>" } } }`.
   Localize follows these lists transitively (an asset package lists its ontology package). A
-  published package moves into `dependencies` with a range.
-- **K-checkout** (provider CO; consumers BC, PC, deploy): `linked checkout <branch>` in a projects
-  root: one base clone per repo, the app as a `git worktree` on `<branch>` (created from `--from`,
-  default the default branch, when the remote lacks it), the packages of
-  `linked.unpublishedPackages` (transitively) as worktrees in `packages-local/` on `<branch>` if
-  the package repo has it, else on its default branch; one install; `--json` result listing the
-  app dir and each package with its branch and whether it fell back. `linked branch fork <branch>
-  <package>`: create the branch in that package checkout from its current head and push it.
-  `linked branch merge <branch> --into <default>`: packages in dependency order, then the app;
-  fetch, merge, push; stop at the first conflict. Credentials only through the environment
-  (a short-lived token via `GIT_ASKPASS` / credential helper env); no token is ever written to
-  `.git/config`. CO fixes flag names and the JSON shape and records them here when it lands.
+  published package moves into `dependencies` with a range. One reader, `unpublishedPackages(json)`
+  → `[{name, repo}]` from `@_linked/cli/installed-packages`: `repo` is `https:` (or `file:` for
+  local repos), userinfo stripped with a warning; a malformed list or entry is an error, never
+  skipped. `linked localize --listed` clones the lists in a developer's app; `dependencyOrder`
+  reads them as edges.
+- **K-checkout** (provider CO, landed; consumers BC, PC, deploy): `linked checkout <branch>
+  [--repo <app https url>] [--root <dir>] [--dir <dir>] [--from <ref>] [--no-install]
+  [--build <cmd>] [--json]` in a projects root: one bare base clone per repo at
+  `<root>/.repos/<owner>/<name>.git`, the app as a `git worktree` on `<branch>` at `--dir`
+  (default `<root>/<name>/<branch with / as __>`; created from `--from`, default the remote's
+  default branch, and pushed `-u`, when the remote lacks it), the packages of
+  `linked.unpublishedPackages` (transitively) as worktrees in its `packages-local/<checkoutNameFor
+  name>` on `<branch>` if the package repo has it, else detached at `origin/<default>`
+  (`fellBack`); one `npm install` in the app worktree (its own install) when a worktree was created
+  or moved with a manifest change, then builds of the moved package worktrees in dependency order;
+  an app whose `workspaces` lacks `packages-local/*` is refused. `--json` (also on refusal):
+  `{code, branch, root, app: {name, repo, dir, branch, created, head, status, reason?},
+  packages: [{name, repo, dir, branch, detached, fellBack, head, requiredBy, status, reason?,
+  unlisted?}], install: {ran, ok}, builds: [{name, result: ok|failed|skipped}], messages}`;
+  `status` ∈ `created|updated|unchanged|switched|kept`; exit 0, 2 usage, 4 remote unreachable,
+  5 build failed, 6 refused, 7 install failed. Re-runs fast-forward clean worktrees, switch a
+  fallback whose branch appeared, push a new app branch a failed run left unpushed, and report the
+  rest `kept`; nothing is deleted. One run per base clone at a time (callers serialise per app).
+  `linked branch fork <branch> <package> [--dir <app>] [--json]`: create the branch in that
+  package checkout from its current head and push it; `{code, package, dir, branch, from,
+  pushed, messages}`. `linked branch merge <branch> --into <default> [--mode push|update]
+  [--dir <app>] [--json]`: the repos on `<branch>`, packages in dependency order (including
+  `linked.unpublishedPackages` edges), then the app; fetch; `push` (default) merges
+  `origin/<branch>` `--no-ff` into `origin/<default>` in a temporary worktree and pushes
+  `<default>`; `update` (protected default branches) merges `origin/<default>` into `<branch>` and
+  pushes the branch, and CN (step BC) then opens and merges one PR per repo whose `landed` is
+  false, in the order returned, with its GitHub App (0 approvals); stop at the first conflict or
+  refused push. `{code, branch, into, mode, repos: [{name, dir, repo, result:
+  merged|up-to-date|conflict|push-refused|skipped, sha?, files?, landed}], messages}`.
+  `linked worktree remove --branch <branch> [--dir <app>] [--force] [--json]`: remove the
+  checkout once every repo has landed in `origin/<default>` (an ancestor of it: a squash merge
+  reads as not landed, so CN lands with merge commits); `{code, removed, kept: [{dir,
+  reason}], branches: [{repo, branch, deleted, sha}], messages}`. Credentials only through the
+  environment: `LINKED_GIT_TOKEN` (and `LINKED_GIT_USERNAME`, default `x-access-token`), used by
+  remote git calls through `GIT_ASKPASS` with credential helpers and git hooks off; local git, the
+  install and builds run without it; no token is ever written to `.git/config` or any file.
 - **K-repos** (provider PC; consumers BC, CS): package repos `{ws}-ont-{slug}` and
   `{ws}-assets-{slug}` in `GITHUB_TARGET_ORG` (production `create-now-repos`, dev/test
   `linked-cm-testing`); npm names `{slug}-ont`, `{slug}-assets`; created with `linked.kind` and the
@@ -600,4 +629,4 @@ Large, 4 phases, one commit each:
 
 - [x] LK — cli report 032, server report 020
 - [x] RK — cli report 033
-- [ ] CO
+- [x] CO — cli report 034
