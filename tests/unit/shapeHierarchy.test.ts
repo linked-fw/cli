@@ -142,9 +142,11 @@ const fixture = ({
 
 /**
  * An installed `@_linked/fixture-dep` with the shape `Animal` (class dep:Animal) and, unless
- * `register` is false, ontology data stating `dep:Dog rdfs:subClassOf dep:Animal`.
+ * `register` is false, ontology data stating `dep:Dog rdfs:subClassOf dep:Animal`. With
+ * `sourceOnly`, the data and its register module are only in `src/` (TypeScript, not built yet),
+ * as in a workspace package whose `lib/` predates its ontology.
  */
-const dependency = ({register = true} = {}) => {
+const dependency = ({register = true, sourceOnly = false} = {}) => {
   const root = 'node_modules/@_linked/fixture-dep';
   write(
     `${root}/package.json`,
@@ -159,6 +161,16 @@ const dependency = ({register = true} = {}) => {
   );
   write(`${root}/lib/esm/package.js`, pkgModule('@_linked/fixture-dep'));
   write(`${root}/lib/esm/shapes/Animal.js`, shapeClass('Animal', {cls: `${DEP}Animal`}));
+  if (sourceOnly) {
+    write(`${root}/src/package.ts`, pkgModule('@_linked/fixture-dep'));
+    write(
+      `${root}/src/ontologies/dep.ts`,
+      ontologyModule(DEP, 'dep').replace('export var ns', 'export var ns: (term: string) => {id: string}'),
+    );
+    write(`${root}/src/ontologies/dep.register.ts`, registerModule('dep'));
+    write(`${root}/src/data/dep.ttl`, turtle(DEP, 'dep', 'dep:Dog rdfs:subClassOf dep:Animal .\n'));
+    return;
+  }
   write(`${root}/lib/esm/ontologies/dep.js`, ontologyModule(DEP, 'dep'));
   if (register) {
     write(`${root}/lib/esm/ontologies/dep.register.js`, registerModule('dep'));
@@ -343,6 +355,16 @@ describe("the dependencies' ontology data and scope", () => {
         '@test/fixture': ['@_linked/core', '@_linked/fixture-dep'],
         '@_linked/fixture-dep': ['@_linked/core'],
       },
+    });
+    expect(await findingsOf()).toEqual([]);
+  });
+
+  test("an unbuilt dependency's register module is loaded from src, so its data backs an extends", async () => {
+    dependency({sourceOnly: true});
+    hound();
+    expect(collectShapeCheckInputs(dir)).toMatchObject({
+      expectRegistered: expect.arrayContaining(['@test/fixture', '@_linked/fixture-dep']),
+      tsLoader: expect.stringMatching(/ts-loader\.mjs$/),
     });
     expect(await findingsOf()).toEqual([]);
   });

@@ -1,7 +1,7 @@
 import {execFile} from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import {pathToFileURL} from 'url';
+import {fileURLToPath, pathToFileURL} from 'url';
 import {ASSET_HOOK, findShapeModules} from './shapeReferences.js';
 import {isLinkedPackageJson} from '../installed-packages.js';
 
@@ -21,6 +21,10 @@ import {isLinkedPackageJson} from '../installed-packages.js';
  * `registerInstalledOntologies` registers the data of the package and of every linked dependency,
  * as an app's boot does. So, unlike the shape-reference check, this runs one child `node` for the
  * whole package.
+ *
+ * A linked dependency that is not built yet (or whose `lib/` predates its ontology) has its register
+ * modules only in `src/ontologies/*.register.ts`. Those are loaded through the cli's TypeScript
+ * loader, so the order in which packages are built does not decide what the check sees.
  */
 
 /** As `@_linked/core/shapes/checkShapeHierarchy` returns them. */
@@ -39,6 +43,11 @@ export interface ShapeCheckInputs {
   packageDirs: string[];
   /** The packages among them that have register modules, so must come back registered. */
   expectRegistered: string[];
+  /**
+   * File URL of the cli's TypeScript loader, when a package among them has register modules only
+   * in `src/` (not built yet); they are then imported from source.
+   */
+  tsLoader?: string;
   /** Package name → its `dependencies` and `peerDependencies`, for the check's direction-I scope. */
   dependencies: Record<string, string[]>;
   /** File URL of the `checkShapeHierarchy` module the package's core provides. */
@@ -88,6 +97,24 @@ export const resolvePackageDir = (name: string, fromDir: string): string | undef
 const hasRegisterModules = (packageDir: string): boolean => {
   const dir = path.join(packageDir, 'lib', 'esm', 'ontologies');
   return fs.existsSync(dir) && fs.readdirSync(dir).some((file) => /\.register\.js$/.test(file));
+};
+
+/** Whether an unbuilt package has register modules in source (`src/ontologies/*.register.ts`). */
+const hasSourceRegisterModules = (packageDir: string): boolean => {
+  const dir = path.join(packageDir, 'src', 'ontologies');
+  return fs.existsSync(dir) && fs.readdirSync(dir).some((file) => /\.register\.ts$/.test(file));
+};
+
+/**
+ * The cli's TypeScript loader (`loaders/ts-loader.mjs`): beside this module's folder in the build
+ * (`lib/esm/utils/`), in the package's `lib/` when this module runs from `src/utils/`.
+ */
+const tsLoaderPath = (): string | undefined => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return [
+    path.join(here, '..', 'loaders', 'ts-loader.mjs'),
+    path.join(here, '..', '..', 'lib', 'esm', 'loaders', 'ts-loader.mjs'),
+  ].find((file) => fs.existsSync(file));
 };
 
 /** The name the package registers its shapes under: `linkedPackage('<name>')` in `package.js`. */
@@ -163,12 +190,16 @@ export const collectShapeCheckInputs = (
     queue.push(...deps.map((dep) => ({name: dep, from: dir})));
   }
 
+  const dirs = [...new Set(packageDirs)];
+  const sourceOnly = dirs.filter((dir) => !hasRegisterModules(dir) && hasSourceRegisterModules(dir));
+  const tsLoader = sourceOnly.length > 0 ? tsLoaderPath() : undefined;
   return {
     modules: modules.map((file) => pathToFileURL(file).href),
-    packageDirs: [...new Set(packageDirs)],
-    expectRegistered: [...new Set(packageDirs)]
-      .filter(hasRegisterModules)
+    packageDirs: dirs,
+    expectRegistered: dirs
+      .filter((dir) => hasRegisterModules(dir) || (tsLoader && sourceOnly.includes(dir)))
       .map((dir) => readJson(path.join(dir, 'package.json')).name ?? path.basename(dir)),
+    ...(tsLoader ? {tsLoader: pathToFileURL(tsLoader).href} : {}),
     dependencies,
     core: pathToFileURL(core).href,
     registerInstalled: pathToFileURL(registerInstalled).href,
@@ -196,9 +227,16 @@ try {
   const warnings = [];
   const warn = console.warn;
   console.warn = (...args) => warnings.push(args.map(String).join(' '));
+  // Register modules only in src/ (a dependency not built yet) are imported through the TS loader.
+  const options = {};
+  if (process.env.LINKED_CHECK_TS_LOADER) {
+    register(process.env.LINKED_CHECK_TS_LOADER);
+    const {pathToFileURL} = await import('node:url');
+    options.importModule = (file) => import(pathToFileURL(file).href);
+  }
   let registered;
   try {
-    registered = await registerInstalledOntologies(JSON.parse(process.env.LINKED_CHECK_PACKAGE_DIRS));
+    registered = await registerInstalledOntologies(JSON.parse(process.env.LINKED_CHECK_PACKAGE_DIRS), options);
   } finally {
     console.warn = warn;
   }
@@ -241,6 +279,7 @@ export const runShapeHierarchyCheck = async (
           LINKED_CHECK_REGISTER: inputs.registerInstalled,
           LINKED_CHECK_PACKAGE_DIRS: JSON.stringify(inputs.packageDirs),
           LINKED_CHECK_EXPECT: JSON.stringify(inputs.expectRegistered),
+          LINKED_CHECK_TS_LOADER: inputs.tsLoader ?? '',
         },
         timeout: timeoutMs,
         maxBuffer: 64 * 1024 * 1024,
