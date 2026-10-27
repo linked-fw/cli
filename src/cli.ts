@@ -593,6 +593,10 @@ program
     'Take back every checkout `linked delocalize` parked, then npm install once.',
   )
   .option(
+    '--listed',
+    "Clone every package the app's committed package.json lists in linked.unpublishedPackages (and those their own lists name) that is not in packages-local/ yet, from the repo the list gives, on the app's current branch where that repo has it (else its default branch); then one npm install and the builds. A token for private repos comes only from LINKED_GIT_TOKEN.",
+  )
+  .option(
     '--repo <git-url>',
     'Clone this instead of the published repository.',
   )

@@ -38,6 +38,13 @@
  *
  * `adopt` (adopt.ts) replaces step 3 with "the checkout is already there", and
  * `--parked` with "every parked checkout". Steps 1, 2 and 4-6 are `runLocalize`.
+ * `--listed` (`localizeListed`) takes its names from the app's committed
+ * `linked.unpublishedPackages`, transitively, and clones each from the repo the
+ * list names, on the app's branch where the package repo has it.
+ *
+ * Every clone goes through the credentials seam (integration/credentials.ts):
+ * a token comes only from `LINKED_GIT_TOKEN`, never from the URL, and the
+ * install and builds run without it.
  *
  * A package inside a monorepo (`--subdir`, or a registry `repository.directory`)
  * is cloned whole into `packages-local/.repos/<checkout>` -- a dot directory,
@@ -66,6 +73,14 @@ import type {Member} from './members.js';
 import {checkoutNameFor, resolvePackage} from './resolve.js';
 import type {Deps, RunResult} from './run.js';
 import {linkDirectory} from '../utils/platform.js';
+import {
+  localEnv,
+  remoteEnv,
+  scrubSecret,
+  stripUserinfo,
+} from '../integration/credentials.js';
+import {packageBranch, walkUnpublished} from '../integration/unpublished.js';
+import {unpublishedPackages} from '../installed-packages.js';
 import {sharedInstall} from './shared-install.js';
 
 /** A checkout's own build, run when its package.json has a `build` script. */
@@ -93,6 +108,11 @@ export interface LocalizeOptions {
   subdir?: string;
   /** Run in each new checkout after the install. Absent: the default; empty: no build. */
   build?: string;
+  /**
+   * Check a new clone out on this branch when its repo has it, else leave it on its default
+   * branch (`packageBranch`). `--listed` passes the app's branch.
+   */
+  branch?: string | null;
 }
 
 /** A checkout ready for the install. */
@@ -134,6 +154,31 @@ export function runLocalize(
   deps: Deps,
   prepare: Prepare,
 ): number {
+  const pre = preflight(names, opts, deps);
+  if ('code' in pre) return pre.code;
+
+  let code = 0;
+  const prepared: Prepared[] = [];
+  for (const name of names) {
+    try {
+      const p = prepare(name, opts, deps);
+      if (p) prepared.push(p);
+    } catch (e) {
+      code = Math.max(code, reportError(e, deps));
+    }
+  }
+  return Math.max(code, finish(prepared, opts, deps, pre.setupLock));
+}
+
+/**
+ * Steps 1-2, before any checkout is made: the shared-install and `overrides` refusals and the
+ * one-time set-up (with its lockfile). `{code}` when a refusal stopped the run.
+ */
+function preflight(
+  names: string[],
+  opts: LocalizeOptions,
+  deps: Deps,
+): {code: number} | {setupLock?: string} {
   let setupLock: string | undefined;
   try {
     refuseSharedInstall(deps.appRoot);
@@ -165,25 +210,108 @@ export function runLocalize(
       setupLock =
         captureSetupLockfile(changes, workspacesBefore, deps) ?? undefined;
   } catch (e) {
-    return reportError(e, deps);
+    return {code: reportError(e, deps)};
   }
+  return {setupLock};
+}
 
-  let code = 0;
-  const prepared: Prepared[] = [];
-  for (const name of names) {
-    try {
-      const p = prepare(name, opts, deps);
-      if (p) prepared.push(p);
-    } catch (e) {
-      code = Math.max(code, reportError(e, deps));
-    }
-  }
+/** Steps 4-6 for what was prepared; with nothing prepared, only the set-up's commit hint. */
+function finish(
+  prepared: Prepared[],
+  opts: LocalizeOptions,
+  deps: Deps,
+  setupLock: string | undefined,
+): number {
   if (!prepared.length) {
     // Nothing was installed: the work tree holds the set-up's lockfile as captured.
     if (setupLock !== undefined) commitHint(deps);
+    return 0;
+  }
+  return installAndBuild(prepared, opts, deps, setupLock);
+}
+
+/**
+ * `linked localize --listed`: clone every package of the app's `linked.unpublishedPackages`,
+ * and of theirs (`walkUnpublished`), that is not in `packages-local/` yet, from the repo the
+ * list names, on the app's branch where the package repo has it (else its default branch:
+ * `packageBranch`); then the one install and the builds. A listed package already in
+ * `packages-local/` (or parked) is used as it is, and its own list followed. A refusal (two
+ * repos for one name, a clone that fails or is not the package) stops the walk before the
+ * install; the clones made so far stay.
+ */
+export function localizeListed(opts: LocalizeOptions, deps: Deps): number {
+  const appJson = readJson(path.join(deps.appRoot, 'package.json'));
+  let first: string[];
+  try {
+    first = unpublishedPackages(appJson, (m) => deps.warn(`[localize] ${m}`)).map(
+      (e) => e.name,
+    );
+  } catch (e) {
+    return reportError(e, deps);
+  }
+  if (!first.length) {
+    deps.log(
+      `[localize] package.json lists no linked.unpublishedPackages: nothing to clone.`,
+    );
+    return 0;
+  }
+  const published = {
+    ...(appJson?.dependencies ?? {}),
+    ...(appJson?.devDependencies ?? {}),
+  };
+  const pre = preflight(first, opts, deps);
+  if ('code' in pre) return pre.code;
+
+  const branch = currentBranch(deps.appRoot, deps);
+  const prepared: Prepared[] = [];
+  try {
+    walkUnpublished(
+      appJson,
+      (entry) => {
+        if (entry.name in published) {
+          deps.warn(
+            `[localize] ${entry.name} is in linked.unpublishedPackages and in dependencies. A ` +
+              `published package belongs in dependencies only: remove it from the list.`,
+          );
+        }
+        const member = localMembers(deps.appRoot).find(
+          (m) => m.name === entry.name,
+        );
+        if (member) {
+          deps.log(`[localize] ${entry.name}: in ${member.dir} already, used as it is`);
+          return readJson(path.join(deps.appRoot, member.dir, 'package.json'));
+        }
+        const p = prepareClone(
+          entry.name,
+          {
+            ...opts,
+            repo: entry.repo,
+            subdir: undefined,
+            branch: branch === 'HEAD' ? null : branch,
+          },
+          deps,
+        );
+        if (!p) return null;
+        prepared.push(p);
+        return readJson(path.join(deps.appRoot, p.dir, 'package.json'));
+      },
+      (m) => deps.warn(`[localize] ${m}`),
+    );
+  } catch (e) {
+    const code = reportError(e, deps);
+    if (prepared.length) {
+      deps.error(
+        `[localize] nothing was installed; ${prepared.map((p) => p.dir).join(', ')} ` +
+          `stay${prepared.length === 1 ? 's' : ''}. Fix the cause and run this again.`,
+      );
+    }
+    if (pre.setupLock !== undefined) commitHint(deps);
     return code;
   }
-  return Math.max(code, installAndBuild(prepared, opts, deps, setupLock));
+  if (!prepared.length) {
+    deps.log(`[localize] every listed package is in ${LOCAL_DIR}/ already.`);
+  }
+  return finish(prepared, opts, deps, pre.setupLock);
 }
 
 /**
@@ -200,7 +328,10 @@ export function installAndBuild(
   reportHooks(installGitHooks(deps.appRoot), deps);
 
   deps.log(`[localize] npm ${INSTALL_ARGS.join(' ')} (app root)`);
-  const install = deps.run('npm', INSTALL_ARGS, {cwd: deps.appRoot});
+  const install = deps.run('npm', INSTALL_ARGS, {
+    cwd: deps.appRoot,
+    env: localEnv(),
+  });
   if (setupLock !== undefined) restoreSetupLockfile(setupLock, deps);
   if (install.status !== 0) {
     deps.error(
@@ -295,15 +426,25 @@ function prepareClone(
       EXIT_REFUSED,
     );
   }
+  // A URL with credentials would land in the clone's .git/config: tokens come from the
+  // environment (integration/credentials.ts).
+  const {url: repo, stripped} = stripUserinfo(resolved.repo);
+  if (stripped) {
+    deps.warn(
+      `[localize] ${name}: the repository URL carries credentials; cloning without them (pass ` +
+        `a token in LINKED_GIT_TOKEN instead).`,
+    );
+  }
   fs.mkdirSync(path.dirname(clone), {recursive: true});
-  deps.log(`[localize] cloning ${resolved.repo} -> ${relClone}`);
-  const r = deps.run('git', ['clone', '--', resolved.repo, clone]);
+  deps.log(`[localize] cloning ${repo} -> ${relClone}`);
+  const r = deps.run('git', ['clone', '--', repo, clone], {env: remoteEnv()});
   if (r.status !== 0) {
     throw new LocalizeError(
-      `git clone ${resolved.repo} failed:\n${(r.stderr || r.stdout).trim()}`,
+      `git clone ${repo} failed:\n${scrubSecret((r.stderr || r.stdout).trim())}`,
       EXIT_REFUSED,
     );
   }
+  if (opts.branch) checkOutBranch(name, clone, opts.branch, deps);
 
   const pkgDir = resolved.subdir ? path.join(clone, resolved.subdir) : clone;
   const relPkg = resolved.subdir ? `${relClone}/${resolved.subdir}` : relClone;
@@ -330,6 +471,41 @@ function prepareClone(
     deps.log(`[localize] ${relDir} -> ${relPkg}`);
   }
   return {name, dir: relDir, build: true};
+}
+
+/**
+ * Put a fresh clone on `branch` when its repo has it (`packageBranch`); otherwise it stays on
+ * the default branch the clone checked out, and the log says so.
+ */
+function checkOutBranch(
+  name: string,
+  clone: string,
+  branch: string,
+  deps: Deps,
+): void {
+  const has =
+    deps.run(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`],
+      {cwd: clone, env: localEnv()},
+    ).status === 0;
+  const rule = packageBranch(branch, has, currentBranch(clone, deps));
+  if (rule.fellBack) {
+    deps.log(
+      `[localize] ${name}: its repo has no branch ${branch}, so it stays on ${rule.branch}`,
+    );
+    return;
+  }
+  const r = deps.run('git', ['switch', rule.branch], {
+    cwd: clone,
+    env: localEnv(),
+  });
+  if (r.status !== 0) {
+    throw new LocalizeError(
+      `git switch ${rule.branch} failed in ${clone}:\n${(r.stderr || r.stdout).trim()}`,
+      EXIT_REFUSED,
+    );
+  }
 }
 
 /** Move a parked checkout back into `packages-local/`. No clone, no build: it is as it was. */
@@ -605,7 +781,7 @@ function runBuild(
     return 'skipped';
   }
   deps.log(`[localize] ${p.dir}: ${cmd}`);
-  const r = deps.run(cmd, [], {cwd: pkgDir, shell: true});
+  const r = deps.run(cmd, [], {cwd: pkgDir, shell: true, env: localEnv()});
   if (r.status !== 0) {
     deps.warn(
       `[localize] ${p.dir}: \`${cmd}\` failed. It is installed and linked anyway -- a package ` +

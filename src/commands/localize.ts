@@ -29,6 +29,7 @@ import {
   delocalize,
   list,
   localize,
+  localizeListed,
   localizeParked,
 } from '../localize/index.js';
 
@@ -37,6 +38,8 @@ export {DEFAULT_BUILD_COMMAND} from '../localize/index.js';
 export interface LocalizeCommandOptions {
   adopt?: boolean;
   parked?: boolean;
+  /** Clone the packages of the app's `linked.unpublishedPackages`, transitively. */
+  listed?: boolean;
   list?: boolean;
   check?: boolean;
   /** Deprecated: npm links checkouts now. Exits 0 with no output. */
@@ -91,6 +94,24 @@ export async function runLocalize(
     );
   if (options.parked) {
     process.exitCode = localizeParked({dir: options.dir}, deps);
+    return;
+  }
+  if (options.listed) {
+    if (
+      packages.length ||
+      options.adopt ||
+      options.repo ||
+      options.subdir ||
+      options.list
+    )
+      return usage(
+        "--listed clones what the app's linked.unpublishedPackages names; it takes no package " +
+          'names, --adopt, --repo, --subdir or --list.',
+      );
+    process.exitCode = localizeListed(
+      {dir: options.dir, build: options.build},
+      deps,
+    );
     return;
   }
   if (options.list || packages.length === 0) {

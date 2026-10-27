@@ -4,6 +4,10 @@ import fsExtra from 'fs-extra';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {stripUserinfo} from './integration/credentials.js';
+import {EXIT_REFUSED, LocalizeError} from './localize/errors.js';
+import {normalizeGitUrl} from './localize/resolve.js';
+
 /**
  * Framework packages that MUST be single-instance per runtime — they hold
  * module-level state (`@_linked/core`'s shape registry, `LinkedStorage`, the query
@@ -95,6 +99,73 @@ export const isLinkedPackageJson = (json: unknown): boolean => {
   const kind = linkedKind(json);
   return kind !== undefined && kind !== 'app';
 };
+
+/** One entry of `linked.unpublishedPackages`: a package the app uses that is not on npm. */
+export interface UnpublishedPackage {
+  /** The npm name, as the package's own `package.json` declares it. */
+  name: string;
+  /** Its git repository: normalized (`normalizeGitUrl`), with no userinfo. */
+  repo: string;
+}
+
+/**
+ * THE reader of `"linked": {"unpublishedPackages": {"<npm name>": {"repo": "<url>"}}}`, the
+ * committed list of the packages an app (or a package) uses that are not published, so
+ * `linked localize --listed` and `linked checkout` clone them from their repos. A published
+ * package moves into `dependencies` with a range instead.
+ *
+ * Absent list: `[]`. Anything malformed -- a list that is not an object, an entry without a
+ * string `repo`, a URL that is neither `https:` nor `file:` -- throws a `LocalizeError` (code 6)
+ * naming the entry: a list the cli cannot read must not shrink silently. A URL with userinfo
+ * (`https://user:token@…`) is used without it, with a warning: tokens come from the environment.
+ */
+export function unpublishedPackages(
+  json: unknown,
+  warn: (message: string) => void = () => {},
+): UnpublishedPackage[] {
+  if (!json || typeof json !== 'object') return [];
+  const linked: unknown = (json as {linked?: unknown}).linked;
+  if (!linked || typeof linked !== 'object') return [];
+  const list: unknown = (linked as {unpublishedPackages?: unknown})
+    .unpublishedPackages;
+  if (list === undefined) return [];
+  const owner = (json as {name?: unknown}).name;
+  const where = `linked.unpublishedPackages${typeof owner === 'string' ? ` of ${owner}` : ''}`;
+  if (!list || typeof list !== 'object' || Array.isArray(list)) {
+    throw new LocalizeError(
+      `${where} is not an object of {"<npm name>": {"repo": "<https url>"}}.`,
+      EXIT_REFUSED,
+    );
+  }
+  const out: UnpublishedPackage[] = [];
+  for (const [name, entry] of Object.entries(list as Record<string, unknown>)) {
+    const raw: unknown =
+      entry && typeof entry === 'object'
+        ? (entry as {repo?: unknown}).repo
+        : undefined;
+    if (!name.trim() || typeof raw !== 'string' || !raw.trim()) {
+      throw new LocalizeError(
+        `${where}: "${name}" needs {"repo": "<https url>"}.`,
+        EXIT_REFUSED,
+      );
+    }
+    const {url, stripped} = stripUserinfo(normalizeGitUrl(raw));
+    if (!/^(https|file):\/\/[^/]*\/./i.test(url)) {
+      throw new LocalizeError(
+        `${where}: "${name}" has repo "${url}", which is not an https:// (or file://) URL.`,
+        EXIT_REFUSED,
+      );
+    }
+    if (stripped) {
+      warn(
+        `${where}: "${name}" has credentials in its repo URL; they are ignored (pass a token in ` +
+          `LINKED_GIT_TOKEN instead). Remove them from package.json.`,
+      );
+    }
+    out.push({name, repo: url});
+  }
+  return out;
+}
 
 /** An installed linked package, as {@link discoverInstalledLinkedPackages} finds it. */
 export interface InstalledLinkedPackage {

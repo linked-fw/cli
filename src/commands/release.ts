@@ -167,6 +167,12 @@ function readDeps(dir: string): string[] {
       const deps = pkg[field];
       if (deps && typeof deps === 'object') for (const n of Object.keys(deps)) names.add(n);
     }
+    // An unpublished package is listed here instead of in dependencies (an asset package lists
+    // its ontology package); read raw, since an order must not fail on a malformed entry.
+    const linked = pkg.linked;
+    const listed =
+      linked && typeof linked === 'object' ? (linked as {unpublishedPackages?: unknown}).unpublishedPackages : undefined;
+    if (listed && typeof listed === 'object') for (const n of Object.keys(listed)) names.add(n);
     return [...names];
   } catch {
     return [];
@@ -175,7 +181,8 @@ function readDeps(dir: string): string[] {
 
 /**
  * Repos in release order: each after the listed repos its `package.json`
- * depends on (dependencies, devDependencies, peerDependencies), ties broken
+ * depends on (dependencies, devDependencies, peerDependencies, and the names of
+ * `linked.unpublishedPackages`), ties broken
  * by `rel`, and the app root (`.`) last. Repos in a dependency cycle follow
  * in `rel` order.
  */
