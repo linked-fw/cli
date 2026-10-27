@@ -297,6 +297,6 @@ fallback reported), forks a package branch, merges both into the default branch;
 
 ## Progress
 
-- [ ] LK
-- [ ] RK
+- [x] LK — cli report 032, server report 020
+- [x] RK — cli report 033
 - [ ] CO

@@ -55,12 +55,12 @@ Run in worktree `/Users/rene/web/wt/lk` with RK applied, rebased on `dev`.
   cli `src defaults`, server `src` (outside tests) and CN `src` (outside tests): only comments
   that say the old field is not read, the two stampers' `delete pkg.linkedApp`, and CN's
   `appPackagesOf` fallback with its comment.
-- cli `npm run test:unit`: `Test Suites: 92 passed, 92 total` / `Tests: 1081 passed, 1081 total`,
-  44 s.
+- cli `npm run test:unit` (rebased on CK's core): `Test Suites: 92 passed, 92 total` /
+  `Tests: 1081 passed, 1081 total`, 56 s.
 - cli `npm run test:template`: `Test Suites: 2 passed, 2 total` / `Tests: 22 passed, 22 total`,
   1:22.
 - cli `npx linked build`: `✔ Build successful`, 8 s.
-- server: see report 020.
+- server: see report 020 (one test known to fail on `dev` since CK's core change).
 - CN: see report 033 (`typecheck:gate` and `CN_TEST_PORT=4342 npm run test:regular`).
 - `planBuildAll` / `getLincdPackages` / `discoverLinkedDependencies` over the worktree list the
   same 27 / 27 / 26 packages as the main checkout before landing (old flags, old CLI).

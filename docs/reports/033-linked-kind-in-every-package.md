@@ -49,12 +49,17 @@ that keeps key order: `linked` takes the old flag's place, or `kind` goes first 
   boot dependencies).
 - Worktree `npx linked build-all`: `Successfully built:` 27 packages, 55 s.
 - CN `npm run typecheck:gate`: `No new type errors. 0 pre-existing errors still in the baseline.`
-- CN `CN_TEST_PORT=4342 npm run test:regular`, before the rebase onto `dev` (CK's core):
-  `typecheck:gate PASS 17s`, `unit (vitest) PASS 51s` (`Tests 2968 passed | 5 skipped`),
-  `packages PASS 9s`, `playwright (integration + sign-in e2e) PASS 252s` (`336 passed`,
-  `14 skipped`), `total PASS 329s`. After the rebase: not yet green — Fuseki on :3030 ran out of
-  heap (`java.lang.OutOfMemoryError` in its log, 18:18) under the concurrent test runs and stays
-  unhealthy; to be re-run once it is restarted.
+- CN `CN_TEST_PORT=4342 npm run test:regular` on the landed tree (after Fuseki was restarted):
+  `typecheck:gate PASS 16s`, `unit (vitest) PASS 60s` (`Tests 2968 passed | 5 skipped (2973)`),
+  `packages PASS 6s`, `playwright (integration + sign-in e2e) FAIL 247s` — `1 failed`, `1 flaky`,
+  `14 skipped`, `331 passed (4.1m)`; total 5:28. The one failure,
+  `app-gateway-user-token.spec.ts:168` (`expect(lines).toHaveLength(5)` / `Received length: 1`), counts
+  gateway audit lines on CN's stdout: the other four were printed unprefixed in the same instant,
+  and its retry hit the first attempt's leftover dataset. Alone it passes:
+  `CN_TEST_PORT=4342 npx playwright test tests/integration/app-gateway-user-token.spec.ts` →
+  `7 passed (25.8s)`. Before the rebase onto CK's core the whole set passed (`336 passed`,
+  `total PASS 329s`); a run in between failed on Fuseki running out of heap
+  (`java.lang.OutOfMemoryError`) under concurrent test runs, not on this change.
 - CN quick gate (`vitest` appTemplateIdentity, appProjectPackages, graphAccess,
   ProjectCreationOrchestrator): `Test Files 4 passed (4)` / `Tests 123 passed | 2 skipped (125)`.
 
