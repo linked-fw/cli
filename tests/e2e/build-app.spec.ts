@@ -4,7 +4,7 @@
 // The build resolves the `appAssets` file store before Vite runs. It loads the
 // app's linked.backend.files.ts for that, not the storage file, which builds
 // every dataset store and awaits a RemoteDataset's init() (a ping of its data
-// server). The app's `appData` is a RemoteDataset at a dead url; the build must
+// server). The app's `main` is a RemoteDataset at a dead url; the build must
 // finish and write its release manifest. No Docker, no Fuseki, no browser, so
 // CI runs this spec (.github/workflows/dual-copy-e2e.yml).
 import {test, expect} from '@playwright/test';
@@ -35,7 +35,7 @@ test('a RemoteDataset app builds with nothing listening on its url', () => {
   ).toBe(true);
   const datasetsFile = join(dir, 'linked.backend.datasets.json');
   const config = JSON.parse(readFileSync(datasetsFile, 'utf8'));
-  config.datasets.appData = {
+  config.datasets.main = {
     store: '@_linked/server/shapes/quadstores/RemoteDataset',
     config: {url: DEAD_URL, token: 'e2e-token'},
   };
