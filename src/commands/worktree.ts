@@ -77,7 +77,7 @@ export function defaultWorktreeDir(appRoot: string, agent: string): string {
  * `p` with every existing ancestor resolved through symlinks, so paths
  * compare equal however they were spelled (`/tmp` vs `/private/tmp`).
  */
-function realish(p: string): string {
+export function realish(p: string): string {
   const abs = path.resolve(p);
   let head = abs;
   const tail: string[] = [];

@@ -755,6 +755,23 @@ worktree
     return runWorktreeRelink(agent, options);
   });
 
+program
+  .command('checkout <branch>')
+  .description(
+    "A branch checkout of an app and the packages its committed package.json lists in linked.unpublishedPackages (transitively), in a projects root: one bare base clone per repo in <root>/.repos/<owner>/<name>.git, the app as a git worktree on <branch> (created from --from and pushed when the remote lacks it) in <root>/<name>/<branch-dir>, each package as a worktree in its packages-local/ on <branch> when its repo has it, else detached at origin/<default branch>. Then one npm install in the app worktree and the builds of the package worktrees that moved. Re-running it fetches and fast-forwards clean worktrees; anything else is left as it is and reported. A token for private repos comes only from LINKED_GIT_TOKEN (never the URL): remote git calls use it through GIT_ASKPASS, the install and builds run without it, and it is never written to disk.",
+  )
+  .option('--repo <url>', "The app's https git URL. Default: the origin of the app checkout this runs in.")
+  .option('--root <dir>', 'The projects root. Default: the current directory.')
+  .option('--dir <dir>', "The app worktree's directory. Default: <root>/<name>/<branch with / as __>.")
+  .option('--from <ref>', "What a new app branch is created from (a branch of the remote, or a commit). Default: the remote's default branch.")
+  .option('--no-install', 'Make the worktrees only: no npm install, no builds.')
+  .option('--build <cmd>', "The build run in each package worktree that moved. Default: its own `npm run build` when it has a build script. '' builds nothing.")
+  .option('--json', 'Print the result as JSON (also on a refusal): code, branch, root, app, packages, install, builds, messages.')
+  .action(async (branch: string, options) => {
+    const {runCheckout} = await import('./commands/checkout.js');
+    return runCheckout(branch, options);
+  });
+
 const release = program
   .command('release')
   .description(
