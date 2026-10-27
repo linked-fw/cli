@@ -3,7 +3,7 @@
 //
 // Scaffolds an app from the template with the local build, installs this
 // build into it (helpers/app.ts, E2E_CLI to pick another) and boots it twice:
-// on its committed FusekiStore with nothing answering, and with `appData` a
+// on its committed FusekiStore with nothing answering, and with `main` a
 // RemoteDataset at a dead url. Each boot must print the guard's `on` line and
 // no `TWO COPIES` line. Then the browser side (report 021): with
 // `@_linked/shape-ui` installed (it ships `src/` with `.tsx` imported from `.ts`
@@ -84,7 +84,7 @@ test('the committed FusekiStore app boots and renders / with one copy of each pa
     // render still imports every module the page needs.
     const status = await waitForHttp(`${ORIGIN}/`, run, 150_000);
     expect(status, run.output()).not.toBe(0);
-    expect(run.output()).toContain('[storage] appData: FusekiStore');
+    expect(run.output()).toContain('[storage] main: FusekiStore');
     // `/src/index.tsx` is what the browser loads first; serving it transforms
     // the client entry as well.
     await waitForHttp(`${ORIGIN}/src/index.tsx`, run, 30_000);
@@ -94,26 +94,27 @@ test('the committed FusekiStore app boots and renders / with one copy of each pa
   }
 });
 
-test('a RemoteDataset appData is the class the app imports, and so is its error', async () => {
+test('a RemoteDataset main is the class the app imports, and so is its error', async () => {
   const dir = app!.dir;
   const datasetsFile = join(dir, 'linked.backend.datasets.json');
   const config = JSON.parse(readFileSync(datasetsFile, 'utf8'));
-  config.datasets.appData = {
+  config.datasets.main = {
     store: '@_linked/server/shapes/quadstores/RemoteDataset',
     config: {url: DEAD_URL, token: 'e2e-token'},
   };
   writeFileSync(datasetsFile, JSON.stringify(config, null, 2) + '\n');
 
-  // The probe runs before the template's own init(): that one exits the boot
-  // with its message. A failed init() is not memoized, so both ping.
+  // The probe runs before the template's own init() loop over every slot: that
+  // one exits the boot with its message. A failed init() is not memoized, so
+  // both ping.
   const storageFile = join(dir, 'linked.backend.storage.ts');
   const storage = readFileSync(storageFile, 'utf8');
-  const marker = 'if (appData.init) {';
+  const marker = 'for (const [slot, store] of Object.entries(stores)';
   expect(storage, 'the template storage file changed shape').toContain(marker);
   const probe = [
-    "console.log('[probe] appData instanceof RemoteDataset:', appData instanceof RemoteDataset);",
+    "console.log('[probe] main instanceof RemoteDataset:', main instanceof RemoteDataset);",
     'try {',
-    '  await appData.init?.();',
+    '  await main.init?.();',
     "  console.log('[probe] init() did not throw');",
     '} catch (err) {',
     '  console.log(',
@@ -138,7 +139,7 @@ test('a RemoteDataset appData is the class the app imports, and so is its error'
     const output = run.output();
     expect(code, output).not.toBe('timeout');
     expect(code, output).not.toBe(0);
-    expect(output).toContain('[probe] appData instanceof RemoteDataset: true');
+    expect(output).toContain('[probe] main instanceof RemoteDataset: true');
     expect(output).toContain(
       '[probe] init() error instanceof RemoteDatasetUnreachableError: true',
     );
