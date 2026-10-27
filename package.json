@@ -55,7 +55,9 @@
     "email": "rpwverheij@gmail.com"
   },
   "license": "MIT",
-  "linkedPackage": true,
+  "linked": {
+    "kind": "library"
+  },
   "publishConfig": {
     "access": "public"
   },
