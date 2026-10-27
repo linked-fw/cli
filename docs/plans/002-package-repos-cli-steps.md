@@ -259,41 +259,342 @@ build-all and the boot log list the same packages as before LK; the pg-cn backlo
 
 ## CO — `linked checkout`, `branch fork`, `branch merge`
 
-**Depends on:** LK (RK landed first: CO rebases on it, both touch the CLI). **Repo:** cli (+ CN
+**Depends on:** LK and RK (landed; CO rebases on them, all touch the CLI). **Repo:** cli (+ CN
 docs, semantu-agents skills PR). **Plan doc:** cli `docs/plans/005-…`. **Report:** cli
-`docs/reports/034-…`. **Test port:** 4345. **Size:** large. Sensitive (credentials): independent
-review. *Plan-mode detail is added when its wave starts.*
+`docs/reports/034-…`. **Test port:** 4345 (only if a CN run is needed; the CLI gates need none).
+**Size:** large, 4 phases (below). **Sensitive** (credentials): independent review before landing.
 
 **Goal.** K-unpublished and K-checkout: one command makes a branch checkout of an app and its
-unpublished packages as git worktrees of base clones, with credentials only in the environment.
+unpublished packages as git worktrees of base clones, with credentials only in the environment;
+two commands mirror a project branch into a package repo and merge it back; `worktree remove`
+cleans such a checkout up once it has landed.
 
-**Scope.** `linked.unpublishedPackages` read by `localize` (transitively, one install);
-`linked checkout <branch>` (base clone per repo, app and package worktrees, fallback to the default
-branch, `--from`, `--json`); `linked branch fork <branch> <package>`; `linked branch merge <branch>
---into <default>` (dependency order, then the app; stop at the first conflict); `worktree remove`
-checks landed against the default branch; credentials via `GIT_ASKPASS` / credential-helper env,
-never a token in `.git/config`; `--json` on the new commands. Docs: README,
-`docs/integration-branches-and-worktrees.md`, `docs/localize.md`, CN docs (arch-03 §Local
-development), the semantu-agents skills (`/Users/rene/packages/semantu-agents`, branch + PR).
-CO fixes the flag names and JSON shape and records them in K-checkout here and in 057.
+### Scope
 
-**Done when.** K-unpublished and K-checkout hold, with the flag names and JSON shape recorded; a
-test makes a checkout of an app with two unpublished packages (one only on the default branch:
-fallback reported), forks a package branch, merges both into the default branch; no
-`.git/config` under the checkout contains a token; docs and skills PR done.
+- **The list reader** (K-unpublished): `unpublishedPackages(json)` next to `linkedKind` in
+  `src/installed-packages.ts` (same module, exported from `@_linked/cli/installed-packages`):
+  validates `linked.unpublishedPackages` (`{ "<npm name>": { "repo": "<https url>" } }`), returns
+  `[{name, repo}]` with the repo normalized (`normalizeGitUrl`, userinfo stripped); invalid entries
+  are errors, not skipped. A transitive resolver over it (Design §Transitive list).
+- **`linked localize --listed`**: in a developer's app, clone every package of the app's list
+  (transitively) that is not in `packages-local/` yet, on the app's branch with fallback (Design
+  §Branch rule), then the usual one install and builds (`installAndBuild`). Full clones as today
+  (a developer's app is one checkout); `prepareClone` takes a `branch` and runs the clone through
+  the credentials seam. Bare `linked localize` keeps reporting.
+- **`linked checkout <branch>`** (K-checkout), new top-level command next to `worktree add`, not
+  instead of it.
+- **`linked branch fork <branch> <package>`** and **`linked branch merge <branch> --into
+  <default>`** under the existing `branch` command.
+- **`linked worktree remove --branch <branch>`**: removes a `linked checkout` checkout (the app
+  worktree and its package worktrees) after checking each repo's branch landed in that repo's
+  default branch (`origin/<default>` after a fetch); `<agent>` becomes optional when `--branch`
+  is given.
+- **Credentials seam**: every `git` that talks to a remote (clone, fetch, push, ls-remote) in the
+  new code and in `localize`'s clone goes through one helper that adds the askpass environment;
+  no URL with userinfo ever reaches `git clone`, `git remote` or a config file (Design
+  §Credentials).
+- `--json` on `checkout`, `branch fork`, `branch merge` and `worktree remove`.
+- `dependencyOrder` (`src/commands/release.ts:182`) also follows `linked.unpublishedPackages`
+  edges (an asset package lists its ontology package there, not in `dependencies`); `release
+  plan`'s order gains the same edges.
+- Docs and skills (Architecture). K-checkout here and in CN 057/180 gets the final flag names and
+  JSON shape in the same landing.
+- Not here: creating repos (PC), CN's `CheckoutProvisioner` switch (BC), opening PRs on GitHub.
 
-**Known files and pitfalls.**
-- `worktree add` (`src/cli.ts:704-717`, `src/commands/worktree.ts:125-363`) always makes
-  `<base>--<agent>`, refuses existing branches, no fetch/push, needs an integration branch: add
-  `checkout` next to it, not instead of it. `worktree list --json` exists (`cli.ts:719-724`);
-  `landed()` (`commands/worktree.ts:395-398`) checks against the base; `remove` `:575`.
-- `localize` (`src/localize/localize.ts:119-333`, `src/localize/resolve.ts:55-104`): full clone,
-  repo from `npm view` or one `--repo`, no branch, one install per run, may leave a token in
-  `.git/config` — CN strips it today (`src/backend/provisioners/CheckoutProvisioner.ts:123-131`).
-- Credentials can pass through the env: `src/localize/run.ts:47` (`env: opts.env ?? process.env`).
-- Ordering: `dependencyOrder` (`src/commands/release.ts:182`).
-- The localize postinstall restores the committed lockfile; a checkout made by `linked checkout`
-  is an app's own install, not CN's workspace (different rule: say which in the docs).
+### Design (proposal; the step agent may refine it inside K-checkout, K-unpublished, K-kind)
+
+**Command line.**
+```
+linked checkout <branch> --repo <app https url> [--root <dir>] [--dir <dir>] [--from <ref>]
+                [--no-install] [--build <cmd>] [--json]
+linked branch fork <branch> <package> [--dir <app checkout>] [--json]
+linked branch merge <branch> --into <default> [--dir <app checkout>] [--mode push|update] [--json]
+linked worktree remove --branch <branch> [--dir <app checkout>] [--force] [--json]
+```
+`--root` defaults to the current directory; `--repo` may be left out when run inside an existing
+app checkout (it is that checkout's `origin`). `<package>` is matched like `branch start` does
+(`@_linked/core`, `core`, `_linked-core`, or the plain npm name `acme-ont`).
+
+**Projects-root layout.**
+```
+<root>/.repos/<owner>/<name>.git                  bare base clone, one per repo (app and packages)
+<root>/<name>/<branch-dir>/                       app worktree (default --dir)
+<root>/<name>/<branch-dir>/packages-local/<dir>/  package worktree, <dir> = checkoutNameFor(npm name)
+```
+`<owner>/<name>` from the normalized URL path (two orgs never collide); `<branch-dir>` is the
+branch with `/` → `__` (the CN caller passes `--dir` with its own `branchClonePath`, so CN's
+layout stays CN's). A base clone is a plain `git clone --bare` (not a partial clone: that needs
+the remote at every later checkout); then
+`git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'`, delete the copied local
+heads, `git fetch --prune origin`, `git remote set-head origin --auto`. Every worktree's branch is
+then a local branch tracking `origin/<branch>`, and the default branch is `origin/HEAD`.
+
+**Branch rule** (one function, used by `checkout` and `localize --listed`):
+- The app: `<branch>` if `origin/<branch>` exists; else create it from `--from` (default
+  `origin/HEAD`), push it `-u`, report `created: true`. A local branch of that name already in
+  another worktree → refuse that repo (git allows a branch in one worktree only).
+- A package: `<branch>` if the package repo has `origin/<branch>`; else **detached at
+  `origin/<default>`**, `fellBack: true`. Detached, not on `main`: two branch checkouts that both
+  fall back would otherwise both need `main` checked out, which git refuses. `branch fork` turns a
+  detached fallback into the branch.
+
+**Transitive list.** Breadth first from the app worktree's committed `package.json` (the branch
+actually checked out): for each `{name, repo}` not yet seen, make its base clone and worktree, then
+read *that worktree's* `package.json` (the package's branch, or its default when it fell back) and
+queue its list. Keyed by npm name: the same name with the same normalized repo is checked out once
+and records every `requiredBy`; the same name with two different repos refuses (exit 6) before
+anything is installed, naming both requirers. Cycles end through the seen set. A listed name the
+worktree's `package.json` declares with another `name` refuses (the repo is not that package). A
+name also in the app's `dependencies` is a warning (it is published: K-unpublished says it moves
+out of the list).
+
+**Install.** One `npm install --no-audit --no-fund` in the app worktree after every package
+worktree exists (the `INSTALL_ARGS` of `localize.ts:76`), then builds of the package worktrees
+that have a build script (cli first, as `installAndBuild` does; `--build ''` builds nothing). The
+app worktree has its own `node_modules` (never the link farm: `refuseSharedInstall`,
+`localize.ts:641`, keeps applying). The app's `postinstall` runs `hooks/lock-at-rest.cjs`, which
+restores the committed `package-lock.json`, so `git status` in the app worktree stays clean while
+`packages-local/*` members exist; `checkout` installs the localize git hooks
+(`installGitHooks`) in the app's base clone so they cover its worktrees (check `core.hooksPath`
+and worktree-shared hooks in a test). The docs say plainly: this is an app's own install, not CN's
+workspace and not an agent worktree's link farm. `--no-install` skips both install and builds.
+`LINKED_GIT_TOKEN` is removed from the environment of `npm install` and every build (lifecycle
+scripts must not see it).
+
+**Idempotency.** Re-running `checkout` with the same branch: fetch every base clone (`--prune`);
+the app worktree exists → clean and behind → `merge --ff-only origin/<branch>`; dirty or diverged
+→ left alone, `status: "kept"` with the reason. A fallen-back package whose repo now has the
+branch and is clean → switched to it (`switched: true`); a package on its branch → ff as the app;
+a newly listed package → added; a package no longer listed → left, reported `unlisted: true`
+(never deleted). The install runs only when a worktree was created, moved or a `package.json` /
+lockfile changed (or always with `--install`, if the agent finds `auto` unreliable — say which).
+
+**JSON** (`checkout --json`, printed on success and on refusal; exit code also in `code`):
+```json
+{
+  "code": 0,
+  "branch": "change-1",
+  "root": "/srv/projects",
+  "app": {"name": "acme-peacegame-app", "repo": "https://github.com/create-now-repos/acme-peacegame.git",
+          "dir": "/srv/projects/acme-peacegame/change-1", "branch": "change-1", "created": true,
+          "head": "3f2c…", "status": "created"},
+  "packages": [
+    {"name": "peacegame-ont", "repo": "https://github.com/create-now-repos/acme-ont-peacegame.git",
+     "dir": "/srv/projects/acme-peacegame/change-1/packages-local/peacegame-ont",
+     "branch": "main", "detached": true, "fellBack": true, "head": "a91e…",
+     "requiredBy": ["acme-peacegame-app", "peacegame-assets"], "status": "created"},
+    {"name": "peacegame-assets", "repo": "https://github.com/create-now-repos/acme-assets-peacegame.git",
+     "dir": "…/packages-local/peacegame-assets", "branch": "change-1", "detached": false,
+     "fellBack": false, "head": "77b0…", "requiredBy": ["acme-peacegame-app"], "status": "updated"}
+  ],
+  "install": {"ran": true, "ok": true},
+  "builds": [{"name": "peacegame-ont", "result": "ok"}],
+  "messages": []
+}
+```
+`status` ∈ `created | updated | unchanged | switched | kept`. `branch fork --json`:
+`{code, package, dir, branch, from: <sha>, pushed: true}`. `branch merge --json`:
+`{code, branch, into, mode, repos: [{name, dir, result: "merged"|"up-to-date"|"conflict"|"push-refused"|"skipped", sha?, files?}]}`
+in merge order. `worktree remove --json`: `{code, removed: [dir…], kept: [{dir, reason}], branches: [{repo, branch, deleted, sha}]}`.
+
+**Credentials.** The CLI ships `hooks/git-askpass.cjs` (plain CommonJS like the other hooks,
+executable, a `#!/usr/bin/env node` line; a `.cmd` twin on Windows, `src/localize/run.ts` already
+knows the platform rules): it answers a `Username` prompt with `x-access-token` (or
+`LINKED_GIT_USERNAME`) and a `Password` prompt with `LINKED_GIT_TOKEN`, and exits 1 when the
+variable is unset. One helper `gitRemoteEnv(env)` returns, only when `LINKED_GIT_TOKEN` is set,
+`GIT_ASKPASS=<that file>`, `GIT_TERMINAL_PROMPT=0` and, through `GIT_CONFIG_COUNT`/
+`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`, an empty `credential.helper` (so a keychain helper never
+*stores* the token git just used) — no `-c` on argv, so no token or helper in `ps`. Every URL the
+CLI receives is stripped of userinfo before use; one with userinfo is accepted only to strip it,
+with a warning (CN passes a clean URL plus the env). Error text from git is scrubbed of the token
+value before it is printed. A test greps every `config` and `worktrees/*/config*` under the root
+for the token and for `@github.com`.
+
+**`branch fork <branch> <package>`.** In the app checkout's `packages-local/<dir>`: refuse when
+dirty or the branch already exists on `origin`; `git switch -c <branch>` from the current head
+(the detached fallback), `git push -u origin <branch>`. A local branch that exists unpushed → push
+it. Idempotent: on `<branch>` already and pushed → `pushed: false`, code 0.
+
+**`branch merge <branch> --into <default>`.** In the app checkout: the repos on `<branch>` (the
+app and each package worktree whose branch is `<branch>`; fallen-back packages are skipped), in
+`dependencyOrder` (packages first, the app last, with the `unpublishedPackages` edges). Per repo:
+`git fetch origin`; refuse up front, for all repos, when any is dirty. Then per repo in order:
+`git merge --no-ff origin/<branch>` in a temporary detached worktree of the base clone at
+`origin/<default>` (`git worktree add --detach`, removed after; the checkout itself stays on
+`<branch>`), commit message
+`Merge branch '<branch>' into <default>`, then `git push origin HEAD:<default>`. **`--no-ff`**:
+one merge commit per repo is the record of "project branch X was merged", reverts as one commit,
+and works when `<default>` moved on (ff-only would refuse). Stop at the first conflict (`git merge
+--abort`, `result: "conflict"` with the files, later repos `skipped`, exit 6); repos already
+pushed stay merged (a package merged before the app is harmless: the app's `<default>` still reads
+the package's `<default>`, now with the change). `--mode update` instead merges `origin/<default>`
+into `<branch>` in each repo and pushes `<branch>`, so a caller that may not push to `<default>`
+(protected: see Pitfalls) can land by PR; the step agent picks the default mode with the master.
+
+**`worktree remove --branch <branch>`.** Finds the app worktree by `--dir` or by `<branch>` among
+the base clone's worktrees; fetches; per repo, landed = `git merge-base --is-ancestor <branch>
+origin/<default>` (a fallen-back detached package counts as landed; its HEAD is on `<default>`'s
+history); refuses, removing nothing, while one has not landed or has changes (`--force` as today);
+removes package worktrees, then the app worktree (`git worktree remove`, then `git worktree prune`
+in each base clone), then deletes the landed local branches. Base clones stay. The `landed()` of
+agent worktrees (`commands/worktree.ts:395-399`, against the local base) is unchanged.
+
+### Verify
+
+- `cd packages-local/_linked-cli && npx jest --config jest.config.cjs tests/unit/checkout tests/unit/integration tests/unit/localize`
+  green; `npm run test:unit` green (count before/after quoted).
+- The e2e test (Tests) prints the checkout JSON; quote it in the report.
+- No token on disk after the e2e test:
+  `grep -rl "$LINKED_GIT_TOKEN" <tmp root> --include=config --include='config.worktree'` and
+  `git -C <base clone> config --get-regexp 'remote\..*\.url'` show no token or userinfo (the test
+  asserts both).
+- `npx linked build` in the cli; `node lib/esm/launch.js checkout --help`, `branch fork --help`,
+  `branch merge --help`, `worktree remove --help` show the flags recorded in K-checkout.
+- By hand, once, against a private repo of `linked-cm-testing` with an installation token in
+  `LINKED_GIT_TOKEN` (the master gets the token from CN's testing App key; skip and say so if not
+  available): `linked checkout test-co --repo <url> --root $(mktemp -d) --json`, then
+  `grep -r x-access-token <root>` finds nothing.
+- CN main checkout after landing and `npm run build` in the cli: `npx linked branch status` and
+  `npx linked worktree list` unchanged; the owner's path works.
+
+### Done when
+
+K-unpublished and K-checkout hold, with the flag names and JSON shape recorded here and in CN
+057/180; the e2e test makes a checkout of an app with two unpublished packages (the asset package
+listing the ontology package; one package only on the default branch: fallback reported), re-runs
+it idempotently, forks the fallen-back package's branch, merges package then app into the default
+branch, removes the checkout with the landed check; no `config` under the root holds a token;
+`localize --listed` clones from the list in one install; cli gates green; changeset (minor);
+docs updated; semantu-agents PR open; independent review findings fixed.
+
+### Files (found in the code)
+
+CLI (`packages-local/_linked-cli`):
+- Commands: `src/cli.ts:574-622` (`localize`, `--repo` `:597`), `:669-696` (`branch status`,
+  `branch start`; `fork`/`merge` go here), `:697-753` (`worktree add` `:703-717`, `list --json`
+  `:718-729`, `remove <agent>` `:730-742`, `relink` `:743-753`), `:754-770` (`release plan`).
+  `checkout` is added next to the `worktree` block.
+- `src/commands/worktree.ts` (841 lines): `worktreeAdd` `:125` (refuses an existing dir `:135`,
+  `baseOf` `:102-107` needs a branch, `agentBranch` from `src/integration/repos.ts:178-185`
+  always `<base>--<agent>`), `landed()` `:395-399` (against the local base, no fetch),
+  `worktreeList` `:443`, `findAppWorktree` `:530`, `worktreeRemove` `:575` (refusal `:613-628`,
+  branch deletion `:694-704`), `runWorktreeRemove` `:829-841`.
+- `src/commands/branch.ts` (439 lines): `refExists` `:50`, `localBranchExists` `:57`,
+  `safeToDeleteCreatedBranch` `:77`, `parseWorktreeList`/`worktreesOf` `:111,128`,
+  `selectCheckouts` `:245` (package matching for `fork`), `branchStart` `:291`, `runBranchStatus`
+  `:422` (the `--json` convention: `JSON.stringify(x, null, 2)`).
+- `src/integration/repos.ts`: `git` `:39`, `currentBranch` `:50`, `listRepos` `:89` (finds
+  `packages-local/*` with a `.git` file too: worktrees count), `integrationOf` `:163`.
+- `src/commands/release.ts`: `readDeps` `:159-174` (only `dependencies`, `devDependencies`,
+  `peerDependencies`), `dependencyOrder` `:182-205`, used `:330`.
+- `src/commands/worktree-node-modules.ts` (link farm, `linkNodeModules` `:242`) — not used by
+  `checkout`; `src/localize/shared-install.ts:32` `sharedInstall`, `localize.ts:641-652`
+  `refuseSharedInstall`.
+- Localize: `src/localize/localize.ts` `localize` `:119`, `runLocalize` `:131-188`,
+  `installAndBuild` `:194-238`, `prepareClone` `:254-333` (`git clone -- <repo> <dir>` `:300`, no
+  branch, the URL as given lands in `.git/config`), `currentBranch` `:668`, `INSTALL_ARGS` `:76`;
+  `src/localize/resolve.ts` `resolvePackage` `:55` (`npm view … repository` `:82`),
+  `normalizeGitUrl` `:157`, `checkoutNameFor` `:191`; `src/localize/run.ts:47`
+  (`env: opts.env ?? process.env`: env passes through, and `RunOptions.env` `:21` is the seam);
+  `src/localize/app-root.ts` (`findWorkspaceRoot` `:60`); `src/localize/app-setup.ts:32-47`
+  (the `postinstall`/`dependencies` lock-at-rest scripts), `hooks/lock-at-rest.cjs`;
+  `src/localize/git-hooks.ts:125` (`installGitHooks`); `src/localize/errors.ts` (exit codes
+  1/2/4/5/6/7).
+- `src/installed-packages.ts:62-84` (`LinkedKind`, `LINKED_KINDS`, `linkedKind`): the list reader
+  goes next to it.
+- No CLI code fetches or pushes today except `create-app`'s first push (`src/cli-methods.ts:2860`).
+
+CN (`/Users/rene/web/create_now`), read-only for CO:
+- `src/backend/provisioners/CheckoutProvisioner.ts:98-139` (`cloneBranch`: `git clone --branch
+  --single-branch`, token strip `:123-131`, `npm install` `:135-137`), `src/utils/projectsRoot.ts:19`
+  (`CN_PROJECTS_ROOT`), `:53` (`branchClonePath`: CN passes it as `--dir` in BC).
+- `src/backend/provisioners/GitHubProvisioner.ts:128-149` (`buildRepoProtectionPayload`:
+  `enforce_admins: true`, pull-request reviews required — Pitfalls).
+
+Tests: `tests/unit/integration/{branch,worktree,repos,releasePlan}.test.ts` (real throwaway repos
+under `os.tmpdir()`: `initRepo`/`makeApp` in `worktree.test.ts:33,56`),
+`tests/unit/localize/{real-localize,commands,resolve,git-hooks}.test.ts`, `helpers.ts`;
+`jest.config.cjs` roots `tests/unit`.
+
+### Pitfalls
+
+- **Protected default branches refuse the push.** CN's app repos are protected with
+  `enforce_admins: true` and required pull-request reviews (`GitHubProvisioner.ts:128-149`), so
+  `git push origin HEAD:main` from `branch merge` is refused (GH006) even for the App. K-checkout's
+  "fetch, merge, push" into the default branch cannot work on them as written; `--mode update`
+  (push the branch, land by PR) is the proposal. Stop and report to the master before choosing.
+- **One branch, one worktree.** A fallen-back package must be detached; two app checkouts on the
+  same branch are refused (`git worktree add` would fail late otherwise).
+- **Bare clones have no remote-tracking refs** until the fetch refspec is set; without it fetch
+  updates nothing and every "exists on origin" check lies.
+- **The token leaks four ways**: a URL in `.git/config` (`localize` today: `localize.ts:300`), a
+  keychain credential helper storing what askpass supplied, argv (`-c http.extraHeader=…` shows in
+  `ps`), and error text; and npm lifecycle scripts reading the env. Each has a test.
+- `dependencyOrder` ignores `linked.unpublishedPackages`; without the new edges the asset package
+  may merge before the ontology package.
+- `listRepos` names repos by directory; `checkoutNameFor` (`resolve.ts:191`) decides the
+  directory, so `fork`'s package matching must accept the plain npm name (`acme-ont`) too.
+- Hooks: git runs hooks from the base clone's `hooks/` (or `core.hooksPath`) for all its
+  worktrees; the localize hooks expect an app root — test them in an app worktree.
+- `npm install` in an app worktree with no committed lockfile entry for the packages is expected
+  (K-unpublished: `npm install`, never `npm ci`, while the list is non-empty).
+- Do not reuse `worktree add`'s agent naming or integration-branch requirement; `checkout` needs
+  neither.
+- Build with `npx linked build`; after landing, the main checkout runs `npm run build` in the cli
+  before anything else (057 Rules).
+
+### Architecture and docs
+
+- CLI `README.md` §Integration branches and worktrees (`:444`) and the localize paragraph
+  (`:409-417`): `checkout`, `branch fork`/`merge`, `worktree remove --branch`, `localize --listed`.
+- `docs/integration-branches-and-worktrees.md`: §`linked branch` (`:99`) gains fork and merge,
+  §`linked worktree remove` (`:194`) the `--branch` form, a new §`linked checkout` (projects root,
+  layout, branch rule, JSON, credentials) and §Limitations (`:272`).
+- `docs/localize.md`: §Commands (`:189`) `--listed`, §Docker and CI (`:439`) the env token,
+  §What it never does (`:500`) "never writes a token", §Exit codes (`:511`).
+- CN `docs/architecture/03-packages-and-governance.md` §Local development (`:727`, the
+  `unpublishedPackages` paragraph `:780-797`, "*Not built yet (plan 057)*" goes) and
+  `docs/how-to/develop-a-linked-package-locally.md`.
+- semantu-agents (`/Users/rene/packages/semantu-agents`, currently on branch
+  `master-agent-skill`: branch from its default branch, not from that one):
+  `skills/public/workflow/SKILL.md`, `implementation/SKILL.md`, `wrapup/SKILL.md`,
+  `release/SKILL.md`, `master/SKILL.md` (all name `worktree add/remove`, `localize` or `branch
+  start`); changeset; PR.
+
+### Tests
+
+- **Unit (pure):** `unpublishedPackages(json)` (valid, absent, non-object, bad URL, userinfo
+  stripped); the transitive resolver over an in-memory map (duplicate same repo, same name two
+  repos → refusal, cycle, rename mismatch); the branch rule (exists, fallback, created from
+  `--from`); `branchDir('feat/x')`; `dependencyOrder` with `unpublishedPackages` edges;
+  `gitRemoteEnv` (no token → empty; token → askpass, prompt off, helper reset; nothing on argv);
+  the askpass hook answering both prompts; error-text scrubbing; JSON shapes.
+- **E2E (no network):** `tests/unit/checkout/checkout.e2e.test.ts` — under `os.tmpdir()`, bare
+  "remote" repos for an app and two packages (`file://` URLs; the asset package lists the ontology
+  package, the app lists both; only the asset repo has `change-1`), a fake token in
+  `LINKED_GIT_TOKEN`, `--no-install` (one case runs a real `npm install` with a dependency-free
+  app, like `real-localize.test.ts`): checkout → JSON with the fallback; re-run → `unchanged`;
+  commit on a package remote → `updated`; `branch fork change-1 <ont>` → pushed; commits on both
+  branches; `branch merge change-1 --into main` → ontology, assets, app in order, merge commits on
+  the remotes; a conflicting case stops at the first repo; `worktree remove --branch change-1` →
+  refused before the merge, removes after; no config holds the token. Askpass is not exercised
+  over HTTP (no network, no server): the unit tests assert the env and the hook directly.
+- **Quick gate (1–2 min):**
+  `npx jest --config jest.config.cjs tests/unit/checkout tests/unit/integration/branch.test.ts tests/unit/integration/worktree.test.ts tests/unit/integration/releasePlan.test.ts tests/unit/localize/commands.test.ts tests/unit/localize/resolve.test.ts tests/unit/linkedKind.test.ts`.
+- **Full gate:** cli `npm run test:unit`, `npm run test:template`, `npx linked build`; CN (only
+  the docs change there) `npm run typecheck:gate`. No CN regular set unless the agent touches CN
+  code (it should not).
+
+### Size and phases
+
+Large, 4 phases, one commit each:
+1. List reader, transitive resolver, branch rule, `dependencyOrder` edges, credentials seam
+   (`gitRemoteEnv`, askpass hook, URL stripping, error scrubbing), `localize --listed` and
+   `prepareClone` on the seam; unit tests.
+2. `linked checkout` (base clones, worktrees, install, idempotency, JSON); the e2e checkout cases.
+3. `branch fork`, `branch merge` (order, `--no-ff`, conflict stop, the mode question settled with
+   the master), `worktree remove --branch`; e2e cases.
+4. Docs, K-checkout updated in 002 and CN 057/180, changeset, semantu-agents PR, review fixes.
 
 ## Progress
 
