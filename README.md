@@ -34,7 +34,7 @@ linked create-shape <name>        # add a shape file to the current package
 linked create-component <name>    # add a React component file
 ```
 
-An app is a `linkedApp`, not a linked package: its root registers no package, and its shapes
+An app (`"linked": {"kind": "app"}`) is not a linked package: its root registers no package, and its shapes
 live in its packages. A linked package is one of two kinds:
 
 - an **ontology package**, `<name>-ont` — exactly one ontology (`src/ontologies/<name>.ts`), no
@@ -57,8 +57,8 @@ or outside an app) it gets no such entry, because `npm install` would look the u
 package up in the registry and fail with E404; one line says to run `npm install <name>-ont` in
 the asset package once the ontology package is published.
 `create-ont-package` and `create-asset-package` are the two kinds spelled out. The suffix is
-never doubled: `create-ont-package foo-ont` creates `foo-ont`. Every package they create has
-`"linkedPackage": true`. `create-shape`, `create-component`, `create-set-component` and
+never doubled: `create-ont-package foo-ont` creates `foo-ont`. Every package they create says
+what it is in `"linked": {"kind": "ontology"}` or `{"kind": "assets"}`. `create-shape`, `create-component`, `create-set-component` and
 `create-ontology` refuse where there is no `src/package.ts` (a new app root has none) instead of
 writing an import of a package that does not exist: run them inside `packages/<name>`. An app that
 does have a `src/package.ts` at its root is served as before.
@@ -78,7 +78,7 @@ not a warning; the command prints one informational line:
 `Shapes and terms in <package> mint under https://linked.cm/. They resolve once the package is
 published (npx linked publish, coming soon).`
 
-Inside an app (a `package.json` with `"linkedApp": true` above the current directory),
+Inside an app (a `package.json` with `"linked": {"kind": "app"}` above the current directory),
 `create-package` puts the package in one of two places, and asks which on a terminal:
 
 ```bash
@@ -146,8 +146,8 @@ earlier build is removed); a core without `shapes/shapesToTurtle` warns and writ
 module that throws fails the build. With `--skip-shape-check` the step is skipped with a warning.
 Whenever no new file is written, one left by an earlier build is removed.
 
-`linked build` exits with code 1 whenever the build does not succeed, including when it is run in a `linkedApp` or
-in a package without `"linkedPackage": true` (it used to exit 0 there). A build that finishes with warnings still
+`linked build` exits with code 1 whenever the build does not succeed, including when it is run in an app or
+in a package without a package `linked.kind` (it used to exit 0 there). A build that finishes with warnings still
 exits 0.
 
 ### Ontology accessor modules
@@ -469,21 +469,26 @@ linked status                     # show which packages need build/publish
 linked depcheck                   # check for missing/unused deps
 ```
 
-## Package flags
+## Package kinds
 
-The CLI recognizes two flags in `package.json`:
+Every `package.json` says what it is in `linked.kind`, merged into any other `linked` keys
+(`linked.serverOnly`):
 
 ```json
 {
-  "linkedPackage": true,     // marks a reusable library; build-workspace builds it
-  "linkedApp": true          // marks a deployable app; build-workspace skips it
+  "linked": {"kind": "ontology"}   // or "assets", "library" (framework code), "app"
 }
 ```
+
+A linked package is any kind but `app`: `linked build` builds it, and boot loading, the ontology
+sync, Vite's dependency exclusion and `build-all`'s dependency order find it. An `app` is built with
+`linked build-app`. `linkedKind(json)` from `@_linked/cli/installed-packages` is the one reader
+(`@_linked/server/utils/linkedDependencies` has a byte-identical twin).
 
 A package can also declare its ontologies under `"linkedOntologies"` (see
 [Ontology accessor modules](#ontology-accessor-modules)).
 
-The legacy `lincd: true` / `lincdApp: true` flags are no longer read. Migrate to `linkedPackage` / `linkedApp`.
+The `lincd`, `lincdApp`, `linkedPackage` and `linkedApp` flags are not read.
 
 ### Extensionless relative imports
 

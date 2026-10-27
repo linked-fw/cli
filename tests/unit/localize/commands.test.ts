@@ -46,7 +46,7 @@ function cloning(appRoot, pkgFor, handler?) {
         path.relative(appRoot, inv.args[inv.args.length - 1]),
         {
           version: '1.0.0',
-          linkedPackage: true,
+          linked: {kind: 'assets'},
           scripts: {build: 'linked build'},
           ...pkgFor,
           name,
@@ -264,7 +264,7 @@ test('one install for several names, and a failing build only warns (exit 5)', (
         {
           name: ['@x/a', '@x/b'][n++],
           version: '1.0.0',
-          linkedPackage: true,
+          linked: {kind: 'assets'},
           scripts: {build: 'linked build'},
         },
       );
@@ -286,28 +286,28 @@ test('one install for several names, and a failing build only warns (exit 5)', (
   assert.match(deps.output(), /tsc broke/);
 });
 
-/** The cli as it is: a linkedPackage whose own `build` script is its `tsc`. */
+/** The cli as it is: a linked package whose own `build` script is its `tsc`. */
 const CLI_PKG = {
   name: '@_linked/cli',
-  linkedPackage: true,
+  linked: {kind: 'assets'},
   scripts: {build: 'tsc'},
 };
 
 test('a checkout is built with its own build script, else not at all', (t) => {
   const cases: [object, string | null][] = [
-    [{name: '@x/a', linkedPackage: true, scripts: {build: 'linked build'}}, 'npm run build'],
+    [{name: '@x/a', linked: {kind: 'assets'}, scripts: {build: 'linked build'}}, 'npm run build'],
     [
       {
         name: '@x/a',
-        linkedApp: true,
+        linked: {kind: 'app'},
         scripts: {prebuild: 'p', build: 'NODE_ENV=production linked build-app'},
       },
       'npm run build',
     ],
     [{name: '@x/a', scripts: {build: 'tsc'}}, 'npm run build'],
     // No build script: nothing, whatever kind of Linked package or app it is
-    [{name: '@x/a', linkedPackage: true, scripts: {}}, null],
-    [{name: '@x/a', linkedApp: true, scripts: {}}, null],
+    [{name: '@x/a', linked: {kind: 'assets'}, scripts: {}}, null],
+    [{name: '@x/a', linked: {kind: 'app'}, scripts: {}}, null],
   ];
   for (const [pkg, expected] of cases) {
     const appRoot = consumer(t);
@@ -333,7 +333,7 @@ test('a checkout is built with its own build script, else not at all', (t) => {
   }
 
   const appRoot = consumer(t);
-  const deps = cloning(appRoot, {name: '@x/a', linkedApp: true});
+  const deps = cloning(appRoot, {name: '@x/a', linked: {kind: 'app'}});
   localize(
     ['@x/a'],
     {repo: 'https://example.invalid/a.git', build: 'make'},
@@ -381,8 +381,8 @@ test('the cli builds before the others and then gets its bin linked', (t) => {
         appRoot,
         path.relative(appRoot, inv.args[inv.args.length - 1]),
         [
-          {name: '@x/a', linkedPackage: true, scripts: {build: 'linked build'}},
-          {name: '@_linked/cli', scripts: {build: 'tsc'}, linkedPackage: true},
+          {name: '@x/a', linked: {kind: 'assets'}, scripts: {build: 'linked build'}},
+          {name: '@_linked/cli', scripts: {build: 'tsc'}, linked: {kind: 'library'}},
         ][n++],
       );
       return ok();
@@ -719,7 +719,7 @@ test('a monorepo package is a link into packages-local/.repos, and parks and com
         JSON.stringify({
           name: '@x/a',
           version: '1.0.0',
-          linkedPackage: true,
+          linked: {kind: 'assets'},
           scripts: {build: 'linked build'},
         }),
       );

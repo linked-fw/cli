@@ -13,7 +13,7 @@ import {discoverWorkspacePackages} from '../../src/commands/start';
 //
 // The watch set must therefore be discovered the same way `discoverWorkspaces`'
 // dependency pass is — walk dependencies + devDependencies, keep
-// `linkedPackage: true`, register those shipping `src/` — so the two lists
+// a package `linked.kind`, register those shipping `src/` — so the two lists
 // cannot disagree about what is source.
 
 function writeJson(file: string, json: unknown) {
@@ -57,19 +57,19 @@ describe('discoverWorkspacePackages with a localized checkout', () => {
     // One ordinary workspace package, so the globs pass has something to find.
     makePackage(path.join(app, 'packages', 'inglob'), {
       name: '@fixture/inglob',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
 
     // The localized checkout: in no glob (app not set up), reachable only via node_modules.
     checkout = path.join(app, 'packages-local', 'pkg');
-    makePackage(checkout, {name: '@fixture/pkg', version: '1.0.0', linkedPackage: true});
+    makePackage(checkout, {name: '@fixture/pkg', version: '1.0.0', linked: {kind: 'assets'}});
     link(checkout, path.join(app, 'node_modules', '@fixture', 'pkg'));
 
     // Control 1: a linked dep installed normally — published, so no `src/`.
     // Watching it is meaningless; there is no source to edit.
     makePackage(
       path.join(app, 'node_modules', '@fixture', 'published'),
-      {name: '@fixture/published', version: '1.0.0', linkedPackage: true},
+      {name: '@fixture/published', version: '1.0.0', linked: {kind: 'assets'}},
       false,
     );
     // Control 2: a dep that ships `src/` but is not a linked package.
@@ -84,7 +84,7 @@ describe('discoverWorkspacePackages with a localized checkout', () => {
     makePackage(path.join(app, 'node_modules', '@fixture', 'shipssrc'), {
       name: '@fixture/shipssrc',
       version: '1.0.0',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
   });
 

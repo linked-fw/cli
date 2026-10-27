@@ -7,7 +7,7 @@ import {
   planBuildAll,
 } from '../../src/lifecycle';
 
-// `build-all` used to discover only packages carrying `linkedPackage: true`,
+// `build-all` used to discover only packages carrying the linked-package flag,
 // inside the `workspaces` globs only, and printed nothing about anything it
 // passed over. Measured against Create Now on 2026-09-29 that meant 3 of 6
 // tracked workspace members built, `@_linked/maps` (a shipped dependency that
@@ -51,7 +51,7 @@ describe('build-all package discovery', () => {
     writeJson(path.join(tmp, 'package.json'), {
       name: 'the-app',
       private: true,
-      linkedApp: true,
+      linked: {kind: 'app'},
       workspaces: ['packages/*'],
       dependencies: {
         '@w/flagged': '^1.0.0',
@@ -61,7 +61,7 @@ describe('build-all package discovery', () => {
     });
     makePackage(path.join(tmp, 'packages', 'flagged'), {
       name: '@w/flagged',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       scripts: buildScript,
     });
     // The `@_linked/maps` case: a real dependency with a working build script
@@ -72,11 +72,11 @@ describe('build-all package discovery', () => {
     });
     makePackage(path.join(tmp, 'packages', 'noscript'), {
       name: '@w/noscript',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     makePackage(path.join(tmp, 'packages', 'inner-app'), {
       name: '@w/inner-app',
-      linkedApp: true,
+      linked: {kind: 'app'},
       scripts: buildScript,
     });
     makePackage(path.join(tmp, 'packages', 'unrelated'), {
@@ -85,12 +85,12 @@ describe('build-all package discovery', () => {
     });
     makePackage(path.join(tmp, 'packages-local', 'dep'), {
       name: '@local/dep',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       scripts: buildScript,
     });
     makePackage(path.join(tmp, 'packages-local', 'unrelated'), {
       name: '@local/unrelated',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       scripts: buildScript,
     });
   }

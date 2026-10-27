@@ -49,7 +49,7 @@ describe('linked app-doctor', () => {
       name: '@_linked/primitives',
       version: '1.0.0',
       type: 'module',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       exports: {'./*': {import: './lib/esm/*.js'}},
       dependencies: {vaul: '^0.9.0', cmdk: '^1.0.0'},
     });

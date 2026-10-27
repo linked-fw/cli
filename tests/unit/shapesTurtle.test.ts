@@ -94,7 +94,7 @@ const fixture = ({
       name: '@test/fixture',
       version: '1.0.0',
       type: 'module',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       main: 'lib/esm/index.js',
       files: ['lib'],
       dependencies: {'@_linked/core': '*'},

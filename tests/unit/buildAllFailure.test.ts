@@ -29,7 +29,7 @@ function makePackage(
   writeJson(path.join(root, 'package.json'), {
     name,
     version: '1.0.0',
-    linkedPackage: true,
+    linked: {kind: 'assets'},
     scripts: {build},
     dependencies,
   });
@@ -48,7 +48,7 @@ describe('build-all with a failing package', () => {
     tmp = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), 'linked-buildall-fail-')),
     );
-    // No `linkedApp` root, so every package with a build script is built.
+    // No app root (`linked.kind: "app"`), so every package with a build script is built.
     writeJson(path.join(tmp, 'package.json'), {
       name: 'probe-root',
       private: true,

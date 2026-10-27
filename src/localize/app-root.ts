@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import {readJson} from './fsops.js';
 import {requireHook} from './hook-module.js';
+import {isLinkedPackageJson} from '../installed-packages.js';
 
 interface ManifestsModule {
   workspaceGlobs: (appRoot: string) => string[] | null;
@@ -35,7 +36,7 @@ function manifestsModule(): ManifestsModule {
 
 interface Manifest {
   workspaces: boolean;
-  linkedPackage: boolean;
+  isPackage: boolean;
 }
 
 function manifestAt(dir: string): Manifest | null {
@@ -44,7 +45,7 @@ function manifestAt(dir: string): Manifest | null {
   if (!pkg || typeof pkg !== 'object') return null;
   return {
     workspaces: 'workspaces' in pkg && !!pkg.workspaces,
-    linkedPackage: 'linkedPackage' in pkg && pkg.linkedPackage === true,
+    isPackage: isLinkedPackageJson(pkg),
   };
 }
 
@@ -53,14 +54,14 @@ function manifestAt(dir: string): Manifest | null {
  * whose `package.json` has `workspaces`, then each higher ancestor with
  * `workspaces` whose globs match the root found so far -- the first one that
  * does not ends the climb. Of that chain, the topmost that is not itself a
- * linked package (`"linkedPackage": true`), else the topmost. Null when there
+ * linked package (`isLinkedPackageJson`), else the topmost. Null when there
  * is none.
  */
 export function findWorkspaceRoot(start: string): string | null {
   const nearest = nearestWithWorkspaces(path.resolve(start));
   if (!nearest) return null;
   let topmost = nearest.dir;
-  let topmostApp: string | null = nearest.linkedPackage ? null : nearest.dir;
+  let topmostApp: string | null = nearest.isPackage ? null : nearest.dir;
   for (let above = path.dirname(topmost); ; above = path.dirname(above)) {
     const m = manifestAt(above);
     if (m?.workspaces) {
@@ -69,7 +70,7 @@ export function findWorkspaceRoot(start: string): string | null {
       const globs = workspaceGlobs(above) ?? [];
       if (!globsMatch(globs, rel) && !underPackagesLocal(globs, rel)) break;
       topmost = above;
-      if (!m.linkedPackage) topmostApp = above;
+      if (!m.isPackage) topmostApp = above;
     }
     if (path.dirname(above) === above) break;
   }
@@ -92,10 +93,10 @@ function underPackagesLocal(globs: string[], rel: string): boolean {
 
 function nearestWithWorkspaces(
   start: string,
-): {dir: string; linkedPackage: boolean} | null {
+): {dir: string; isPackage: boolean} | null {
   for (let dir = start; ; dir = path.dirname(dir)) {
     const m = manifestAt(dir);
-    if (m?.workspaces) return {dir, linkedPackage: m.linkedPackage};
+    if (m?.workspaces) return {dir, isPackage: m.isPackage};
     if (path.dirname(dir) === dir) return null;
   }
 }

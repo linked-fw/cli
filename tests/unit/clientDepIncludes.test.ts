@@ -86,7 +86,7 @@ describe('scanLinkedClientDeps', () => {
           "import send from 'mailer';\nexport const mail = send;\n",
         'lib/esm/types.d.ts': "import type {X} from 'types-only';\n",
       },
-      {type: 'module', linkedPackage: true, exports: LIB_EXPORTS},
+      {type: 'module', linked: {kind: 'assets'}, exports: LIB_EXPORTS},
     );
     write(path.join(ui, 'node_modules', 'nested-drawer', 'package.json'), {
       name: 'nested-drawer',
@@ -253,12 +253,12 @@ describe('scanLinkedClientDeps', () => {
     expect(scan.frameworkPackages).toEqual([]);
   });
 
-  test('a custom-scope package marked linkedPackage is scanned', async () => {
+  test('a custom-scope package with a linked.kind is scanned', async () => {
     dep(
       app,
       '@acme/shapes',
       {'lib/esm/index.js': "import 'radix-slot';\n"},
-      {type: 'module', linkedPackage: true, exports: LIB_EXPORTS},
+      {type: 'module', linked: {kind: 'assets'}, exports: LIB_EXPORTS},
     );
     const scan = await scanLinkedClientDeps(['@acme/shapes'], {cwd: app});
     expect(scan.entries.map((e) => e.entry)).toEqual(['radix-slot']);

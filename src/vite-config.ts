@@ -367,8 +367,8 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
 /**
  * Linked packages installed as SOURCE, found by walking the app's
  * `dependencies` + `devDependencies` (and recursing through the `dependencies`
- * of each linked package found), keeping those marked `"linkedPackage": true`
- * — the same marker the CLI keys on (see cli-methods.ts) — and registering the
+ * of each linked package found), keeping the linked packages (`linked.kind`, `isLinkedPackageJson`)
+ * — the same marker the CLI keys on everywhere — and registering the
  * ones that ship `src/`.
  *
  * A dep ships `src/` when it is a symlinked workspace clone, a `link:`/`portal:`
@@ -384,7 +384,7 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
  *
  * The marker — NOT the npm scope — drives discovery, so a user's own
  * custom-scope published linked package (e.g. `@acme/foo` with
- * `linkedPackage:true`) is picked up too, and linked packages present in
+ * a package `linked.kind`) is picked up too, and linked packages present in
  * node_modules but not depended upon are ignored.
  *
  * Every root is REALPATHED before it is registered: `readInstalledPkg` returns
@@ -789,7 +789,7 @@ export function clientDefine(
 
 /**
  * The app's direct dependencies (and devDependencies) that are linked packages
- * by their own `linkedPackage` flag, not their scope. Best-effort: no
+ * by their own `linked.kind`, not their scope. Best-effort: no
  * `package.json` gives `[]`. See `optimizeDeps` in `createViteConfig`.
  */
 export async function installedLinkedDeps(cwd: string): Promise<string[]> {
@@ -835,7 +835,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     // of the standalone-gated branches below apply.
     const isStandalone = isDev && workspaces.length === 0;
 
-    // The app's installed framework deps (by their `linkedPackage` flag) —
+    // The app's installed framework deps (by their `linked.kind`) —
     // excluded from Vite's dep-optimizer below (`optimizeDeps.exclude`) in EVERY
     // dev mode, so the browser's native ESM graph loads ONE copy of each. Without
     // the exclude, esbuild inlines a duplicate `@_linked/core` into each

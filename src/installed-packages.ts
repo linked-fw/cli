@@ -10,7 +10,7 @@ import path from 'node:path';
  * context) or register shapes into it. Two copies in one runtime split that state
  * and mangle shape identity (`Person`→`Person2`).
  *
- * A NAME check, used only by `client-dep-includes` (alongside the flag). Deciding
+ * A NAME check, used only by `client-dep-includes` (alongside `linked.kind`). Deciding
  * whether an installed package is linked goes by its `package.json` instead —
  * {@link isLinkedPackageJson} — which is what the source walk and the standalone
  * `optimizeDeps.exclude` use.
@@ -57,17 +57,44 @@ export async function readInstalledPkg(
   }
 }
 
+// linkedKind: twin of @_linked/server src/utils/linkedDependencies.ts, keep byte-identical.
+/** What a `package.json` is, by its `linked.kind`. */
+export type LinkedKind = 'app' | 'ontology' | 'assets' | 'library';
+
+/** Every value `linked.kind` may take. */
+export const LINKED_KINDS: readonly LinkedKind[] = [
+  'app',
+  'ontology',
+  'assets',
+  'library',
+];
+
 /**
- * THE definition of a linked package: its own `package.json` says
- * `"linkedPackage": true`. Not its npm scope — a linked package can be
- * published under any scope, and not everything under `@_linked/` is one
- * (a plain tool need not be). The pre-rename `"lincd": true` is not
- * read: the packages that still carry it are the old `lincd-*` framework,
- * which cannot share a runtime with `@_linked/core`. `lifecycle.ts`
- * (`build-all`, `getLincdPackages`) and `linked build-package` use this too.
+ * THE way to tell what a `package.json` is: its `"linked": {"kind": …}`. `app` is an app (built
+ * by `linked build-app`); `ontology`, `assets` and `library` are linked packages (an ontology
+ * package may carry shapes for its own terms; `library` is framework code). Undefined for
+ * anything else: no `linked` object, a kind that is not one of these, and the retired
+ * `linkedPackage` / `linkedApp` flags, which are not read.
  */
-export const isLinkedPackageJson = (json: any): boolean =>
-  json?.linkedPackage === true;
+export function linkedKind(json: unknown): LinkedKind | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const linked: unknown = (json as {linked?: unknown}).linked;
+  if (!linked || typeof linked !== 'object') return undefined;
+  const kind: unknown = (linked as {kind?: unknown}).kind;
+  return LINKED_KINDS.find((k) => k === kind);
+}
+// end of the linkedKind twin.
+
+/**
+ * THE definition of a linked package: its own `package.json` has a `linked.kind` other than
+ * `app` ({@link linkedKind}). Not its npm scope — a linked package can be published under any
+ * scope, and not everything under `@_linked/` is one (a plain tool need not be).
+ * `lifecycle.ts` (`build-all`, `getLincdPackages`) and `linked build-package` use this too.
+ */
+export const isLinkedPackageJson = (json: unknown): boolean => {
+  const kind = linkedKind(json);
+  return kind !== undefined && kind !== 'app';
+};
 
 /** An installed linked package, as {@link discoverInstalledLinkedPackages} finds it. */
 export interface InstalledLinkedPackage {

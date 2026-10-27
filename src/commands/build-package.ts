@@ -10,7 +10,7 @@ import {isLinkedPackageJson} from '../installed-packages.js';
  * and run `linked build` in that package's directory. This is the editor-hook
  * variant of build: the caller knows a file path, we figure out the package.
  *
- * Only rebuilds packages flagged `linkedPackage: true`.
+ * Only rebuilds linked packages (`isLinkedPackageJson`).
  */
 export async function buildPackageByPath(filePath: string): Promise<void> {
   let currentPath = path.isAbsolute(filePath)
@@ -30,7 +30,7 @@ export async function buildPackageByPath(filePath: string): Promise<void> {
       if (!isLinked) {
         console.log(
           chalk.yellow(
-            `Package ${pkgJson.name} is not a linked package (no linkedPackage flag). Skipping.`,
+            `Package ${pkgJson.name} is not a linked package (no linked.kind of a package). Skipping.`,
           ),
         );
         return;

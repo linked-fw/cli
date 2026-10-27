@@ -133,7 +133,7 @@ function makePackage(
   writeJson(path.join(root, 'package.json'), {
     name,
     version: '1.0.0',
-    linkedPackage: true,
+    linked: {kind: 'assets'},
     scripts: {build},
     dependencies,
   });

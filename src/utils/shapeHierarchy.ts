@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import {pathToFileURL} from 'url';
 import {ASSET_HOOK, findShapeModules} from './shapeReferences.js';
+import {isLinkedPackageJson} from '../installed-packages.js';
 
 /**
  * Checking shape hierarchy: do the package's shapes agree with the class hierarchy?
@@ -98,9 +99,6 @@ const runtimePackageName = (libEsm: string): string | undefined => {
     .match(/linkedPackage\(\s*['"]([^'"]+)['"]/)?.[1];
 };
 
-/** A dependency whose ontology data an app would register: a framework or other linked package. */
-const isLinkedDependency = (name: string, pkgJson: any) =>
-  name.startsWith('@_linked/') || pkgJson.linkedPackage === true;
 
 /**
  * What the check of the built package at `packagePath` loads, or why it does not run: a package
@@ -157,7 +155,8 @@ export const collectShapeCheckInputs = (
     const dir = resolvePackageDir(name, from);
     if (!dir) continue;
     const depJson = readJson(path.join(dir, 'package.json'));
-    if (!isLinkedDependency(name, depJson)) continue;
+    // A dependency whose ontology data an app would register: a linked package.
+    if (!isLinkedPackageJson(depJson)) continue;
     const deps = dependencyNames(depJson);
     dependencies[name] = deps;
     packageDirs.push(dir);

@@ -162,15 +162,15 @@ describe('workspaces negated patterns', () => {
     });
     makePackage(path.join(root, 'packages', 'tracked'), {
       name: 'tracked',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     makePackage(path.join(root, 'packages', 'core'), {
       name: '@_linked/core',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     makePackage(path.join(root, 'packages', 'primitives'), {
       name: '@_linked/primitives',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
   }
 
@@ -211,11 +211,11 @@ describe('workspaces negated patterns', () => {
     });
     makePackage(path.join(tmp, 'packages', 'tracked'), {
       name: 'tracked',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     makePackage(path.join(tmp, 'packages', 'core'), {
       name: '@_linked/core',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     expect(getLincdPackages(tmp).map((p) => p.packageName)).toEqual([
       'tracked',

@@ -103,9 +103,9 @@ function defaultsDir(...parts: string[]): string {
 
 /**
  * The commands that write a file importing `../package.js` need a `src/package.ts`
- * to import. A new app root has none (it is a linkedApp, not a linkedPackage), so
+ * to import. A new app root has none (it is an app, `linked.kind: "app"`, not a linked package), so
  * there the import would be broken: refuse instead. Only the file decides: a
- * linkedApp that keeps its shapes at its root with its own `src/package.ts`, as
+ * app that keeps its shapes at its root with its own `src/package.ts`, as
  * create-now does, is served as before.
  */
 function assertInsidePackage(sourceFolder: string, command: string) {
@@ -136,6 +136,7 @@ import {
   orderBuildToolFirst,
 } from './lifecycle.js';
 import type {BuildAllPlan} from './lifecycle.js';
+import {isLinkedPackageJson, linkedKind} from './installed-packages.js';
 import {excerptBuildError} from './build-error-excerpt.js';
 export {
   ensureEnvironmentLoaded,
@@ -579,10 +580,11 @@ function setEnvVar(envText: string, key: string, value: string): string {
  * create-app writes the real per-app values here:
  *  - `.env.example` (committed defaults for this app) + `.env` (local): APP_NAME
  *    drives the display name; APP_PREFIX names data files.
- *  - `package.json`: `name` (hyphenated id) + `displayName` (human name).
+ *  - `package.json`: `name` (hyphenated id) + `displayName` (human name), and
+ *    `linked.kind: "app"` (replacing a template's `linkedApp: true`).
  *  - pm2 process names + the VS Code launch name (cosmetic, but should match).
  *
- * Nothing under `src/` is touched: the app is a linkedApp, not a linked package,
+ * Nothing under `src/` is touched: the app is an app (`linked.kind: "app"`), not a linked package,
  * so its root registers no package and has no package id to stamp. Its shapes
  * live in its packages (`packages/<name>-assets`), each with its own
  * `src/package.ts`.
@@ -622,12 +624,16 @@ export function applyAppIdentity(
     if (!fs.existsSync(envReal)) fs.writeFileSync(envReal, env);
   }
 
-  // 2. package.json — name + displayName.
+  // 2. package.json — name + displayName, and `linked.kind: "app"` merged into
+  // any `linked` object it has (a template may still say `linkedApp: true`,
+  // which nothing reads: it is dropped).
   const pkgPath = path.join(targetFolder, 'package.json');
   if (fs.existsSync(pkgPath)) {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     pkg.name = hyphenName;
     pkg.displayName = appName;
+    delete pkg.linkedApp;
+    pkg.linked = {...pkg.linked, kind: 'app'};
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
   }
 
@@ -990,7 +996,7 @@ function runBuildScript(
 ): Promise<boolean | undefined> {
   // Invoke the package's own `build` script. This lets each package
   // own its build pipeline — e.g. @_linked/core uses direct tsc, pure-CSS
-  // packages may have no-op builds, and linkedPackage: true packages
+  // packages may have no-op builds, and linked packages
   // typically call `linked build` internally.
   //
   // npm is the default; the package manager is detected per package so
@@ -3002,25 +3008,23 @@ export const buildPackage = async (
   // Always use the resolved absolute path
   packagePath = currentPath;
 
-  // Guard: `linked build` only makes sense for linkedPackage. Apps must use
-  // `linked build-app`. Plain packages (no linked flag) have no build pipeline
+  // Guard: `linked build` only makes sense for a linked package. Apps must use
+  // `linked build-app`. Plain packages (no `linked.kind`) have no build pipeline
   // defined here and should have their own build script.
   const pkgJson = JSON.parse(
     fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
   );
-  const isPackage = pkgJson.linkedPackage === true;
-  const isApp = pkgJson.linkedApp === true;
-  if (!isPackage) {
-    if (isApp) {
+  if (!isLinkedPackageJson(pkgJson)) {
+    if (linkedKind(pkgJson) === 'app') {
       console.error(
         chalk.red(
-          `'${pkgJson.name || packagePath}' is a linkedApp, not a linkedPackage. Use 'linked build-app' instead of 'linked build'.`,
+          `'${pkgJson.name || packagePath}' is an app (linked.kind "app"), not a linked package. Use 'linked build-app' instead of 'linked build'.`,
         ),
       );
     } else {
       console.error(
         chalk.red(
-          `'${pkgJson.name || packagePath}' does not have 'linkedPackage: true' in package.json. 'linked build' only builds linked packages. Add the flag or run a different build command.`,
+          `'${pkgJson.name || packagePath}' has no "linked": {"kind": …} of a package in package.json. 'linked build' only builds linked packages: set linked.kind to "ontology", "assets" or "library", or run a different build command.`,
         ),
       );
     }
@@ -3162,7 +3166,7 @@ type BuildStep = {
   apply: () => Promise<unknown>;
 };
 
-// The ordered `linked build` steps for a linkedPackage. Source may use
+// The ordered `linked build` steps for a linked package. Source may use
 // extensionless relative imports: once `lib/esm` holds everything it will ship,
 // every package gets `.js` added to the relative specifiers in it (JS and
 // declarations). For a package that already writes `.js` this is a no-op.

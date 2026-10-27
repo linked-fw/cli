@@ -2,7 +2,7 @@
   "name": "ontology-app",
   "private": true,
   "type": "module",
-  "linkedApp": true,
+  "linked": {"kind": "app"},
   "dependencies": {
     "@_linked/probe-ont": "*"
   }

@@ -78,7 +78,7 @@ describe('createPackage kinds', () => {
 
     const manifest = JSON.parse(read(pkg, 'package.json'));
     expect(manifest.name).toBe('planning-ont');
-    expect(manifest.linkedPackage).toBe(true);
+    expect(manifest.linked).toEqual({kind: 'ontology'});
     expect(manifest.files).toEqual(['lib', 'CHANGELOG.md']);
 
     // The package is `planning-ont`; the ontology slug is `planning`.
@@ -139,7 +139,7 @@ describe('createPackage kinds', () => {
 
     const manifest = JSON.parse(read(pkg, 'package.json'));
     expect(manifest.name).toBe('planning-assets');
-    expect(manifest.linkedPackage).toBe(true);
+    expect(manifest.linked).toEqual({kind: 'assets'});
     expect(manifest.files).toEqual(['lib', 'CHANGELOG.md']);
 
     expect(read(pkg, 'src/package.ts')).toContain(`linkedPackage('planning-assets')`);
@@ -160,7 +160,10 @@ describe('createPackage kinds', () => {
       '@acme/planning-assets',
     );
     for (const pkg of ['planning-ont', 'planning-assets']) {
-      expect([pkg, JSON.parse(read(tmp, pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
+      expect([pkg, JSON.parse(read(tmp, pkg, 'package.json')).linked.kind]).toEqual([
+        pkg,
+        pkg.endsWith('-ont') ? 'ontology' : 'assets',
+      ]);
     }
   });
 
@@ -172,7 +175,7 @@ describe('createPackage kinds', () => {
     beforeEach(() => (console.log as jest.Mock).mockClear());
 
     test('--location packages: the asset package depends on the ontology package', async () => {
-      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linked: {kind: 'app'}});
       await createPackage('@acme/planning', undefined, tmp, {
         kind: 'both',
         location: 'packages',
@@ -189,7 +192,7 @@ describe('createPackage kinds', () => {
     });
 
     test('--location packages-local: no dependency, and one line says how to add it', async () => {
-      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linked: {kind: 'app'}});
       await createPackage('@acme/planning', undefined, tmp, {
         kind: 'both',
         location: 'packages-local',
@@ -235,12 +238,15 @@ describe('createPackage kinds', () => {
       'planning-assets',
     );
     for (const pkg of ['planning-ont', 'planning-assets']) {
-      expect([pkg, JSON.parse(read(tmp, pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
+      expect([pkg, JSON.parse(read(tmp, pkg, 'package.json')).linked.kind]).toEqual([
+        pkg,
+        pkg.endsWith('-ont') ? 'ontology' : 'assets',
+      ]);
     }
   });
 
   test('inside an app, --location packages wires the app even when the install is skipped', async () => {
-    fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
+    fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linked: {kind: 'app'}});
     await createPackage('planning', undefined, tmp, {
       kind: 'both',
       location: 'packages',
@@ -259,7 +265,7 @@ describe('createPackage kinds', () => {
     let warn: jest.SpyInstance;
     beforeEach(() => {
       delete process.env.LINKED_BASE_URI;
-      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linkedApp: true});
+      fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-app', linked: {kind: 'app'}});
       warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       (console.log as jest.Mock).mockClear();
     });
@@ -291,7 +297,10 @@ describe('createPackage kinds', () => {
         `createNameSpace('https://acme.id.create.now/ont/planning/')`,
       );
       for (const pkg of [ont, assets]) {
-        expect([pkg, fs.readJsonSync(path.join(pkg, 'package.json')).linkedPackage]).toEqual([pkg, true]);
+        expect([pkg, fs.readJsonSync(path.join(pkg, 'package.json')).linked.kind]).toEqual([
+          pkg,
+          pkg === ont ? 'ontology' : 'assets',
+        ]);
       }
       expect(logged()).toMatch(/https:\/\/acme\.id\.create\.now\/ \(from \.env\)/);
     });

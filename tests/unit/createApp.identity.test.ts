@@ -1,5 +1,5 @@
-// `create-app` stamps the new app's identity into the template clone. The app is a
-// linkedApp, not a linked package: its root registers no package, so nothing under
+// `create-app` stamps the new app's identity into the template clone. The app is an
+// app (`linked.kind: "app"`), not a linked package: its root registers no package, so nothing under
 // src/ is rewritten — only package.json, the env files and the process names.
 //
 // cli-methods pulls in ora, which is ESM-only.
@@ -30,10 +30,24 @@ describe('applyAppIdentity', () => {
     const pkg = fs.readJsonSync(path.join(app, 'package.json'));
     expect(pkg.name).toBe('my-shop');
     expect(pkg.displayName).toBe('My Shop');
-    expect(pkg.linkedPackage).toBeUndefined();
+    expect(pkg.linked).toEqual({kind: 'app'});
     expect(fs.readFileSync(path.join(app, '.env.example'), 'utf8')).toContain('APP_NAME=My Shop');
     expect(fs.readFileSync(path.join(app, '.env'), 'utf8')).toContain('APP_PREFIX=shop');
     expect(fs.readFileSync(path.join(app, 'pm2.config.js'), 'utf8')).toContain(`name: 'my-shop'`);
+  });
+
+  test('turns a template\'s linkedApp flag into linked.kind "app", keeping its linked object', () => {
+    fs.outputJsonSync(path.join(app, 'package.json'), {
+      name: 'app',
+      linkedApp: true,
+      linked: {serverOnly: ['x']},
+    });
+
+    applyAppIdentity(app, {appName: 'My Shop', appPrefix: 'shop', hyphenName: 'my-shop'});
+
+    const pkg = fs.readJsonSync(path.join(app, 'package.json'));
+    expect(pkg).not.toHaveProperty('linkedApp');
+    expect(pkg.linked).toEqual({serverOnly: ['x'], kind: 'app'});
   });
 
   test('leaves src/ alone: the app root registers no package', () => {

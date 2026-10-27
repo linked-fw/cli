@@ -117,7 +117,7 @@ const fixture = ({
     JSON.stringify({
       name: '@test/fixture',
       type: 'module',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       main: 'lib/esm/index.js',
       dependencies: {'@_linked/core': '*'},
       ...pkgJson,
@@ -151,7 +151,7 @@ const dependency = ({register = true} = {}) => {
     JSON.stringify({
       name: '@_linked/fixture-dep',
       type: 'module',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       main: 'lib/esm/index.js',
       exports: {'./*': './lib/esm/*.js'},
       dependencies: {'@_linked/core': '*'},

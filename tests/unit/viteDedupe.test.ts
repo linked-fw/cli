@@ -112,7 +112,7 @@ describe('resolve.dedupe', () => {
     editJson(
       path.join(app, 'node_modules', '@_linked', 'core', 'package.json'),
       (pkg) => {
-        pkg.linkedPackage = true;
+        pkg.linked = {kind: 'library'};
       },
     );
     fakePkg(
@@ -124,7 +124,7 @@ describe('resolve.dedupe', () => {
     editJson(
       path.join(app, 'node_modules', '@acme', 'widgets', 'package.json'),
       (pkg) => {
-        pkg.linkedPackage = true;
+        pkg.linked = {kind: 'library'};
       },
     );
     // Under @_linked, but a plain tool with no flag; and one still carrying only the old `lincd` flag.
@@ -161,14 +161,14 @@ describe('resolve.dedupe', () => {
     editJson(
       path.join(app, 'node_modules', '@_linked', 'core', 'package.json'),
       (pkg) => {
-        pkg.linkedPackage = true;
+        pkg.linked = {kind: 'library'};
       },
     );
     const ont = path.join(app, 'packages', 'acme-ont');
     writeJson(path.join(ont, 'package.json'), {
       name: 'acme-ont',
       version: '1.0.0',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     fs.mkdirSync(path.join(ont, 'src'), {recursive: true});
     fs.mkdirSync(path.join(app, 'node_modules'), {recursive: true});

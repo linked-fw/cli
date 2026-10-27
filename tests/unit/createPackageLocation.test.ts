@@ -77,21 +77,21 @@ describe('findLinkedAppRoot', () => {
   });
   afterEach(() => fs.rmSync(tmp, {recursive: true, force: true}));
 
-  it('finds the nearest linkedApp, with or without workspaces, from a subfolder', () => {
+  it('finds the nearest app (linked.kind "app"), with or without workspaces, from a subfolder', () => {
     fs.writeFileSync(
       path.join(tmp, 'package.json'),
-      JSON.stringify({name: 'app', linkedApp: true}),
+      JSON.stringify({name: 'app', linked: {kind: 'app'}}),
     );
     const sub = path.join(tmp, 'packages', 'thing', 'src');
     fs.mkdirSync(sub, {recursive: true});
     fs.writeFileSync(
       path.join(tmp, 'packages', 'thing', 'package.json'),
-      JSON.stringify({name: 'thing', linkedPackage: true}),
+      JSON.stringify({name: 'thing', linked: {kind: 'assets'}}),
     );
     expect(findLinkedAppRoot(sub)).toBe(tmp);
   });
 
-  it('returns null when no linkedApp is above', () => {
+  it('returns null when no app is above', () => {
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({name: 'lib'}));
     // the walk continues above tmp, but no ancestor of an os tmpdir is a linked app
     expect(findLinkedAppRoot(tmp)).toBeNull();

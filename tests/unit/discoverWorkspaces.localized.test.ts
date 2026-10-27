@@ -45,7 +45,7 @@ describe('discoverWorkspaces with a localized checkout', () => {
     });
     fs.mkdirSync(path.join(app, 'src'), {recursive: true});
     checkout = path.join(app, 'packages-local', 'pkg');
-    makePackage(checkout, {name: '@fixture/pkg', version: '1.0.0', linkedPackage: true});
+    makePackage(checkout, {name: '@fixture/pkg', version: '1.0.0', linked: {kind: 'assets'}});
     const nm = path.join(app, 'node_modules', '@fixture');
     fs.mkdirSync(nm, {recursive: true});
     fs.symlinkSync(checkout, path.join(nm, 'pkg'), 'dir');
@@ -85,7 +85,7 @@ describe('discoverWorkspaces with a localized checkout', () => {
     // Same rule for the ordinary `packages/*` case: the glob pass already uses
     // real directories, so this only pins that the fix does not regress it.
     const real = path.join(tmp, 'elsewhere', 'other');
-    makePackage(real, {name: '@fixture/other', version: '1.0.0', linkedPackage: true});
+    makePackage(real, {name: '@fixture/other', version: '1.0.0', linked: {kind: 'assets'}});
     const appPkgPath = path.join(app, 'package.json');
     const appPkg = JSON.parse(fs.readFileSync(appPkgPath, 'utf8'));
     appPkg.dependencies['@fixture/other'] = '^1.0.0';
@@ -123,15 +123,15 @@ describe('discoverWorkspaces with two localized checkouts, one depending on the 
     makePackage(a, {
       name: '@fixture/a',
       version: '1.0.0',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       dependencies: {'@fixture/b': '^1.0.0'},
     });
-    makePackage(b, {name: '@fixture/b', version: '1.0.0', linkedPackage: true});
+    makePackage(b, {name: '@fixture/b', version: '1.0.0', linked: {kind: 'assets'}});
     // A's own install: a published, lib-only copy of B.
     writeJson(path.join(a, 'node_modules', '@fixture', 'b', 'package.json'), {
       name: '@fixture/b',
       version: '1.0.0',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     const nm = path.join(app, 'node_modules', '@fixture');
     fs.mkdirSync(nm, {recursive: true});

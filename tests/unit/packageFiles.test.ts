@@ -9,7 +9,11 @@ import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
 import {createPackage} from '../../src/cli-methods';
-import {buildPackageFiles, withOntologyEntry} from '../../src/utils/packageFiles';
+import {
+  buildPackageFiles,
+  cliTemplatesDir,
+  withOntologyEntry,
+} from '../../src/utils/packageFiles';
 import {staleOntologyModules} from '../../src/utils/generateOntology';
 
 // Every file under a folder: relative `/`-path → content.
@@ -94,7 +98,7 @@ describe('buildPackageFiles', () => {
   test('inside an app with a root and the pair: baseUri and dependencies cover it', async () => {
     fs.outputJsonSync(path.join(tmp, 'package.json'), {
       name: 'my-app',
-      linkedApp: true,
+      linked: {kind: 'app'},
     });
     await createPackage('planning', undefined, tmp, {
       kind: 'both',
@@ -201,6 +205,20 @@ describe('buildPackageFiles', () => {
     expect(pkg.dependencies['planning-ont']).toBe('^1.0.0');
     expect(pkg.dependencies['@_linked/core']).toBeDefined();
   });
+
+  test.each(['ontology', 'assets'] as const)(
+    'a %s package says what it is in linked.kind, merged into the template\'s linked object',
+    (kind) => {
+      expect(JSON.parse(buildPackageFiles('planning', kind)['package.json']).linked).toEqual({kind});
+
+      const templatesDir = path.join(tmp, 'defaults');
+      fs.copySync(cliTemplatesDir(), templatesDir);
+      const manifest = path.join(templatesDir, 'package', 'package.json');
+      fs.writeJsonSync(manifest, {...fs.readJsonSync(manifest), linked: {serverOnly: ['x']}});
+      const pkg = JSON.parse(buildPackageFiles('planning', kind, {templatesDir})['package.json']);
+      expect(pkg.linked).toEqual({serverOnly: ['x'], kind});
+    },
+  );
 
   test('nothing is written', () => {
     const cwd = process.cwd();

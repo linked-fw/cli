@@ -41,12 +41,12 @@ describe('linked package sort', () => {
   it('orders core before the cli without reporting a cycle', () => {
     writePackage(root, {
       name: '@test/core',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       devDependencies: {'@test/cli': '1'},
     });
     writePackage(root, {
       name: '@test/cli',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       dependencies: {'@test/core': '1'},
     });
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
