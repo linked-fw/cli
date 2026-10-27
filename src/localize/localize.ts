@@ -371,6 +371,7 @@ export function installAndBuild(
 function linkCliBin(deps: Deps): void {
   const r = deps.run('npm', ['rebuild', CLI_PACKAGE, '--ignore-scripts'], {
     cwd: deps.appRoot,
+    env: localEnv(),
   });
   if (r.status !== 0) {
     deps.warn(
@@ -589,7 +590,10 @@ function captureSetupLockfile(
   if (moveAside) setAside(deps);
   let r: RunResult;
   try {
-    r = deps.run('npm', SETUP_LOCK_ARGS, {cwd: deps.appRoot});
+    r = deps.run('npm', SETUP_LOCK_ARGS, {
+      cwd: deps.appRoot,
+      env: localEnv(),
+    });
   } finally {
     if (moveAside) moveBack(deps);
   }

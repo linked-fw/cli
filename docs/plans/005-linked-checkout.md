@@ -106,4 +106,42 @@ Dependencies: 1 → 2 → 3 → 4 (sequential, one commit each).
 
 ## Progress
 
-(updated after each phase)
+- Phase 1 done (1f9ba63): quick gate green, tsc clean.
+- Phase 2 done (b093706): checkout e2e 8/8.
+- Phase 3 done (b46a9c8): land e2e 5/5; full unit 1122/1122 (1081 before).
+
+## Review
+
+Independent read-only review (credentials focus). Findings: (1) high — remote git calls run with
+the token, so any hook git starts (pre-push, reference-transaction, a husky `core.hooksPath`)
+sees it; (2) high — `worktree remove --branch` removes the app worktree with whatever sits in its
+gitignored `packages-local/` (a full clone, `.repos/`); (3) medium — a renamed remote default
+branch leaves a stale `origin/HEAD`; (4) medium — a failed first push of a new app branch is
+never retried; (5) low — `branch merge` refs unvalidated, misleading push-refused text,
+`check-ref-format` before `--root` exists; (6) low — three localize npm calls kept the token.
+Checked fine: no token on argv, disk, JSON or error text; helper reset; temp worktree cleanup;
+main working tree never removed.
+
+## Iteration 1 — Ideation
+
+### Gap 1 of 6: hooks during remote calls
+Disable hooks for remote calls when a token is set: `core.hooksPath=/dev/null` (an empty temp
+dir on Windows) as one more `GIT_CONFIG_*` entry, plus `--no-verify` on every push. Chosen over
+stripping the token per hook (impossible: git passes its env on).
+### Gap 2 of 6: foreign entries in packages-local/
+Refuse, even with `--force`, while any entry is not a package worktree of the checkout.
+### Gap 3 of 6: stale origin/HEAD
+Always `remote set-head origin --auto` after the fetch (also in `remove --branch`).
+### Gap 4 of 6: unpushed new branch
+On a re-run, an app branch with no recorded upstream (`branch.<b>.remote`) is pushed; one with an
+upstream origin lacks (deleted after merge) is kept.
+### Gap 5 of 6, 6 of 6: low ones, cheap
+Validate both refs in `merge`; message names both causes; mkdir root first; `localEnv()` on the
+remaining npm calls.
+
+## Iteration 1 — Plan and phase
+
+Phase 3b (one commit): the fixes above in `credentials.ts`, `checkout.ts`,
+`branch-fork-merge.ts`, `localize.ts`; tests: hook during push with a husky-style hooksPath, a
+hand clone in `packages-local/` under `--force`, default-branch rename, failed first push then
+re-run. Validation: checkout suite 40/40.

@@ -177,4 +177,44 @@ describe('linked branch fork / merge / worktree remove --branch', () => {
     assert.equal(app?.deleted, false);
     assert.match(res.messages.join('\n'), /kept change-1 at/);
   });
+
+  test('no git hook sees the token on a push, even one the app registered in core.hooksPath', async () => {
+    const {root, run} = setup();
+    const co = run('change-1');
+    const appDir = co.app!.dir;
+    // What husky's `prepare` does: a hooks directory of the app's own, in the base clone's config.
+    const hooks = path.join(root, 'app-hooks');
+    const seen = path.join(root, 'hook-saw-token');
+    fs.mkdirSync(hooks);
+    fs.writeFileSync(path.join(hooks, 'pre-push'), `#!/bin/sh\necho "$LINKED_GIT_TOKEN" >> '${seen}'\nexit 0\n`);
+    fs.chmodSync(path.join(hooks, 'pre-push'), 0o755);
+    git(appDir, 'config', 'core.hooksPath', hooks);
+    // The hook does run for a push without the cli's token.
+    git(appDir, 'push', '-q', 'origin', 'change-1:probe');
+    assert.equal(fs.readFileSync(seen, 'utf8').trim(), '');
+    fs.rmSync(seen);
+    fs.writeFileSync(path.join(appDir, 'app.txt'), 'x\n');
+    git(appDir, 'add', '-A');
+    git(appDir, 'commit', '-q', '-m', 'x');
+    git(appDir, 'push', '-q', '--no-verify');
+    const merge = await branchMerge(appDir, 'change-1', 'main', {env, mode: 'update'});
+    assert.equal(merge.code, 0, merge.messages.join('\n'));
+    const fork = await branchFork(appDir, 'change-2', 'acme-ont', {env});
+    assert.equal(fork.code, 0, fork.messages.join('\n'));
+    assert.ok(!fs.existsSync(seen), 'a hook ran during a push with the token');
+  });
+
+  test('worktree remove --branch refuses, even with --force, while packages-local/ holds something else', () => {
+    const {r, run} = setup();
+    const co = run('change-1');
+    const appDir = co.app!.dir;
+    const clone = path.join(appDir, 'packages-local', 'hand-made');
+    git(appDir, 'clone', '-q', r.url(r.ont), clone);
+    fs.writeFileSync(path.join(clone, 'unsaved.ttl'), '# work\n');
+    const res = checkoutRemove('change-1', {dir: appDir, force: true, env});
+    assert.equal(res.code, 6);
+    assert.deepEqual(res.removed, []);
+    assert.ok(fs.existsSync(path.join(clone, 'unsaved.ttl')));
+    assert.match(res.messages.join('\n'), /not a package worktree of this checkout/);
+  });
 });

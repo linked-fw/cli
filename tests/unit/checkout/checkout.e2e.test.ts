@@ -171,6 +171,33 @@ describe('linked checkout', () => {
     assert.match(ssh.messages.join('\n'), /not an https:\/\//);
   });
 
+  test('a remote that renames its default branch: the fallback follows it', () => {
+    const {r, run} = setup();
+    assert.equal(run('change-1').code, 0);
+    git(r.ont, 'branch', '-m', 'main', 'trunk');
+    git(r.ont, 'symbolic-ref', 'HEAD', 'refs/heads/trunk');
+    commitOn(r.base, r.ont, 'trunk', 'more.ttl', '# on trunk\n');
+    const res = run('change-1');
+    assert.equal(res.code, 0, res.messages.join('\n'));
+    const ont = byName(res, 'acme-ont');
+    assert.deepEqual({branch: ont.branch, status: ont.status}, {branch: 'trunk', status: 'updated'});
+  });
+
+  test('a first push that failed is made by the re-run', () => {
+    const {r, run} = setup();
+    const hook = path.join(r.app, 'hooks', 'pre-receive');
+    fs.writeFileSync(hook, '#!/bin/sh\necho "no new branches" >&2\nexit 1\n');
+    fs.chmodSync(hook, 0o755);
+    const first = run('change-1');
+    assert.equal(first.code, 6);
+    assert.match(first.messages.join('\n'), /no new branches/);
+    fs.rmSync(hook);
+    const again = run('change-1');
+    assert.equal(again.code, 0, again.messages.join('\n'));
+    assert.equal(again.app?.status, 'updated');
+    assert.equal(git(r.app, 'rev-parse', 'refs/heads/change-1'), again.app?.head);
+  });
+
   test(
     'one real npm install in the app worktree links the package worktrees, without the token',
     () => {

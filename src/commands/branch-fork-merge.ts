@@ -113,7 +113,14 @@ export async function branchFork(
     );
   const onRemote = refExists(local, repo.dir, `refs/remotes/origin/${branch}`);
   const push = (): ForkResult => {
-    const r = remote(repo.dir, ['push', '-q', '-u', 'origin', branch]);
+    const r = remote(repo.dir, [
+      'push',
+      '-q',
+      '--no-verify',
+      '-u',
+      'origin',
+      branch,
+    ]);
     if (r.status !== 0)
       return refuse(
         EXIT_REFUSED,
@@ -227,6 +234,14 @@ export async function branchMerge(
   if (!into) return refuse(EXIT_USAGE, '--into <default branch> is required.');
   if (branch === into)
     return refuse(EXIT_USAGE, `"${branch}" is the branch it would merge into.`);
+  for (const ref of [branch, into]) {
+    if (
+      local('git', ['check-ref-format', '--branch', ref], {cwd: appDir})
+        .status !== 0
+    ) {
+      return refuse(EXIT_USAGE, `"${ref}" is not a valid branch name.`);
+    }
+  }
 
   const all = await listRepos(appDir, local);
   const [app] = all;
@@ -354,12 +369,13 @@ export async function branchMerge(
       const p = remote(tmp, [
         'push',
         '-q',
+        '--no-verify',
         'origin',
         `HEAD:refs/heads/${into}`,
       ]);
       if (p.status !== 0) {
         entry.result = 'push-refused';
-        return `${entry.name}: git push origin HEAD:${into} was refused: ${out(p)}. A protected ${into} needs --mode update. Later repos were skipped.`;
+        return `${entry.name}: git push origin HEAD:${into} was refused: ${out(p)}. If ${into} is protected, use --mode update; if origin/${into} moved since the fetch, run this again. Later repos were skipped.`;
       }
       entry.result = 'merged';
       return null;
@@ -411,6 +427,7 @@ export async function branchMerge(
     const p = remote(dir, [
       'push',
       '-q',
+      '--no-verify',
       'origin',
       `HEAD:refs/heads/${branch}`,
     ]);

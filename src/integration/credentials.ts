@@ -10,7 +10,10 @@
  * - `GIT_TERMINAL_PROMPT=0`, so a missing or wrong token fails instead of waiting for a terminal;
  * - an empty `credential.helper`, through `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` /
  *   `GIT_CONFIG_VALUE_n` (not `-c`, which shows in `ps`), so a keychain helper never stores the
- *   token askpass supplied.
+ *   token askpass supplied;
+ * - `core.hooksPath` pointed at an empty directory (and `--no-verify` on every push), so no git
+ *   hook -- `pre-push`, `reference-transaction`, a husky hook the app's `prepare` registered --
+ *   runs while the token is in the environment.
  *
  * Every other subprocess -- local git, `npm install`, builds -- gets `localEnv(env)`: the token
  * removed, so a git hook or an npm lifecycle script never sees it. URLs are stripped of userinfo
@@ -20,6 +23,8 @@
  * Without `LINKED_GIT_TOKEN` nothing is added: the developer's own git credentials apply.
  */
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {hookPath} from '../localize/hook-module.js';
 
@@ -52,6 +57,14 @@ export function askpassProgram(): string {
   return file;
 }
 
+/** An empty directory for `core.hooksPath`: git then finds no hook to run. */
+function noHooksDir(): string {
+  if (process.platform !== 'win32') return '/dev/null';
+  const dir = path.join(os.tmpdir(), 'linked-no-git-hooks');
+  fs.mkdirSync(dir, {recursive: true});
+  return dir;
+}
+
 /**
  * The variables a remote git call adds when `LINKED_GIT_TOKEN` is set; empty otherwise. An
  * existing `GIT_CONFIG_COUNT` is extended, not replaced.
@@ -65,9 +78,11 @@ export function gitRemoteEnv(
   return {
     GIT_ASKPASS: askpassProgram(),
     GIT_TERMINAL_PROMPT: '0',
-    GIT_CONFIG_COUNT: String(n + 1),
+    GIT_CONFIG_COUNT: String(n + 2),
     [`GIT_CONFIG_KEY_${n}`]: 'credential.helper',
     [`GIT_CONFIG_VALUE_${n}`]: '',
+    [`GIT_CONFIG_KEY_${n + 1}`]: 'core.hooksPath',
+    [`GIT_CONFIG_VALUE_${n + 1}`]: noHooksDir(),
   };
 }
 

@@ -271,6 +271,7 @@ class Checkout {
 
   run(): void {
     const {branch} = this;
+    fs.mkdirSync(this.root, {recursive: true});
     if (
       !branch ||
       !this.ok(this.root, ['check-ref-format', '--branch', branch])
@@ -280,7 +281,6 @@ class Checkout {
         EXIT_USAGE,
       );
     }
-    fs.mkdirSync(this.root, {recursive: true});
     const repo = cleanRepo(this.options.repo ?? this.originOfCwd(), (m) =>
       this.say(m),
     );
@@ -392,9 +392,9 @@ class Checkout {
         );
       }
       this.remote(dir, ['fetch', '--prune', '-q', 'origin']);
-      if (!this.ok(dir, ['symbolic-ref', '-q', 'refs/remotes/origin/HEAD'])) {
-        this.remote(dir, ['remote', 'set-head', 'origin', '--auto']);
-      }
+      // Always: a remote that renamed its default branch leaves origin/HEAD pointing at a
+      // branch the prune just deleted.
+      this.remote(dir, ['remote', 'set-head', 'origin', '--auto']);
     }
     this.bases.set(repo, dir);
     return dir;
@@ -504,6 +504,19 @@ class Checkout {
           false,
           `it is on ${on ?? 'a detached HEAD'}, not ${branch}`,
         );
+      if (
+        !this.hasRemoteBranch(base, branch) &&
+        !this.everPushed(base, branch)
+      ) {
+        // An earlier run made the branch but its push failed: push it now.
+        this.remote(
+          dir,
+          ['push', '-q', '--no-verify', '-u', 'origin', branch],
+          EXIT_REFUSED,
+        );
+        this.say(`app: pushed ${branch}, which origin lacked`);
+        return app('updated', false);
+      }
       const {status, reason} = this.updateOnBranch(dir, base, branch);
       return app(status, false, reason);
     }
@@ -556,9 +569,22 @@ class Checkout {
       ]);
     }
     this.moved.push({dir, before: null});
-    this.remote(dir, ['push', '-q', '-u', 'origin', branch], EXIT_REFUSED);
+    this.remote(
+      dir,
+      ['push', '-q', '--no-verify', '-u', 'origin', branch],
+      EXIT_REFUSED,
+    );
     this.say(`app: ${dir} on ${branch}, created from ${rule.from} and pushed`);
     return app('created', true);
+  }
+
+  /**
+   * Whether `branch` was ever pushed from here: a successful `push -u` records its upstream. A
+   * branch with none was made by a run whose push failed; one with an upstream that origin no
+   * longer has was deleted there (merged, usually) and is not pushed again.
+   */
+  private everPushed(base: string, branch: string): boolean {
+    return this.ok(base, ['config', '--get', `branch.${branch}.remote`]);
   }
 
   /** `--from` as a commit: `origin/<from>` when the remote has that branch, else the ref as given. */
@@ -988,30 +1014,41 @@ export function checkoutRemove(
   const local_ = path.join(appDir, LOCAL_DIR);
   let entries: string[] = [];
   try {
-    entries = fs
-      .readdirSync(local_)
-      .filter((e) => !e.startsWith('.'))
-      .sort();
+    entries = fs.readdirSync(local_).sort();
   } catch {
     /* no packages-local/ */
   }
-  const dirs = [
-    ...entries
-      .map((e) => path.join(local_, e))
-      .filter((d) => fs.existsSync(path.join(d, '.git'))),
-    appDir,
-  ];
+  // `git worktree remove` deletes the app worktree with everything in it, its gitignored
+  // packages-local/ included: anything there that is not a package worktree of the checkout (a
+  // full clone, a monorepo clone in .repos/, a stray file) could hold work. Refused even with
+  // --force; move it out first.
+  const foreign = entries
+    .map((e) => path.join(local_, e))
+    .filter((d) => !fs.existsSync(path.join(d, '.git')) || !commonOf(d));
+  if (foreign.length) {
+    result.kept.push(
+      ...foreign.map((dir) => ({
+        dir,
+        reason: 'not a package worktree of this checkout',
+      })),
+    );
+    return refuse(
+      EXIT_REFUSED,
+      `${foreign.join(', ')} ${foreign.length === 1 ? 'is' : 'are'} in ${local_} but not a package worktree of this checkout, ` +
+        `and removing the app worktree would delete ${foreign.length === 1 ? 'it' : 'them'}. Move ${foreign.length === 1 ? 'it' : 'them'} out first; nothing was removed.`,
+    );
+  }
+  const dirs = [...entries.map((e) => path.join(local_, e)), appDir];
   for (const dir of dirs) {
     const common = dir === appDir ? appCommon : commonOf(dir);
     const label = (() => {
       const n = readJson(path.join(dir, 'package.json'))?.name;
       return typeof n === 'string' ? n : path.basename(dir);
     })();
-    if (!common) {
-      result.kept.push({dir, reason: 'not a linked worktree'});
-      continue;
-    }
+    if (!common)
+      return refuse(EXIT_REFUSED, `${dir} is not a linked worktree.`);
     const f = remote(dir, ['fetch', '--prune', '-q', 'origin']);
+    remote(dir, ['remote', 'set-head', 'origin', '--auto']);
     if (f.status !== 0)
       return refuse(
         EXIT_NOT_FOUND,

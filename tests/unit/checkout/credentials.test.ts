@@ -29,16 +29,20 @@ describe('gitRemoteEnv', () => {
     const added = gitRemoteEnv({LINKED_GIT_TOKEN: TOKEN});
     assert.equal(added.GIT_ASKPASS, ASKPASS);
     assert.equal(added.GIT_TERMINAL_PROMPT, '0');
-    assert.equal(added.GIT_CONFIG_COUNT, '1');
+    assert.equal(added.GIT_CONFIG_COUNT, '2');
     assert.equal(added.GIT_CONFIG_KEY_0, 'credential.helper');
     assert.equal(added.GIT_CONFIG_VALUE_0, '');
+    // No git hook runs while the token is in the environment.
+    assert.equal(added.GIT_CONFIG_KEY_1, 'core.hooksPath');
+    assert.equal(added.GIT_CONFIG_VALUE_1, '/dev/null');
     assert.ok(!Object.values(added).some((v) => v.includes(TOKEN)));
   });
 
   test('an existing GIT_CONFIG_COUNT is extended', () => {
     const added = gitRemoteEnv({LINKED_GIT_TOKEN: TOKEN, GIT_CONFIG_COUNT: '2'});
-    assert.equal(added.GIT_CONFIG_COUNT, '3');
+    assert.equal(added.GIT_CONFIG_COUNT, '4');
     assert.equal(added.GIT_CONFIG_KEY_2, 'credential.helper');
+    assert.equal(added.GIT_CONFIG_KEY_3, 'core.hooksPath');
   });
 
   test('the askpass hook is executable', () => {
