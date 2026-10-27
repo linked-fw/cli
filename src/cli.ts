@@ -698,6 +698,32 @@ branch
     return runBranchStart(name, packages, options);
   });
 
+branch
+  .command('fork <branch> <package>')
+  .description(
+    "Run in an app checkout (a linked checkout worktree, or an app with packages-local/ clones). Create <branch> in the packages-local/ checkout <package> names (its npm name, acme-ont; or @_linked/core, core, _linked-core) from its current head -- usually the fallback linked checkout left detached at origin/<default> -- and push it (-u). Refuses when the checkout has changes, or when origin has <branch> already and the checkout is not on it (linked checkout switches to it). On <branch> already: pushes what origin lacks, else does nothing (exit 0). A token comes only from LINKED_GIT_TOKEN.",
+  )
+  .option('--dir <dir>', 'The app checkout. Default: the app the current directory is in.')
+  .option('--json', 'Print {code, package, dir, branch, from, pushed, messages}.')
+  .action(async (name: string, pkg: string, options) => {
+    const {runBranchFork} = await import('./commands/branch-fork-merge.js');
+    return runBranchFork(name, pkg, options);
+  });
+
+branch
+  .command('merge <branch>')
+  .description(
+    "Run in an app checkout. Land <branch> in --into across the repos on it -- each packages-local/ checkout on <branch>, in dependency order (dependencies and linked.unpublishedPackages), then the app; checkouts on another branch or detached are skipped. Fetches each first, and refuses, merging nothing, while one has changes or commits origin lacks. --mode push (default): merge origin/<branch> into origin/<into> with --no-ff (\"Merge branch '<branch>' into <into>\") in a temporary worktree and push <into>. --mode update: merge origin/<into> into <branch> and push <branch>, for a protected <into> that lands by PRs in the order printed. Stops at the first conflict (aborted, files named) or refused push; later repos are skipped, earlier ones stay merged. A token comes only from LINKED_GIT_TOKEN.",
+  )
+  .requiredOption('--into <branch>', 'The default branch it lands in, e.g. main.')
+  .option('--mode <mode>', 'push (merge and push --into) or update (merge --into into the branch and push the branch).', 'push')
+  .option('--dir <dir>', 'The app checkout. Default: the app the current directory is in.')
+  .option('--json', 'Print {code, branch, into, mode, repos: [{name, dir, repo, result, sha, files, landed}], messages}, repos in merge order.')
+  .action(async (name: string, options) => {
+    const {runBranchMerge} = await import('./commands/branch-fork-merge.js');
+    return runBranchMerge(name, options);
+  });
+
 const worktree = program
   .command('worktree')
   .description(
@@ -732,14 +758,30 @@ worktree
   });
 
 worktree
-  .command('remove <agent>')
+  .command('remove [agent]')
   .description(
-    "Run in an app. Find the agent's app worktree by its branch <base>--<agent> (a detached one by its package worktrees on that branch, or at the default dir), remove its package worktrees, then the app worktree, then delete its landed agent branches. Refuses, removing nothing, while a branch has not landed or a worktree has changes.",
+    "Run in an app. Find the agent's app worktree by its branch <base>--<agent> (a detached one by its package worktrees on that branch, or at the default dir), remove its package worktrees, then the app worktree, then delete its landed agent branches. Refuses, removing nothing, while a branch has not landed or a worktree has changes. With --branch <branch> instead of an agent: remove a linked checkout checkout -- its package worktrees, then the app worktree on <branch> (found among the worktrees of the repository it runs in, or --dir), then the landed local branches; landed means in origin's default branch after a fetch (a detached fallback by its HEAD). Base clones stay.",
   )
+  .option('--branch <branch>', 'Remove the linked checkout checkout on this branch instead of an agent worktree.')
   .option('--force', 'Remove even when a worktree has changes or a branch has not landed; unlanded branches are kept and their sha printed.')
   .option('--delete-unlanded', 'Also delete agent branches that have not landed (git branch -D), printing the sha each was at.')
   .option('--dir <path>', 'The app worktree directory, instead of finding it by its branch.')
-  .action(async (agent: string, options) => {
+  .option('--json', 'Print the result as JSON: with --branch {code, removed, kept: [{dir, reason}], branches: [{repo, branch, deleted, sha}], messages}; for an agent {code, messages}.')
+  .action(async (agent: string | undefined, options) => {
+    if (options.branch) {
+      if (agent || options.deleteUnlanded) {
+        console.error('--branch removes a linked checkout checkout: it takes no agent name and no --delete-unlanded.');
+        process.exitCode = 2;
+        return;
+      }
+      const {runCheckoutRemove} = await import('./commands/checkout.js');
+      return runCheckoutRemove(options.branch, options);
+    }
+    if (!agent) {
+      console.error('Name the agent, or pass --branch <branch> for a linked checkout checkout.');
+      process.exitCode = 2;
+      return;
+    }
     const {runWorktreeRemove} = await import('./commands/worktree.js');
     return runWorktreeRemove(agent, options);
   });

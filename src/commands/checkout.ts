@@ -28,8 +28,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
-  localEnv,
-  remoteEnv,
+  gitRunners,
   scrubSecret,
   stripUserinfo,
 } from '../integration/credentials.js';
@@ -58,7 +57,7 @@ import {
   tail,
 } from '../localize/localize.js';
 import {checkoutNameFor, normalizeGitUrl} from '../localize/resolve.js';
-import {makeRun, type Run} from '../localize/run.js';
+import {makeRun, type Run, type RunResult} from '../localize/run.js';
 import {refExists, worktreesOf} from './branch.js';
 import {dependencyOrder} from './release.js';
 import {realish} from './worktree.js';
@@ -219,6 +218,7 @@ interface Head {
 
 class Checkout {
   private readonly local: Run;
+  private readonly remoteRun: (cwd: string, args: string[]) => RunResult;
   private readonly bases = new Map<string, string>();
   private readonly moved: Head[] = [];
 
@@ -232,8 +232,9 @@ class Checkout {
     private readonly result: CheckoutResult,
   ) {
     // Every local subprocess runs without the token: hooks and lifecycle scripts never see it.
-    this.local = (cmd, args, opts = {}) =>
-      runner(cmd, args, {...opts, env: opts.env ?? localEnv(env)});
+    const runners = gitRunners(runner, env);
+    this.local = runners.local;
+    this.remoteRun = runners.remote;
   }
 
   private say(m: string): void {
@@ -258,10 +259,10 @@ class Checkout {
 
   /** A git call that reaches the remote: the askpass environment, the token scrubbed from errors. */
   private remote(cwd: string, args: string[], code = EXIT_NOT_FOUND): string {
-    const r = this.runner('git', args, {cwd, env: remoteEnv(this.env)});
+    const r = this.remoteRun(cwd, args);
     if (r.status !== 0) {
       throw new LocalizeError(
-        `git ${args.join(' ')} failed in ${cwd}: ${scrubSecret((r.stderr || r.stdout).trim(), this.env)}`,
+        `git ${args.join(' ')} failed in ${cwd}: ${(r.stderr || r.stdout).trim()}`,
         code,
       );
     }
@@ -884,5 +885,240 @@ export async function runCheckout(
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   else
     (result.code === 0 ? console.log : console.error)(formatCheckout(result));
+  process.exitCode = result.code;
+}
+
+export interface CheckoutRemoveOptions {
+  /** The app worktree; default the worktree on `<branch>` of the repo `cwd` is in. */
+  dir?: string;
+  /** Remove even what has not landed or has changes; unlanded branches are kept. */
+  force?: boolean;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface CheckoutRemoveResult {
+  code: number;
+  removed: string[];
+  kept: {dir: string; reason: string}[];
+  branches: {repo: string; branch: string; deleted: boolean; sha: string}[];
+  messages: string[];
+}
+
+/**
+ * `linked worktree remove --branch <branch>`: remove a `linked checkout` checkout once it has
+ * landed -- the package worktrees in its `packages-local/`, then the app worktree, then the
+ * landed local branches. Landed means contained in `origin/<default>` after a fetch; a detached
+ * fallback has landed when its HEAD is. Refuses, removing nothing, while a repo has not landed or
+ * has changes, unless `force` (unlanded branches are then kept, their sha printed). Base clones
+ * stay.
+ */
+export function checkoutRemove(
+  branch: string,
+  options: CheckoutRemoveOptions = {},
+  run?: Run,
+): CheckoutRemoveResult {
+  const cwd = options.cwd ?? process.cwd();
+  const env = options.env ?? process.env;
+  const {local, remote} = gitRunners(run ?? makeRun(cwd), env);
+  const result: CheckoutRemoveResult = {
+    code: 0,
+    removed: [],
+    kept: [],
+    branches: [],
+    messages: [],
+  };
+  const refuse = (code: number, ...m: string[]): CheckoutRemoveResult => {
+    result.code = code;
+    result.messages.push(...m);
+    return result;
+  };
+  const git = (dir: string, args: string[]) => local('git', args, {cwd: dir});
+
+  let appDir: string;
+  if (options.dir) {
+    appDir = realish(path.resolve(cwd, options.dir));
+  } else {
+    const found = worktreesOf(local, cwd).find((wt) => wt.branch === branch);
+    if (!found) {
+      return refuse(
+        EXIT_USAGE,
+        `No worktree on ${branch} in the repository of ${cwd}. Pass the app worktree with --dir.`,
+      );
+    }
+    appDir = realish(found.path);
+  }
+  const commonOf = (dir: string): string | null => {
+    const r = git(dir, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ]);
+    const g = git(dir, ['rev-parse', '--path-format=absolute', '--git-dir']);
+    if (r.status !== 0 || g.status !== 0) return null;
+    // A main working tree has its git dir as the common dir: never removed here.
+    return realish(r.stdout.trim()) === realish(g.stdout.trim())
+      ? null
+      : realish(r.stdout.trim());
+  };
+  const appCommon = commonOf(appDir);
+  if (!appCommon)
+    return refuse(
+      EXIT_REFUSED,
+      `${appDir} is not a linked worktree (a checkout's app worktree).`,
+    );
+  const appBranchNow = currentBranch(local, appDir);
+  if (appBranchNow !== branch) {
+    return refuse(
+      EXIT_REFUSED,
+      `${appDir} is on ${appBranchNow ?? 'a detached HEAD'}, not ${branch}.`,
+    );
+  }
+
+  interface Item {
+    label: string;
+    dir: string;
+    common: string;
+    branch: string | null;
+    repo: string;
+    landed: boolean;
+    dirty: boolean;
+  }
+  const items: Item[] = [];
+  const local_ = path.join(appDir, LOCAL_DIR);
+  let entries: string[] = [];
+  try {
+    entries = fs
+      .readdirSync(local_)
+      .filter((e) => !e.startsWith('.'))
+      .sort();
+  } catch {
+    /* no packages-local/ */
+  }
+  const dirs = [
+    ...entries
+      .map((e) => path.join(local_, e))
+      .filter((d) => fs.existsSync(path.join(d, '.git'))),
+    appDir,
+  ];
+  for (const dir of dirs) {
+    const common = dir === appDir ? appCommon : commonOf(dir);
+    const label = (() => {
+      const n = readJson(path.join(dir, 'package.json'))?.name;
+      return typeof n === 'string' ? n : path.basename(dir);
+    })();
+    if (!common) {
+      result.kept.push({dir, reason: 'not a linked worktree'});
+      continue;
+    }
+    const f = remote(dir, ['fetch', '--prune', '-q', 'origin']);
+    if (f.status !== 0)
+      return refuse(
+        EXIT_NOT_FOUND,
+        `git fetch failed in ${dir}: ${(f.stderr || f.stdout).trim()}`,
+      );
+    const def = git(dir, [
+      'symbolic-ref',
+      '--short',
+      '-q',
+      'refs/remotes/origin/HEAD',
+    ]).stdout.trim();
+    const on = currentBranch(local, dir);
+    const landed =
+      !!def &&
+      git(dir, [
+        'merge-base',
+        '--is-ancestor',
+        on ? `refs/heads/${on}` : 'HEAD',
+        `refs/remotes/${def}`,
+      ]).status === 0;
+    const dirty = git(dir, ['status', '--porcelain']).stdout.trim() !== '';
+    const repo = stripUserinfo(
+      git(dir, ['config', '--get', 'remote.origin.url']).stdout.trim(),
+    ).url;
+    items.push({label, dir, common, branch: on, repo, landed, dirty});
+  }
+
+  const problems = items.flatMap((it) => [
+    ...(!it.landed
+      ? [
+          {
+            dir: it.dir,
+            reason: `${it.label}: ${it.branch ?? 'its HEAD'} has not landed in origin's default branch`,
+          },
+        ]
+      : []),
+    ...(it.dirty
+      ? [
+          {
+            dir: it.dir,
+            reason: `${it.label}: it has uncommitted or untracked changes`,
+          },
+        ]
+      : []),
+  ]);
+  if (problems.length && !options.force) {
+    result.kept.push(...problems);
+    return refuse(
+      EXIT_REFUSED,
+      ...problems.map((p) => p.reason),
+      'Nothing was removed. --force removes it anyway and keeps unlanded branches.',
+    );
+  }
+
+  for (const it of items) {
+    const args = [
+      'worktree',
+      'remove',
+      ...(options.force ? ['--force'] : []),
+      it.dir,
+    ];
+    const r = git(it.common, args);
+    if (r.status !== 0) {
+      result.kept.push({dir: it.dir, reason: (r.stderr || r.stdout).trim()});
+      return refuse(
+        EXIT_REFUSED,
+        `${it.label}: git ${args.join(' ')} failed: ${(r.stderr || r.stdout).trim()}`,
+      );
+    }
+    git(it.common, ['worktree', 'prune']);
+    result.removed.push(it.dir);
+  }
+  for (const it of items) {
+    if (!it.branch) continue;
+    const sha = git(it.common, [
+      'rev-parse',
+      `refs/heads/${it.branch}`,
+    ]).stdout.trim();
+    let deleted = false;
+    if (it.landed)
+      deleted = git(it.common, ['branch', '-D', it.branch]).status === 0;
+    else
+      result.messages.push(
+        `${it.label}: kept ${it.branch} at ${sha} (not landed)`,
+      );
+    result.branches.push({repo: it.repo, branch: it.branch, deleted, sha});
+  }
+  return result;
+}
+
+/** The commander action for `worktree remove --branch`. */
+export async function runCheckoutRemove(
+  branch: string,
+  options: {dir?: string; force?: boolean; json?: boolean},
+): Promise<void> {
+  const result = checkoutRemove(branch, {
+    dir: options.dir,
+    force: options.force,
+  });
+  if (options.json)
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  else {
+    const write = result.code === 0 ? console.log : console.error;
+    for (const d of result.removed) write(`removed ${d}`);
+    for (const b of result.branches)
+      if (b.deleted) write(`deleted ${b.branch} (${b.repo})`);
+    for (const m of result.messages) write(m);
+  }
   process.exitCode = result.code;
 }

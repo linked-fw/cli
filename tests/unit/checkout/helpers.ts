@@ -3,10 +3,13 @@
  * `file://` URLs, so nothing touches the network. An app lists an ontology and an asset package
  * in `linked.unpublishedPackages`; the asset package lists the ontology package.
  */
+import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+import {checkout, type CheckoutOptions, type CheckoutResult} from '../../../src/commands/checkout.js';
 
 export const gitEnv: NodeJS.ProcessEnv = {
   ...process.env,
@@ -110,3 +113,53 @@ export function makeRemotes(): Remotes {
   commitOn(base, assets, 'change-1', 'assets.txt', 'on change-1\n');
   return {base, app, ont, assets, url};
 }
+
+/** The fake token every checkout test runs with. */
+export const TOKEN = 'ghs_checkoutE2eFakeToken';
+
+const dirs: string[] = [];
+/** Remove every temp dir `setup` made; for `afterEach`. */
+export function cleanup(): void {
+  for (const d of dirs.splice(0)) fs.rmSync(d, {recursive: true, force: true});
+}
+
+/** Every git config file under `root`: base clones, worktree configs. */
+function configFiles(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, {withFileTypes: true})) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory() && e.name !== 'node_modules') walk(p);
+      else if (e.isFile() && /^config(\.worktree)?$/.test(e.name)) out.push(p);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+/** No token and no userinfo in any config under `root`, nor in any remote URL of a base clone. */
+export function assertNoToken(root: string): void {
+  const files = configFiles(root);
+  assert.ok(files.length > 0);
+  for (const f of files) {
+    const text = fs.readFileSync(f, 'utf8');
+    assert.ok(!text.includes(TOKEN), `${f} holds the token`);
+    assert.ok(!/:\/\/[^/\s]*@/.test(text), `${f} holds a URL with userinfo`);
+  }
+  const repos = path.join(root, '.repos', 'acme');
+  for (const b of fs.readdirSync(repos)) {
+    const urls = git(path.join(repos, b), 'config', '--get-regexp', 'remote\\..*\\.url');
+    assert.ok(!urls.includes(TOKEN) && !urls.includes('@'), urls);
+  }
+}
+
+export function setup(): {r: Remotes; root: string; run: (branch: string, o?: CheckoutOptions) => CheckoutResult} {
+  const r = makeRemotes();
+  const root = tmp('checkout-root-');
+  dirs.push(r.base, root);
+  const env = {...gitEnv, LINKED_GIT_TOKEN: TOKEN};
+  const run = (branch: string, o: CheckoutOptions = {}) =>
+    checkout(branch, {repo: r.url(r.app), root, install: false, env, cwd: root, ...o});
+  return {r, root, run};
+}
+

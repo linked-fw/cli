@@ -8,55 +8,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {checkout, type CheckoutOptions, type CheckoutResult} from '../../../src/commands/checkout.js';
+import {type CheckoutResult} from '../../../src/commands/checkout.js';
 import {scrubbedNpmEnv} from '../localize/helpers.js';
-import {commitOn, git, gitEnv, makeRemotes, tmp, type Remotes} from './helpers.js';
+import {assertNoToken, cleanup, commitOn, git, gitEnv, setup, TOKEN} from './helpers.js';
 
-const TOKEN = 'ghs_checkoutE2eFakeToken';
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) fs.rmSync(d, {recursive: true, force: true});
-});
-
-/** Every git config file under `root`: base clones, worktree configs. */
-export function configFiles(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    for (const e of fs.readdirSync(dir, {withFileTypes: true})) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory() && e.name !== 'node_modules') walk(p);
-      else if (e.isFile() && /^config(\.worktree)?$/.test(e.name)) out.push(p);
-    }
-  };
-  walk(root);
-  return out;
-}
-
-/** No token and no userinfo in any config under `root`, nor in any remote URL of a base clone. */
-export function assertNoToken(root: string): void {
-  const files = configFiles(root);
-  assert.ok(files.length > 0);
-  for (const f of files) {
-    const text = fs.readFileSync(f, 'utf8');
-    assert.ok(!text.includes(TOKEN), `${f} holds the token`);
-    assert.ok(!/:\/\/[^/\s]*@/.test(text), `${f} holds a URL with userinfo`);
-  }
-  const repos = path.join(root, '.repos', 'acme');
-  for (const b of fs.readdirSync(repos)) {
-    const urls = git(path.join(repos, b), 'config', '--get-regexp', 'remote\\..*\\.url');
-    assert.ok(!urls.includes(TOKEN) && !urls.includes('@'), urls);
-  }
-}
-
-export function setup(): {r: Remotes; root: string; run: (branch: string, o?: CheckoutOptions) => CheckoutResult} {
-  const r = makeRemotes();
-  const root = tmp('checkout-root-');
-  dirs.push(r.base, root);
-  const env = {...gitEnv, LINKED_GIT_TOKEN: TOKEN};
-  const run = (branch: string, o: CheckoutOptions = {}) =>
-    checkout(branch, {repo: r.url(r.app), root, install: false, env, cwd: root, ...o});
-  return {r, root, run};
-}
+afterEach(cleanup);
 
 const byName = (res: CheckoutResult, name: string) => {
   const p = res.packages.find((x) => x.name === name);

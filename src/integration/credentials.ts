@@ -98,3 +98,32 @@ export function scrubSecret(
   out = out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]*@/gi, '$1');
   return out;
 }
+
+/** A `Run` for one command line: `cmd`, `args`, options. */
+type RunLike = (
+  cmd: string,
+  args: string[],
+  opts?: {cwd?: string; env?: NodeJS.ProcessEnv; shell?: boolean},
+) => {status: number; stdout: string; stderr: string};
+
+/**
+ * The two ways the cli runs a subprocess once a token may be in `env`: `local` (git, npm,
+ * builds) without the token, `remote` (clone, fetch, push, ls-remote) with the askpass
+ * environment and its error text scrubbed.
+ */
+export function gitRunners<R extends RunLike>(
+  run: R,
+  env: NodeJS.ProcessEnv = process.env,
+): {local: R; remote: (cwd: string, args: string[]) => ReturnType<R>} {
+  const local = ((cmd, args, opts = {}) =>
+    run(cmd, args, {...opts, env: opts.env ?? localEnv(env)})) as R;
+  const remote = (cwd: string, args: string[]) => {
+    const r = run('git', args, {cwd, env: remoteEnv(env)});
+    return {
+      ...r,
+      stderr: scrubSecret(r.stderr, env),
+      stdout: scrubSecret(r.stdout, env),
+    } as ReturnType<R>;
+  };
+  return {local, remote};
+}

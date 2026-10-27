@@ -828,14 +828,18 @@ export async function runWorktreeList(options: {json?: boolean; all?: boolean}):
 /** The commander action for `worktree remove`. */
 export async function runWorktreeRemove(
   agent: string,
-  options: {force?: boolean; deleteUnlanded?: boolean; dir?: string},
+  options: {force?: boolean; deleteUnlanded?: boolean; dir?: string; json?: boolean},
 ): Promise<void> {
   const result = await worktreeRemove(findAppRoot(process.cwd()), agent, {
     force: options.force,
     deleteUnlanded: options.deleteUnlanded,
     dir: resolveDir(options.dir),
   });
-  const write = result.code === 0 ? console.log : console.error;
-  for (const m of result.messages) write(m);
+  if (options.json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  } else {
+    const write = result.code === 0 ? console.log : console.error;
+    for (const m of result.messages) write(m);
+  }
   process.exitCode = result.code;
 }
