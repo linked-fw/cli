@@ -116,15 +116,25 @@ export const LINKED_KINDS: readonly LinkedKind[] = [
  * THE way to tell what a `package.json` is: its `"linked": {"kind": …}`. `app` is an app (built
  * by `linked build-app`); `ontology`, `assets` and `library` are linked packages (an ontology
  * package may carry shapes for its own terms; `library` is framework code). Undefined for
- * anything else: no `linked` object, a kind that is not one of these, and the retired
- * `linkedPackage` / `linkedApp` flags, which are not read.
+ * anything else: no `linked` object and a kind that is not one of these.
+ *
+ * Until every published package carries `linked.kind`, a `package.json` without one is still
+ * read by the retired flags: `linkedApp: true` is an `app`, `linkedPackage: true` a `library`.
  */
 export function linkedKind(json: unknown): LinkedKind | undefined {
   if (!json || typeof json !== 'object') return undefined;
   const linked: unknown = (json as {linked?: unknown}).linked;
-  if (!linked || typeof linked !== 'object') return undefined;
+  if (!linked || typeof linked !== 'object') return retiredFlagKind(json);
   const kind: unknown = (linked as {kind?: unknown}).kind;
-  return LINKED_KINDS.find((k) => k === kind);
+  return LINKED_KINDS.find((k) => k === kind) ?? retiredFlagKind(json);
+}
+
+/** The kind a `package.json` published before `linked.kind` declares by its retired flags. */
+function retiredFlagKind(json: object): LinkedKind | undefined {
+  const flags = json as {linkedApp?: unknown; linkedPackage?: unknown};
+  if (flags.linkedApp === true) return 'app';
+  if (flags.linkedPackage === true) return 'library';
+  return undefined;
 }
 // end of the linkedKind twin.
 
