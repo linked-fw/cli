@@ -26,8 +26,11 @@ already take every checkout there, cover it. `linked checkout <branch> --add <re
   so the app's `package.json` and lock stay as committed.
 - A later run without `--add` reports it `unlisted` and keeps it, as any checkout no list names.
 - An `--add` of a package a list names with the same repo is that listed package (a message); with
-  another repo, one name added with two repos, or a repo with no `package.json` naming a package,
-  it is refused (exit 6).
+  another repo, one name added with two repos, or a repo whose `package.json` names no package by
+  an npm name (a name like `../x` would leave `packages-local/`), it is refused (exit 6).
+- It stays in the app's `packages-local/*` glob: an install a later run makes for a listed package
+  links it like every checkout there, and the app's lock-at-rest hook puts the committed lockfile
+  back.
 
 ### Changes
 
@@ -43,7 +46,7 @@ already take every checkout there, cover it. `linked checkout <branch> --add <re
 ### Verification
 
 - `npx jest --config jest.config.cjs tests/unit/checkout/checkout.e2e.test.ts` → `Tests: 12 passed,
-  12 total` (29.7 s). The added package's entry:
+  12 total` (29.7 s; again after the npm-name check). The added package's entry:
   ```json
   {"name": "acme-extra", "branch": "main", "detached": true, "fellBack": true,
    "requiredBy": [], "status": "created", "added": true}
@@ -62,5 +65,8 @@ None.
 None in this repo. CN's use of it: CN report 210.
 
 ## Details
+
+CN's independent review of the step found the name taken as a directory unchecked (low, fixed in
+the second commit) and that the added checkout joins a later install (documented, by design).
 
 The skills in `semantu-agents` do not describe `linked checkout`, so they need no change.
