@@ -60,7 +60,11 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
   rest `kept`; nothing is deleted. One run per base clone at a time (callers serialise per app).
   `linked branch fork <branch> <package> [--dir <app>] [--json]`: create the branch in that
   package checkout from its current head and push it; `{code, package, dir, branch, from,
-  pushed, messages}`. `linked branch merge <branch> --into <default> [--mode push|update]
+  pushed, messages}`. `linked branch push <branch> [--dir <app>] [--json]`: in every repo of the
+  checkout on `<branch>` (the app, which must be on it, and each package worktree on it), fetch and
+  push what origin lacks (`-u` when new); a diverged branch is `refused`, never forced; `{code,
+  branch, repos: [{name, dir, repo, result: pushed|up-to-date|refused, sha}], messages}`, exit 0,
+  2, 4, 6. `linked branch merge <branch> --into <default> [--mode push|update]
   [--dir <app>] [--json]`: the repos on `<branch>`, packages in dependency order (including
   `linked.unpublishedPackages` edges), then the app; fetch; `push` (default) merges
   `origin/<branch>` `--no-ff` into `origin/<default>` in a temporary worktree and pushes
