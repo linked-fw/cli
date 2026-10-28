@@ -90,33 +90,20 @@ Tests:       1127 passed, 1127 total
 
 `linked build` of the cli: `✔ Build successful` (every check step green). `tsc --noEmit`: clean.
 
-CN `npm run test:regular` in a CN worktree whose `node_modules/@_linked/cli` links this cli at
-`0e228d8` (`CN_TEST_PORT=4166`, under the shared lock), timed 104 s: **red, and not from this change**.
+CN `npm run test:regular` in a CN worktree of `dev` (`bb8f5d8bd`) whose `@_linked/cli` resolves to
+the main checkout's cli built at `0e228d8` (`CN_TEST_PORT=4166`, under the shared lock), 389 s:
 
 ```
- Test Files  5 failed | 328 passed (333)
-      Tests  4 failed | 3051 passed | 6 skipped (3061)
-...
-Error: Invalid override for PackageOntology.preferredPrefix: the path http://purl.org/vocab/vann/preferredNamespacePrefix is already declared as the inherited property 'preferredNamespacePrefix'; redeclare it under that label.
-...
-  1 failed
-    [setup] › tests/auth.setup.ts:13:1 › authenticate via dev iframe
-  364 did not run
+  14 skipped
+  351 passed (5.0m)
 
 test:regular
-  typecheck:gate                                   PASS   14s
-  unit (vitest)                                    FAIL   42s
-  packages                                         PASS    8s
-  playwright (integration + sign-in e2e)           FAIL   40s
-  total                                            FAIL  104s
+  typecheck:gate                                   PASS   19s
+  unit (vitest)                                    PASS   57s
+  packages                                         PASS    9s
+  playwright (integration + sign-in e2e)           PASS  304s
+  total                                            PASS  389s
 ```
-
-Every failure is that one error, thrown at shape registration: `@_linked/owl` `6a2669d` (ontology
-metadata accessors, landed on `dev` the same evening) declares `preferredNamespacePrefix` on
-`Ontology`, and CN's `src/shapes/ontologies/PackageOntology.ts` still declares the same path as
-`preferredPrefix`. The CN backend does not boot, so sign-in setup fails and nothing else runs. No
-cli code is on that path. An earlier quote of a green run in this report was another session's log
-written to the same file name; it is withdrawn.
 
 ### Deviations
 
