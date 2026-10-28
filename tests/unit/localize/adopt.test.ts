@@ -52,7 +52,7 @@ test('adopt sets up, installs at the root and builds the checkout -- without clo
   seed(appRoot, 'scope-thing', {
     name: '@scope/thing',
     version: '1.0.0',
-    linkedPackage: true,
+    linked: {kind: 'assets'},
     scripts: {build: 'linked build'},
   });
   let seenByLockOnly: boolean | null = null;

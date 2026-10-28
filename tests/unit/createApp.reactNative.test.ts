@@ -323,10 +323,9 @@ describe('scaffoldReactNativeApp', () => {
     ).toContain("return nodeEnv === 'development';");
 
     const shapes = readJSON(path.join(target, 'packages/demo-shapes/package.json'));
-    expect(shapes.linkedPackage).toBe(true);
-    // Extensionless imports need no opt-in: `linked build` always rewrites the
-    // emitted ESM specifiers.
-    expect(shapes.linked).toBeUndefined();
+    // Its kind is the only `linked` key: extensionless imports need no opt-in,
+    // `linked build` always rewrites the emitted ESM specifiers.
+    expect(shapes.linked).toEqual({kind: 'assets'});
 
     const apiPkg = readJSON(path.join(target, 'services/api/package.json'));
     expect(apiPkg.dependencies['demo-shapes']).toBe('*');

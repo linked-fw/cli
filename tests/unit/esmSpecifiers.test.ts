@@ -258,6 +258,7 @@ describe('planBuildSteps', () => {
       'Copying files to lib folder',
       'Dual package support',
       'Removing old files from lib folder',
+      'Marking bin files executable',
       'Rewriting ESM import specifiers',
       'Checking shape names',
       'Checking shape references',
@@ -394,7 +395,7 @@ describe('a build step that returns false', () => {
   test('fails the build with a message naming the step', async () => {
     fs.outputJsonSync(path.join(dir, 'package.json'), {
       name: 'pkg',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     // No tsconfig-*.json, so both compile steps are skipped. 'lib/esm' is a
     // FILE, so copying 'src/a.json' into it throws and the copy step — like

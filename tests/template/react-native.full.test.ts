@@ -128,8 +128,7 @@ describeFull('create-app --template react-native (full)', () => {
 
   test('the shapes package builds with extensionless imports, without an opt-in', () => {
     const shapes = JSON.parse(read(app, `packages/${PREFIX}-shapes/package.json`));
-    expect(shapes.linkedPackage).toBe(true);
-    expect(shapes.linked).toBeUndefined();
+    expect(shapes.linked).toEqual({kind: 'assets'});
   });
 
   test('dataset names come from the prefix', () => {

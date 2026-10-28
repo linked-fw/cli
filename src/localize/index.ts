@@ -9,6 +9,7 @@
  */
 export {
   localize,
+  localizeListed,
   defaultBuildCommand,
   DEFAULT_BUILD_COMMAND,
 } from './localize.js';

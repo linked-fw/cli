@@ -12,7 +12,7 @@ import {fileURLToPath} from 'node:url';
  * `hooks/<file>` in this package: two levels up from `src/localize/`, three
  * from `lib/esm/localize/`, so it is looked for upwards.
  */
-function hookFile(file: string): string {
+export function hookPath(file: string): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
   for (;;) {
     const candidate = path.join(dir, 'hooks', file);
@@ -31,7 +31,7 @@ function hookFile(file: string): string {
  * so a mismatched file fails here, by name, rather than at the first call.
  */
 export function requireHook<T>(file: string, isValid: (mod: T) => boolean): T {
-  const found = hookFile(file);
+  const found = hookPath(file);
   const mod: T = createRequire(import.meta.url)(found);
   if (!mod || !isValid(mod))
     throw new Error(`[localize] ${found} does not export what localize needs`);

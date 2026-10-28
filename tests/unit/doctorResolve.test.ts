@@ -16,7 +16,7 @@ function writeJson(file: string, json: unknown) {
 function sourcePkg(root: string, name: string) {
   writeJson(path.join(root, 'package.json'), {
     name,
-    linkedPackage: true,
+    linked: {kind: 'assets'},
     exports: {'./*': './lib/esm/*.js'},
   });
   fs.mkdirSync(path.join(root, 'src'), {recursive: true});
@@ -182,7 +182,7 @@ describe('linked doctor resolve', () => {
     // An installed, published package: lib only, so not bundled.
     writeJson(path.join(app, 'node_modules', '@_linked', 'rdfs', 'package.json'), {
       name: '@_linked/rdfs',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
 
     const out: string[] = [];

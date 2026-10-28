@@ -25,6 +25,7 @@ import {
   workspaceDependents,
   type WorkspaceEntry,
 } from '../vite-config.js';
+import {worktreeLinkHints} from './worktree-node-modules.js';
 
 /** The `vite.config` files Vite looks for in the app root. */
 const VITE_CONFIGS = ['vite.config.ts', 'vite.config.js', 'vite.config.mts', 'vite.config.mjs'];
@@ -212,6 +213,7 @@ export async function doctorResolve(
           'so the process runs two instances.\n',
       );
     }
+    for (const hint of worktreeLinkHints(cwd)) write(`\n${hint}\n`);
   }
   return rows.some((r) => r.flag === 'two-copies') ? 1 : 0;
 }

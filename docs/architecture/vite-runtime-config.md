@@ -106,14 +106,18 @@ directory than Node resolves is flagged `two-copies`.
 
 ## Git worktrees
 
-A git worktree of an app (`linked worktree add`) symlinks `node_modules` to the main
-checkout's, so it shares one install.
+A git worktree of an app (`linked worktree add`) shares the main checkout's install: its
+`node_modules` is a link farm, a real directory whose entries link to the main checkout's,
+except each package with a checkout in the worktree's `packages-local/`, which links to that
+checkout (details in [integration branches and worktrees](../integration-branches-and-worktrees.md#shared-install)).
+Worktrees made by earlier versions symlink `node_modules` to the main checkout's as a whole.
 
-**Per-worktree `cacheDir`.** Vite's default cache is `node_modules/.vite`, which through the
-symlink is the main checkout's: a worktree's dev server would re-optimize it from under the
-main one's ("Re-optimizing dependencies because lockfile has changed"). `viteCacheDir(appRoot)`
-returns `<app>/.vite-cache` when `<app>/node_modules` is a symlink, so each worktree has its
-own cache (gitignored), and leaves the default otherwise. `appRoot` is the directory
+**Per-worktree `cacheDir`.** Vite's default cache is `node_modules/.vite`, which through a
+symlinked `node_modules` is the main checkout's: a worktree's dev server would re-optimize it
+from under the main one's ("Re-optimizing dependencies because lockfile has changed").
+`viteCacheDir(appRoot)` returns `<app>/.vite-cache` when the app shares another install (a
+symlinked `node_modules`, or a link farm), so each worktree has its own cache (gitignored), and
+leaves the default otherwise. `appRoot` is the directory
 `linked start` runs Vite in (`process.cwd()`), used throughout `createViteConfig`.
 
 **How an overlay resolves.** `discoverWorkspaces` builds one table, package name → one
@@ -122,8 +126,8 @@ found through `node_modules`. Glob entries win on a name clash. In a worktree:
 
 - a package worktree at `<wt>/packages-local/<dir>` is found by (1) and wins for that one
   name: Vite loads that package from the worktree;
-- every other package is found by (2) through the symlinked `node_modules`, i.e. the main
-  checkout's copy (its branch as landed so far);
+- every other package is found by (2) through `node_modules`, i.e. the main checkout's copy
+  (its branch as landed so far);
 - the app's own `packages/*` come from the worktree too, through (1).
 
 Third-party dependencies of the overlaid package resolve by walking up to the worktree's
@@ -133,11 +137,14 @@ version-conflicting dependencies in that checkout's own `node_modules`, so
 without it the worktree's imports fall through to the root's versions. The `linked start`
 watch set uses the same table, so HMR follows the worktree's copy.
 
-Node does not see the overlay: it resolves through `node_modules` to the main checkout. That
-is harmless for a package nothing loads natively, and is reported as `overlay` by
-`linked doctor resolve`. It is why the CLI (and a package the app's `vite.config` imports)
-cannot be overlaid this way: run the worktree's own built bin
-(`node <wt>/packages-local/_linked-cli/lib/esm/launch.js start`) for a CLI change.
+Node and `tsc` see the same overlay: the farm links `node_modules/<name>` to the worktree's
+checkout, so `doctor resolve` shows Vite and Node on the same directory, and the `linked` bin
+of a `@_linked/cli` worktree is the worktree's. A package another installed package imports
+is still the main checkout's copy for that importer in Node and `tsc` (it resolves from the
+importer's real path), while Vite's table gives every importer the worktree's. The app's own
+`packages/*` are not linked (the worktree has no build of them), so they show as `overlay`.
+In a worktree with a symlinked `node_modules`, Node and `tsc` load the main checkout's copies;
+`linked worktree relink` moves it to the farm.
 
 ## Adding a framework package
 

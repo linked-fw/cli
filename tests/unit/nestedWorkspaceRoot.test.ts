@@ -45,7 +45,7 @@ describe('an app with `packages-local/*` nested in a parent workspace', () => {
     makePackage(checkout, {
       name: '@fixture/pkg',
       version: '1.0.0',
-      linkedPackage: true,
+      linked: {kind: 'library'},
     });
     const nm = path.join(parent, 'node_modules', '@fixture');
     fs.mkdirSync(nm, {recursive: true});
@@ -117,7 +117,7 @@ describe('an app with `packages-local/*` nested in a parent workspace', () => {
       makePackage(path.join(app, 'packages-local', '_fixture-own'), {
         name: '@fixture/own',
         version: '1.0.0',
-        linkedPackage: true,
+        linked: {kind: 'library'},
       });
     });
 

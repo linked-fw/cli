@@ -5,6 +5,9 @@ import {globSync} from 'glob';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {stripUserinfo} from './integration/credentials.js';
+import {EXIT_REFUSED, LocalizeError} from './localize/errors.js';
+import {normalizeGitUrl} from './localize/resolve.js';
 import {
   isWorkspacePathNegated,
   parseWorkspacePatterns,
@@ -16,7 +19,7 @@ import {
  * context) or register shapes into it. Two copies in one runtime split that state
  * and mangle shape identity (`Person`→`Person2`).
  *
- * A NAME check, used only by `client-dep-includes` (alongside the flag). Deciding
+ * A NAME check, used only by `client-dep-includes` (alongside `linked.kind`). Deciding
  * whether an installed package is linked goes by its `package.json` instead —
  * {@link isLinkedPackageJson} — which is what the source walk and the standalone
  * `optimizeDeps.exclude` use.
@@ -97,17 +100,121 @@ export async function readInstalledPkg(
   }
 }
 
+// linkedKind: twin of @_linked/server src/utils/linkedDependencies.ts, keep byte-identical.
+/** What a `package.json` is, by its `linked.kind`. */
+export type LinkedKind = 'app' | 'ontology' | 'assets' | 'library';
+
+/** Every value `linked.kind` may take. */
+export const LINKED_KINDS: readonly LinkedKind[] = [
+  'app',
+  'ontology',
+  'assets',
+  'library',
+];
+
 /**
- * THE definition of a linked package: its own `package.json` says
- * `"linkedPackage": true`. Not its npm scope — a linked package can be
- * published under any scope, and not everything under `@_linked/` is one
- * (a plain tool need not be). The pre-rename `"lincd": true` is not
- * read: the packages that still carry it are the old `lincd-*` framework,
- * which cannot share a runtime with `@_linked/core`. `lifecycle.ts`
- * (`build-all`, `getLincdPackages`) and `linked build-package` use this too.
+ * THE way to tell what a `package.json` is: its `"linked": {"kind": …}`. `app` is an app (built
+ * by `linked build-app`); `ontology`, `assets` and `library` are linked packages (an ontology
+ * package may carry shapes for its own terms; `library` is framework code). Undefined for
+ * anything else: no `linked` object and a kind that is not one of these.
+ *
+ * Until every published package carries `linked.kind`, a `package.json` without one is still
+ * read by the retired flags: `linkedApp: true` is an `app`, `linkedPackage: true` a `library`.
  */
-export const isLinkedPackageJson = (json: any): boolean =>
-  json?.linkedPackage === true;
+export function linkedKind(json: unknown): LinkedKind | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const linked: unknown = (json as {linked?: unknown}).linked;
+  if (!linked || typeof linked !== 'object') return retiredFlagKind(json);
+  const kind: unknown = (linked as {kind?: unknown}).kind;
+  return LINKED_KINDS.find((k) => k === kind) ?? retiredFlagKind(json);
+}
+
+/** The kind a `package.json` published before `linked.kind` declares by its retired flags. */
+function retiredFlagKind(json: object): LinkedKind | undefined {
+  const flags = json as {linkedApp?: unknown; linkedPackage?: unknown};
+  if (flags.linkedApp === true) return 'app';
+  if (flags.linkedPackage === true) return 'library';
+  return undefined;
+}
+// end of the linkedKind twin.
+
+/**
+ * THE definition of a linked package: its own `package.json` has a `linked.kind` other than
+ * `app` ({@link linkedKind}). Not its npm scope — a linked package can be published under any
+ * scope, and not everything under `@_linked/` is one (a plain tool need not be).
+ * `lifecycle.ts` (`build-all`, `getLincdPackages`) and `linked build-package` use this too.
+ */
+export const isLinkedPackageJson = (json: unknown): boolean => {
+  const kind = linkedKind(json);
+  return kind !== undefined && kind !== 'app';
+};
+
+/** One entry of `linked.unpublishedPackages`: a package the app uses that is not on npm. */
+export interface UnpublishedPackage {
+  /** The npm name, as the package's own `package.json` declares it. */
+  name: string;
+  /** Its git repository: normalized (`normalizeGitUrl`), with no userinfo. */
+  repo: string;
+}
+
+/**
+ * THE reader of `"linked": {"unpublishedPackages": {"<npm name>": {"repo": "<url>"}}}`, the
+ * committed list of the packages an app (or a package) uses that are not published, so
+ * `linked localize --listed` and `linked checkout` clone them from their repos. A published
+ * package moves into `dependencies` with a range instead.
+ *
+ * Absent list: `[]`. Anything malformed -- a list that is not an object, an entry without a
+ * string `repo`, a URL that is neither `https:` nor `file:` -- throws a `LocalizeError` (code 6)
+ * naming the entry: a list the cli cannot read must not shrink silently. A URL with userinfo
+ * (`https://user:token@…`) is used without it, with a warning: tokens come from the environment.
+ */
+export function unpublishedPackages(
+  json: unknown,
+  warn: (message: string) => void = () => {},
+): UnpublishedPackage[] {
+  if (!json || typeof json !== 'object') return [];
+  const linked: unknown = (json as {linked?: unknown}).linked;
+  if (!linked || typeof linked !== 'object') return [];
+  const list: unknown = (linked as {unpublishedPackages?: unknown})
+    .unpublishedPackages;
+  if (list === undefined) return [];
+  const owner = (json as {name?: unknown}).name;
+  const where = `linked.unpublishedPackages${typeof owner === 'string' ? ` of ${owner}` : ''}`;
+  if (!list || typeof list !== 'object' || Array.isArray(list)) {
+    throw new LocalizeError(
+      `${where} is not an object of {"<npm name>": {"repo": "<https url>"}}.`,
+      EXIT_REFUSED,
+    );
+  }
+  const out: UnpublishedPackage[] = [];
+  for (const [name, entry] of Object.entries(list as Record<string, unknown>)) {
+    const raw: unknown =
+      entry && typeof entry === 'object'
+        ? (entry as {repo?: unknown}).repo
+        : undefined;
+    if (!name.trim() || typeof raw !== 'string' || !raw.trim()) {
+      throw new LocalizeError(
+        `${where}: "${name}" needs {"repo": "<https url>"}.`,
+        EXIT_REFUSED,
+      );
+    }
+    const {url, stripped} = stripUserinfo(normalizeGitUrl(raw));
+    if (!/^(https|file):\/\/[^/]*\/./i.test(url)) {
+      throw new LocalizeError(
+        `${where}: "${name}" has repo "${url}", which is not an https:// (or file://) URL.`,
+        EXIT_REFUSED,
+      );
+    }
+    if (stripped) {
+      warn(
+        `${where}: "${name}" has credentials in its repo URL; they are ignored (pass a token in ` +
+          `LINKED_GIT_TOKEN instead). Remove them from package.json.`,
+      );
+    }
+    out.push({name, repo: url});
+  }
+  return out;
+}
 
 /** An installed linked package, as {@link discoverInstalledLinkedPackages} finds it. */
 export interface InstalledLinkedPackage {

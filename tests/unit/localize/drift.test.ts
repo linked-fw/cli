@@ -179,6 +179,25 @@ test('worktree with symlinked node_modules reports no missing-dir', (t) => {
   assert.deepEqual(driftProblems(worktree), []);
 });
 
+test('worktree with a node_modules link farm reads the main install\'s hidden lockfile', (t) => {
+  const main = consumer(t);
+  hiddenLock(main, {
+    'packages-local/_linked-core': {name: '@_linked/core', version: '2.28.4'},
+    'node_modules/@_linked/core': {resolved: 'packages-local/_linked-core', link: true},
+  });
+  const worktree = consumer(t);
+  fs.rmSync(path.join(worktree, 'node_modules'), {recursive: true});
+  fs.mkdirSync(path.join(worktree, 'node_modules'));
+  fs.writeFileSync(
+    path.join(worktree, 'node_modules', '.linked-worktree.json'),
+    JSON.stringify({installRoot: main, overlays: {}}),
+  );
+  // The checkout is missing next to the main install, not just in the worktree.
+  assert.deepEqual(driftProblems(worktree), [
+    {kind: 'missing-dir', dir: 'packages-local/_linked-core'},
+  ]);
+});
+
 test('real missing checkout still reported', (t) => {
   const appRoot = consumer(t);
   hiddenLock(appRoot, {

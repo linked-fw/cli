@@ -4,7 +4,7 @@
 // this module fixes survived in four separate copies. The declared range tracks
 // glob@10's own `minimatch` range so the two resolve to one copy; widening it
 // past major 9 installs a second copy at the root instead of deduping.
-import {minimatch} from 'minimatch';
+import {minimatch} from './utils/minimatch.js';
 
 /**
  * Interpretation of a `package.json` `workspaces` field, npm-compatible.

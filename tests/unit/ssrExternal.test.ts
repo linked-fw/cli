@@ -52,14 +52,14 @@ describe('ssr.noExternal', () => {
     const shapes = path.join(tmp, 'packages', 'shapes');
     writeJson(path.join(shapes, 'package.json'), {
       name: 'shapes',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       dependencies: {'@_linked/core': '1.0.0'},
     });
     fs.mkdirSync(path.join(shapes, 'src'), {recursive: true});
     fs.writeFileSync(path.join(shapes, 'src', 'index.ts'), 'export {};');
     // Published core: lib only, installed at the root.
     const core = path.join(tmp, 'node_modules', '@_linked', 'core');
-    writeJson(path.join(core, 'package.json'), {name: '@_linked/core', linkedPackage: true});
+    writeJson(path.join(core, 'package.json'), {name: '@_linked/core', linked: {kind: 'library'}});
     fs.mkdirSync(path.join(core, 'lib'), {recursive: true});
     fs.symlinkSync(shapes, path.join(tmp, 'node_modules', 'shapes'), 'dir');
     const app = path.join(tmp, 'services', 'api');
@@ -113,7 +113,7 @@ describe('ssr.noExternal', () => {
   it('the resolver gives an SSR entry of @_linked/cli a shim instead of its source', async () => {
     writeJson(path.join(tmp, 'package.json'), {name: 'root', workspaces: ['packages/*']});
     const cli = path.join(tmp, 'packages', 'cli');
-    sourcePkg(cli, {name: '@_linked/cli', linkedPackage: true});
+    sourcePkg(cli, {name: '@_linked/cli', linked: {kind: 'library'}});
     fs.writeFileSync(path.join(cli, 'src', 'utils.ts'), 'export {};');
     process.chdir(tmp);
     const factory = createViteConfig() as any;
@@ -159,7 +159,7 @@ describe('ssr.noExternal', () => {
       dependencies: {'@_linked/cli': '*', 'uses-cli': '1'},
     });
     const cli = path.join(tmp, 'packages', 'cli');
-    sourcePkg(cli, {name: '@_linked/cli', linkedPackage: true});
+    sourcePkg(cli, {name: '@_linked/cli', linked: {kind: 'library'}});
     link('@_linked/cli', cli);
     publishedPkg('uses-cli', {dependencies: {'@_linked/cli': '1'}});
     process.chdir(tmp);
@@ -189,7 +189,7 @@ describe('ssr.noExternal', () => {
   it('published-core layout: published core, so fuseki stays external', async () => {
     writeJson(path.join(tmp, 'package.json'), {name: 'root', workspaces: ['packages/*', 'services/*']});
     const shapes = path.join(tmp, 'packages', 'shapes');
-    sourcePkg(shapes, {name: 'shapes', linkedPackage: true, dependencies: {'@_linked/core': '1'}});
+    sourcePkg(shapes, {name: 'shapes', linked: {kind: 'library'}, dependencies: {'@_linked/core': '1'}});
     link('shapes', shapes);
     publishedPkg('@_linked/core');
     publishedPkg('@_linked/fuseki', {dependencies: {'@_linked/core': '1'}});
@@ -214,10 +214,10 @@ describe('ssr.noExternal', () => {
       dependencies: {'@_linked/core': '*', shapes: '*', app: '1', 'left-pad': '1'},
     });
     const core = path.join(tmp, 'packages', 'core');
-    sourcePkg(core, {name: '@_linked/core', linkedPackage: true});
+    sourcePkg(core, {name: '@_linked/core', linked: {kind: 'library'}});
     link('@_linked/core', core);
     const shapes = path.join(tmp, 'packages', 'shapes');
-    sourcePkg(shapes, {name: 'shapes', linkedPackage: true, dependencies: {'@_linked/core': '*'}});
+    sourcePkg(shapes, {name: 'shapes', linked: {kind: 'library'}, dependencies: {'@_linked/core': '*'}});
     link('shapes', shapes);
     publishedPkg('@_linked/fuseki', {peerDependencies: {'@_linked/core': '1'}});
     publishedPkg('uses-fuseki', {dependencies: {'@_linked/fuseki': '1'}});

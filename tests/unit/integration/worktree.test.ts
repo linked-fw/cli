@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {worktreeAdd, worktreeList, worktreeRemove} from '../../../src/commands/worktree.js';
+import {worktreeAdd, worktreeList, worktreeRelink, worktreeRemove} from '../../../src/commands/worktree.js';
 import {getTarget} from '../../../src/integration/repos.js';
 import {makeRun, type Run} from '../../../src/localize/run.js';
 
@@ -76,6 +76,18 @@ function makeApp(): App {
 
   const core = path.join(root, 'packages-local', '_linked-core');
   initRepo(core, {name: '@_linked/core'});
+
+  // The install, as npm lays it out: a registry package, a bin, the checkouts linked by name.
+  const nm = path.join(root, 'node_modules');
+  fs.mkdirSync(path.join(nm, 'react'));
+  fs.writeFileSync(path.join(nm, 'react', 'package.json'), '{"name":"react"}');
+  fs.mkdirSync(path.join(nm, '.bin'));
+  fs.symlinkSync('../react/cli.js', path.join(nm, '.bin', 'react-cli'));
+  fs.mkdirSync(path.join(nm, '.vite'));
+  fs.writeFileSync(path.join(nm, '.package-lock.json'), '{}');
+  fs.mkdirSync(path.join(nm, '@_linked'));
+  fs.symlinkSync('../../packages-local/_linked-server', path.join(nm, '@_linked', 'server'));
+  fs.symlinkSync('../../packages-local/_linked-core', path.join(nm, '@_linked', 'core'));
   return {container, root, server, core, dir: path.join(container, 'wt', 'a1')};
 }
 
@@ -88,6 +100,29 @@ const isLink = (p: string): boolean => {
     return false;
   }
 };
+const real = (p: string): string => fs.realpathSync(p);
+
+/**
+ * `<app.dir>/node_modules` is a link farm into the root's install: a real
+ * directory, the registry package and the checkouts not in `overlays` from the
+ * root, each overlay from the worktree, `.bin` relinked, no lockfile or cache.
+ */
+function assertFarm(app: App, overlays: Record<string, string>): void {
+  const nm = path.join(app.dir, 'node_modules');
+  assert.ok(fs.lstatSync(nm).isDirectory() && !isLink(nm), `${nm} is a real directory`);
+  const marker = JSON.parse(fs.readFileSync(path.join(nm, '.linked-worktree.json'), 'utf8'));
+  assert.equal(marker.installRoot, app.root);
+  assert.deepEqual(marker.overlays, overlays);
+  assert.equal(real(path.join(nm, 'react')), real(path.join(app.root, 'node_modules', 'react')));
+  assert.equal(fs.readlinkSync(path.join(nm, '.bin', 'react-cli')), '../react/cli.js');
+  assert.equal(fs.existsSync(path.join(nm, '.vite')), false);
+  assert.equal(fs.existsSync(path.join(nm, '.package-lock.json')), false);
+  const expect: Record<string, string> = {'@_linked/server': app.server, '@_linked/core': app.core, ...overlays};
+  for (const [name, dir] of Object.entries(expect)) {
+    assert.equal(real(path.join(nm, name)), real(dir), name);
+  }
+}
+
 const worktreeCount = (repo: string): number =>
   git(repo, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree ')).length;
 
@@ -105,7 +140,7 @@ describe('linked worktree add', () => {
     assert.equal(branchOf(pkgDir), 'overhaul--a1');
     assert.equal(branchOf(app.dir), 'overhaul--a1');
 
-    assert.equal(fs.readlinkSync(path.join(app.dir, 'node_modules')), path.join(app.root, 'node_modules'));
+    assertFarm(app, {'@_linked/server': pkgDir});
     assert.equal(fs.readlinkSync(path.join(app.dir, '.env')), path.join(app.root, '.env'));
     const pemLinks = fs.readdirSync(app.dir).filter((n) => n.endsWith('.pem') && isLink(path.join(app.dir, n)));
     assert.equal(pemLinks.join(','), '');
@@ -312,7 +347,8 @@ describe('linked worktree add', () => {
     const result = await worktreeAdd(app.root, 'a1');
     assert.equal(result.code, 0, result.messages.join('\n'));
     assert.equal(fs.readlinkSync(path.join(app.dir, '.env')), fs.realpathSync(shared));
-    assert.match(result.messages.join('\n'), /node_modules -> /);
+    assert.match(result.messages.join('\n'), /node_modules: links into /);
+    assertFarm(app, {});
   });
 
   test('the start command quotes a dir with spaces', async () => {
@@ -399,7 +435,7 @@ describe('linked worktree remove', () => {
     assert.match(result.messages.join('\n'), /not landed/);
     assert.ok(fs.existsSync(pkgDir));
     assert.ok(isLink(path.join(pkgDir, 'node_modules')));
-    assert.ok(isLink(path.join(app.dir, 'node_modules')));
+    assertFarm(app, {'@_linked/server': pkgDir});
     assert.equal(worktreeCount(app.root), 2);
     assert.equal(worktreeCount(app.server), 2);
   });
@@ -426,8 +462,8 @@ describe('linked worktree remove', () => {
     assert.notEqual(result.code, 0);
     assert.match(result.messages.join('\n'), /simulated remove failure/);
     assert.ok(fs.existsSync(app.dir));
-    assert.ok(isLink(path.join(app.dir, 'node_modules')));
-    assert.equal(fs.readlinkSync(path.join(app.dir, 'node_modules')), path.join(app.root, 'node_modules'));
+    // The package worktree is gone by then, so the rebuilt farm has no overlay.
+    assertFarm(app, {});
     assert.ok(isLink(path.join(app.dir, '.env')));
     assert.equal(fs.readlinkSync(path.join(app.dir, '.env')), path.join(app.root, '.env'));
   });
@@ -511,5 +547,66 @@ describe('linked worktree remove', () => {
     const text = result.messages.join('\n');
     assert.match(text, /--dir/);
     assert.match(text, /linked worktree list/);
+  });
+});
+
+describe('linked worktree relink', () => {
+  test('moves a worktree with a symlinked node_modules to the farm', async () => {
+    const app = makeApp();
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server']})).code, 0);
+    const nm = path.join(app.dir, 'node_modules');
+    fs.rmSync(nm, {recursive: true});
+    fs.symlinkSync(path.join(app.root, 'node_modules'), nm);
+    const result = await worktreeRelink(app.dir, undefined);
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assert.match(result.messages.join('\n'), /replaced the node_modules symlink/);
+    assertFarm(app, {'@_linked/server': path.join(app.dir, 'packages-local', '_linked-server')});
+    // The main checkout's install is as it was.
+    assert.equal(fs.readlinkSync(path.join(app.root, 'node_modules', '@_linked', 'server')), '../../packages-local/_linked-server');
+    assert.ok(fs.existsSync(path.join(app.root, 'node_modules', '.vite')));
+  });
+
+  test('links a package worktree added by hand, by agent name from the main checkout', async () => {
+    const app = makeApp();
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server']})).code, 0);
+    fs.mkdirSync(path.join(app.core, 'node_modules'));
+    git(app.core, 'switch', '-q', '-c', 'overhaul');
+    const coreDir = path.join(app.dir, 'packages-local', '_linked-core');
+    git(app.core, 'worktree', 'add', '-q', '-b', 'overhaul--a1', coreDir, 'overhaul');
+    const result = await worktreeRelink(app.root, 'a1');
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assertFarm(app, {
+      '@_linked/core': coreDir,
+      '@_linked/server': path.join(app.dir, 'packages-local', '_linked-server'),
+    });
+    assert.equal(fs.readlinkSync(path.join(coreDir, 'node_modules')), path.join(app.core, 'node_modules'));
+  });
+
+  test('picks up a package the main checkout installed since', async () => {
+    const app = makeApp();
+    assert.equal((await worktreeAdd(app.root, 'a1')).code, 0);
+    fs.mkdirSync(path.join(app.root, 'node_modules', 'lodash'));
+    assert.equal(fs.existsSync(path.join(app.dir, 'node_modules', 'lodash')), false);
+    assert.equal((await worktreeRelink(app.dir, undefined)).code, 0);
+    assert.equal(real(path.join(app.dir, 'node_modules', 'lodash')), real(path.join(app.root, 'node_modules', 'lodash')));
+  });
+
+  test('leaves a real install of the worktree alone', async () => {
+    const app = makeApp();
+    assert.equal((await worktreeAdd(app.root, 'a1')).code, 0);
+    const nm = path.join(app.dir, 'node_modules');
+    fs.rmSync(nm, {recursive: true});
+    fs.mkdirSync(path.join(nm, 'own'), {recursive: true});
+    const result = await worktreeRelink(app.dir, undefined);
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /install of the worktree's own/);
+    assert.ok(fs.existsSync(path.join(nm, 'own')));
+  });
+
+  test('refuses in the main checkout without an agent', async () => {
+    const app = makeApp();
+    const result = await worktreeRelink(app.root, undefined);
+    assert.notEqual(result.code, 0);
+    assert.match(result.messages.join('\n'), /name the agent/);
   });
 });

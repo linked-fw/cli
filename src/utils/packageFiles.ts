@@ -247,11 +247,14 @@ export function buildPackageFiles(
   if (baseUri) {
     files['src/package.ts'] = withBaseUri(files['src/package.ts'], baseUri);
   }
+  // The package says what it is: `linked.kind` merged into the template's
+  // `linked` object, never replacing it.
+  const pkg = JSON.parse(files['package.json']);
+  pkg.linked = {...pkg.linked, kind};
   if (dependencies && Object.keys(dependencies).length) {
-    const pkg = JSON.parse(files['package.json']);
     pkg.dependencies = {...pkg.dependencies, ...dependencies};
-    files['package.json'] = JSON.stringify(pkg, null, 2) + '\n';
   }
+  files['package.json'] = JSON.stringify(pkg, null, 2) + '\n';
 
   return Object.fromEntries(
     Object.entries(files).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),

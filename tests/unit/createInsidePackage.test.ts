@@ -1,7 +1,7 @@
 // `create-shape`, `create-component`, `create-set-component` and `create-ontology`
 // write a file that imports `../package.js`. Where there is no src/package.ts (a
 // new app root registers no package) they refuse instead of writing a broken
-// import. A linkedApp that does have one, as CN does, is served as before.
+// import. An app that does have one, as CN does, is served as before.
 //
 // cli-methods pulls in ora, which is ESM-only.
 jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
@@ -23,7 +23,7 @@ describe('create-shape and friends need a src/package.ts', () => {
 
   beforeEach(() => {
     app = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-app-root-'));
-    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app', linkedApp: true});
+    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app', linked: {kind: 'app'}});
     fs.ensureDirSync(path.join(app, 'src'));
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -41,16 +41,16 @@ describe('create-shape and friends need a src/package.ts', () => {
   ];
 
   for (const [command, run] of commands) {
-    test(`${command} refuses at a linkedApp root without src/package.ts, and writes nothing`, async () => {
+    test(`${command} refuses at an app root without src/package.ts, and writes nothing`, async () => {
       await expect(run('Thing', app)).rejects.toThrow(CreatePackageError);
       await expect(run('Thing', app)).rejects.toThrow(/inside a package \(packages\/<name>\)/);
       expect(fs.readdirSync(path.join(app, 'src'))).toEqual([]);
     });
   }
 
-  // CN is itself a linkedApp that keeps its shapes at its root, with a real
-  // src/package.ts: a linkedApp manifest alone is no reason to refuse.
-  test('a linkedApp WITH src/package.ts is allowed (CN keeps its shapes at its root)', async () => {
+  // CN is itself an app that keeps its shapes at its root, with a real
+  // src/package.ts: an app manifest alone is no reason to refuse.
+  test('an app WITH src/package.ts is allowed (CN keeps its shapes at its root)', async () => {
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
       `export const {linkedShape} = linkedPackage('create-now');\n`,
@@ -60,7 +60,7 @@ describe('create-shape and friends need a src/package.ts', () => {
   });
 
   test('create-ontology writes the ontology with its Turtle data in a package', async () => {
-    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linkedPackage: true});
+    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linked: {kind: 'ontology'}});
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
       `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
@@ -98,7 +98,7 @@ describe('create-shape and friends need a src/package.ts', () => {
   });
 
   test('create-ontology refuses a slug Turtle cannot use before writing anything', async () => {
-    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linkedPackage: true});
+    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linked: {kind: 'ontology'}});
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
       `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
@@ -110,7 +110,7 @@ describe('create-shape and friends need a src/package.ts', () => {
   });
 
   test('create-shape writes the shape in a package', async () => {
-    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-assets', linkedPackage: true});
+    fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-assets', linked: {kind: 'assets'}});
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
       `export const {linkedShape} = linkedPackage('my-app-assets');\n`,

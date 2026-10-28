@@ -7,7 +7,7 @@ summary: >
   source instead of loading two copies of `@_linked/core`. Patch.
 ---
 
-# 031 — A nested app with an empty `packages-local/*` is not a workspace root
+# 038 — A nested app with an empty `packages-local/*` is not a workspace root
 
 ## Why
 
@@ -53,6 +53,19 @@ walked up to the checkouts, and the app booted with "2 copies of @_linked/core's
   (non-source) `@_linked/*` dependencies hoisted to the parent are not rows. Not recorded
   elsewhere; minor.
 
+## Rebased onto dev
+
+Written as report 031 against an older base; renumbered 038 because 031 is taken on `dev`.
+Rebasing onto `dev` (which by then had `linked.kind`, `unpublishedPackages`, `linked checkout`,
+the worktree link farm, c31c7a3's nested-worktree app root and 1078909's hoisted-package
+resolution) conflicted only in the import lines of `src/installed-packages.ts` and
+`src/lifecycle.ts`; both sides' imports are kept. No logic conflicted: `findWorkspaceRoot`
+(c31c7a3) still climbs to a parent whose globs cover the app, and 1078909's walk in
+`vite-config.ts` goes through `readInstalledPkg`, so it gets this rule.
+The test fixtures marked their packages with the retired `linkedPackage: true`, which `dev` no
+longer reads; they now use `linked: {kind: 'library'}`. After the rebase, `npm run test:unit`:
+`Test Suites: 99 passed, 99 total`, `Tests: 1158 passed, 1158 total`.
+
 ## PR
 
 A directory counts as a workspace root only when one of its `workspaces` globs matches a package
@@ -76,4 +89,4 @@ package was registered as source while Node loaded CN's checkouts, so the app bo
 
 **Deviations:** `discoverLocalPackages` also changed, so the server's `getLincdPackages` and
 `build-all` agree with the resolver about the root. **Follow-ups:** `doctor resolve` takes its
-names from `<cwd>/node_modules/@_linked` only (report 031, Follow-ups).
+names from `<cwd>/node_modules/@_linked` only (report 038, Follow-ups).

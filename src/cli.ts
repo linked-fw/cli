@@ -593,6 +593,10 @@ program
     'Take back every checkout `linked delocalize` parked, then npm install once.',
   )
   .option(
+    '--listed',
+    "Clone every package the app's committed package.json lists in linked.unpublishedPackages (and those their own lists name) that is not in packages-local/ yet, from the repo the list gives, on the app's current branch where that repo has it (else its default branch); then one npm install and the builds. A token for private repos comes only from LINKED_GIT_TOKEN.",
+  )
+  .option(
     '--repo <git-url>',
     'Clone this instead of the published repository.',
   )
@@ -658,7 +662,7 @@ const doctor = program
 doctor
   .command('resolve')
   .description(
-    'Run in an app. For every source workspace and installed @_linked package: the directory Vite\'s dev SSR runner loads it from (or "external" when Vite leaves it to Node), the directory Node resolves it to, and whether Vite bundles it. Flags "overlay" when the two differ (a worktree\'s own checkout) and "two-copies" when they differ for a package Node also loads during linked start (@_linked/cli, and every @_linked package the app\'s vite.config imports). Exits 1 on "two-copies".',
+    'Run in an app. For every source workspace and installed @_linked package: the directory Vite\'s dev SSR runner loads it from (or "external" when Vite leaves it to Node), the directory Node resolves it to, and whether Vite bundles it. Flags "overlay" when the two differ (a worktree\'s own copy that node_modules does not link to, such as the app\'s own packages/) and "two-copies" when they differ for a package Node also loads during linked start (@_linked/cli, and every @_linked package the app\'s vite.config imports). Exits 1 on "two-copies". In a worktree, also says when node_modules needs linked worktree relink.',
   )
   .option('--json', 'Print the rows as JSON: name, vite, node, bundled, flag.')
   .action(async (options) => {
@@ -694,16 +698,54 @@ branch
     return runBranchStart(name, packages, options);
   });
 
+branch
+  .command('fork <branch> <package>')
+  .description(
+    "Run in an app checkout (a linked checkout worktree, or an app with packages-local/ clones). Create <branch> in the packages-local/ checkout <package> names (its npm name, acme-ont; or @_linked/core, core, _linked-core) from its current head -- usually the fallback linked checkout left detached at origin/<default> -- and push it (-u). Refuses when the checkout has changes, or when origin has <branch> already and the checkout is not on it (linked checkout switches to it). On <branch> already: pushes what origin lacks, else does nothing (exit 0). A token comes only from LINKED_GIT_TOKEN.",
+  )
+  .option('--dir <dir>', 'The app checkout. Default: the app the current directory is in.')
+  .option('--json', 'Print {code, package, dir, branch, from, pushed, messages}.')
+  .action(async (name: string, pkg: string, options) => {
+    const {runBranchFork} = await import('./commands/branch-fork-merge.js');
+    return runBranchFork(name, pkg, options);
+  });
+
+branch
+  .command('push <branch>')
+  .description(
+    "Run in an app checkout. Push <branch> in every repo on it -- the app (which must be on <branch>) and each packages-local/ checkout on <branch>; detached fallbacks and checkouts on another branch are left alone -- so that branch merge finds nothing unpushed. Fetches each first; pushes only commits origin lacks (-u when origin has no <branch>); a repo whose branch has diverged from origin is refused, never forced, and the others still push. Exit 0, 2 usage, 4 a fetch failed, 6 refused. A token comes only from LINKED_GIT_TOKEN.",
+  )
+  .option('--dir <dir>', 'The app checkout. Default: the app the current directory is in.')
+  .option('--json', 'Print {code, branch, repos: [{name, dir, repo, result: pushed|up-to-date|refused, sha}], messages}, the app first.')
+  .action(async (name: string, options) => {
+    const {runBranchPush} = await import('./commands/branch-fork-merge.js');
+    return runBranchPush(name, options);
+  });
+
+branch
+  .command('merge <branch>')
+  .description(
+    "Run in an app checkout. Land <branch> in --into across the repos on it -- each packages-local/ checkout on <branch>, in dependency order (dependencies and linked.unpublishedPackages), then the app; checkouts on another branch or detached are skipped. Fetches each first, and refuses, merging nothing, while one has changes or commits origin lacks. --mode push (default): merge origin/<branch> into origin/<into> with --no-ff (\"Merge branch '<branch>' into <into>\") in a temporary worktree and push <into>. --mode update: merge origin/<into> into <branch> and push <branch>, for a protected <into> that lands by PRs in the order printed. Stops at the first conflict (aborted, files named) or refused push; later repos are skipped, earlier ones stay merged. A token comes only from LINKED_GIT_TOKEN.",
+  )
+  .requiredOption('--into <branch>', 'The default branch it lands in, e.g. main.')
+  .option('--mode <mode>', 'push (merge and push --into) or update (merge --into into the branch and push the branch).', 'push')
+  .option('--dir <dir>', 'The app checkout. Default: the app the current directory is in.')
+  .option('--json', 'Print {code, branch, into, mode, repos: [{name, dir, repo, result, sha, files, landed}], messages}, repos in merge order.')
+  .action(async (name: string, options) => {
+    const {runBranchMerge} = await import('./commands/branch-fork-merge.js');
+    return runBranchMerge(name, options);
+  });
+
 const worktree = program
   .command('worktree')
   .description(
-    "An agent's worktree of the app (default <parent of the app root>/wt/<agent>) with a nested worktree of each package it changes, on the branch <base>--<agent>. The base is the root's integration branch, or its current branch. node_modules is shared with the main checkout.",
+    "An agent's worktree of the app (default <parent of the app root>/wt/<agent>) with a nested worktree of each package it changes, on the branch <base>--<agent>. The base is the root's integration branch, or its current branch. node_modules is a link farm into the main checkout's install, with the worktree's own packages-local/ checkouts linked in place of the main checkout's.",
   );
 
 worktree
   .command('add <agent>')
   .description(
-    "Run in an app. Create the app worktree on <base>--<agent> (or detached with --app-detached), symlink node_modules and the gitignored .env files, and add a worktree of each --with package in its packages-local/. A --with checkout not on the base joins it (created from the target), refusing, with nothing changed, when it has changes. Prints the start command.",
+    "Run in an app. Create the app worktree on <base>--<agent> (or detached with --app-detached), add a worktree of each --with package in its packages-local/, link the gitignored .env files, and make node_modules a link farm into the main checkout's install in which the --with packages link to the worktree's checkouts (so Vite, tsc and Node all load them). A --with checkout not on the base joins it (created from the target), refusing, with nothing changed, when it has changes. Prints the start command.",
   )
   .option('--with <packages>', 'Comma-separated packages-local/ checkouts to change: @_linked/core, core or _linked-core.')
   .option('--app-detached', 'Check the app out detached at the base tip: for work that changes only packages.')
@@ -728,16 +770,65 @@ worktree
   });
 
 worktree
-  .command('remove <agent>')
+  .command('remove [agent]')
   .description(
-    "Run in an app. Find the agent's app worktree by its branch <base>--<agent> (a detached one by its package worktrees on that branch, or at the default dir), remove its package worktrees, then the app worktree, then delete its landed agent branches. Refuses, removing nothing, while a branch has not landed or a worktree has changes.",
+    "Run in an app. Find the agent's app worktree by its branch <base>--<agent> (a detached one by its package worktrees on that branch, or at the default dir), remove its package worktrees, then the app worktree, then delete its landed agent branches. Refuses, removing nothing, while a branch has not landed or a worktree has changes. With --branch <branch> instead of an agent: remove a linked checkout checkout -- its package worktrees, then the app worktree on <branch> (found among the worktrees of the repository it runs in, or --dir), then the landed local branches; landed means in origin's default branch after a fetch (a detached fallback by its HEAD). Base clones stay.",
   )
+  .option('--branch <branch>', 'Remove the linked checkout checkout on this branch instead of an agent worktree.')
   .option('--force', 'Remove even when a worktree has changes or a branch has not landed; unlanded branches are kept and their sha printed.')
   .option('--delete-unlanded', 'Also delete agent branches that have not landed (git branch -D), printing the sha each was at.')
   .option('--dir <path>', 'The app worktree directory, instead of finding it by its branch.')
-  .action(async (agent: string, options) => {
+  .option('--json', 'Print the result as JSON: with --branch {code, removed, kept: [{dir, reason}], branches: [{repo, branch, deleted, sha}], messages}; for an agent {code, messages}.')
+  .action(async (agent: string | undefined, options) => {
+    if (options.branch) {
+      if (agent || options.deleteUnlanded) {
+        console.error('--branch removes a linked checkout checkout: it takes no agent name and no --delete-unlanded.');
+        process.exitCode = 2;
+        return;
+      }
+      const {runCheckoutRemove} = await import('./commands/checkout.js');
+      return runCheckoutRemove(options.branch, options);
+    }
+    if (!agent) {
+      console.error('Name the agent, or pass --branch <branch> for a linked checkout checkout.');
+      process.exitCode = 2;
+      return;
+    }
     const {runWorktreeRemove} = await import('./commands/worktree.js');
     return runWorktreeRemove(agent, options);
+  });
+
+worktree
+  .command('relink [agent]')
+  .description(
+    "Rebuild an app worktree's node_modules link farm (the agent's, or the worktree it runs in): after an npm install in the main checkout, after adding a package worktree to its packages-local/ by hand, or to move a worktree whose node_modules is a symlink (made by an earlier cli) to the farm. Every package in its packages-local/ links to that checkout. A real install of the worktree's own is left alone.",
+  )
+  .option('--dir <path>', 'The app worktree directory, instead of the agent name or the current directory.')
+  .action(async (agent: string | undefined, options) => {
+    const {runWorktreeRelink} = await import('./commands/worktree.js');
+    return runWorktreeRelink(agent, options);
+  });
+
+program
+  .command('checkout <branch>')
+  .description(
+    "A branch checkout of an app and the packages its committed package.json lists in linked.unpublishedPackages (transitively), in a projects root: one bare base clone per repo in <root>/.repos/<owner>/<name>.git, the app as a git worktree on <branch> (created from --from and pushed when the remote lacks it) in <root>/<name>/<branch-dir>, each package as a worktree in its packages-local/ on <branch> when its repo has it, else detached at origin/<default branch>. Then one npm install in the app worktree and the builds of the package worktrees that moved. Re-running it fetches and fast-forwards clean worktrees; anything else is left as it is and reported. A token for private repos comes only from LINKED_GIT_TOKEN (never the URL): remote git calls use it through GIT_ASKPASS, the install and builds run without it, and it is never written to disk.",
+  )
+  .option('--repo <url>', "The app's https git URL. Default: the origin of the app checkout this runs in.")
+  .option('--root <dir>', 'The projects root. Default: the current directory.')
+  .option('--dir <dir>', "The app worktree's directory. Default: <root>/<name>/<branch with / as __>.")
+  .option('--from <ref>', "What a new app branch is created from (a branch of the remote, or a commit). Default: the remote's default branch.")
+  .option('--no-install', 'Make the worktrees only: no npm install, no builds.')
+  .option('--build <cmd>', "The build run in each package worktree that moved. Default: its own `npm run build` when it has a build script. '' builds nothing.")
+  .option(
+    '--add <repo>',
+    "Also check out the package in this https (or file) repo into packages-local/, though no list names it (repeatable): on <branch> when its repo has it, else detached at origin/<default branch>. It never makes the install run and is not built, so the app's package.json and lock stay as committed; a later run without --add reports it unlisted.",
+    (value: string, previous: string[] = []) => [...previous, value],
+  )
+  .option('--json', 'Print the result as JSON (also on a refusal): code, branch, root, app, packages, install, builds, messages.')
+  .action(async (branch: string, options) => {
+    const {runCheckout} = await import('./commands/checkout.js');
+    return runCheckout(branch, options);
   });
 
 const release = program

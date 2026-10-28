@@ -1,7 +1,8 @@
 // Full test for `create-package`, proving the scaffold is correct the moment it exists.
 //
 // Scaffolds with the BUILT CLI (lib/esm/launch.js) into a temp directory, which installs
-// from the registry and builds, then proves the properties a new package is supposed to
+// from the registry, replaces the installed CLI's `lib` and `hooks` with this repo's (so the
+// scaffold's `linked build` is the CLI under test) and builds, then proves the properties a new package is supposed to
 // have and has repeatedly not had:
 //
 //   - it builds, with `linked build`, and a type error fails that build;
@@ -88,6 +89,14 @@ describeFull('create-package (full)', () => {
       stdio: 'pipe',
       maxBuffer: 100 * 1024 * 1024,
     });
+    // The scaffold's `linked build` must be the CLI under test, not the release its
+    // devDependencies pinned: replace the installed `lib` (and the `hooks` it loads).
+    const installed = path.join(pkg, 'node_modules', '@_linked', 'cli');
+    for (const dir of ['lib', 'hooks']) {
+      fs.rmSync(path.join(installed, dir), {recursive: true, force: true});
+      fs.cpSync(path.join(CLI_ROOT, dir), path.join(installed, dir), {recursive: true});
+    }
+    fs.chmodSync(path.join(installed, 'lib', 'esm', 'launch.js'), 0o755);
 
     // Two probe modules, added after scaffolding and before the build under test.
     // `orphan` is imported by nothing: it only emits if the tsconfig compiles the

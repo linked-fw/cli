@@ -450,7 +450,7 @@ describe('writing and the build check', () => {
   test('a package without linkedOntologies passes untouched', async () => {
     fs.writeJsonSync(path.join(dir, 'package.json'), {
       name: 'plain',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     fs.appendFileSync(path.join(dir, 'src/ontologies/ex.ts'), '// hand edit\n');
     expect(await step().apply()).toBe(true);

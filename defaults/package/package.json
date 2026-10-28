@@ -11,7 +11,9 @@
     "url": ""
   },
   "version": "1.0.0",
-  "linkedPackage": true,
+  "linked": {
+    "kind": "assets"
+  },
   "type": "module",
   "main": "lib/esm/index.js",
   "module": "lib/esm/index.js",

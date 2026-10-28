@@ -1,7 +1,7 @@
 {
   "name": "ontology-generator-fixture",
   "private": true,
-  "linkedPackage": true,
+  "linked": {"kind": "ontology"},
   "linkedOntologies": {
     "other": {"namespace": "https://example.test/other#"},
     "ex": {"namespace": "https://example.test/ex/", "data": ["ex.ttl", "ex-extra.ttl"]}

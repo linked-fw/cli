@@ -18,6 +18,7 @@ import {generateScopedName} from './utils.js';
 import {generateScopedNameProduction} from './css-module-names.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 import {pinCompiledClassNames} from './plugins/pin-compiled-class-names.js';
+import {sharedInstall} from './localize/shared-install.js';
 import {
   discoverInstalledLinkedPackages,
   isLinkedPackageJson,
@@ -366,8 +367,8 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
 /**
  * Linked packages installed as SOURCE, found by walking the app's
  * `dependencies` + `devDependencies` (and recursing through the `dependencies`
- * of each linked package found), keeping those marked `"linkedPackage": true`
- * — the same marker the CLI keys on (see cli-methods.ts) — and registering the
+ * of each linked package found), keeping the linked packages (`linked.kind`, `isLinkedPackageJson`)
+ * — the same marker the CLI keys on everywhere — and registering the
  * ones that ship `src/`.
  *
  * A dep ships `src/` when it is a symlinked workspace clone, a `link:`/`portal:`
@@ -383,7 +384,7 @@ async function readSourcePackage(root: string): Promise<WorkspaceEntry | null> {
  *
  * The marker — NOT the npm scope — drives discovery, so a user's own
  * custom-scope published linked package (e.g. `@acme/foo` with
- * `linkedPackage:true`) is picked up too, and linked packages present in
+ * a package `linked.kind`) is picked up too, and linked packages present in
  * node_modules but not depended upon are ignored.
  *
  * Every root is REALPATHED before it is registered: `readInstalledPkg` returns
@@ -788,7 +789,7 @@ export function clientDefine(
 
 /**
  * The app's direct dependencies (and devDependencies) that are linked packages
- * by their own `linkedPackage` flag, not their scope. Best-effort: no
+ * by their own `linked.kind`, not their scope. Best-effort: no
  * `package.json` gives `[]`. See `optimizeDeps` in `createViteConfig`.
  */
 export async function installedLinkedDeps(cwd: string): Promise<string[]> {
@@ -808,21 +809,15 @@ export async function installedLinkedDeps(cwd: string): Promise<string[]> {
 
 /**
  * Vite's dependency cache for the app at `appRoot`. Vite's default is
- * `node_modules/.vite`; when `node_modules` is a symlink -- a git worktree
- * sharing the main checkout's install -- that is the main checkout's cache, and
- * a worktree's dev server would re-optimize it from under the main one's. Such
- * an app gets `<appRoot>/.vite-cache` instead; otherwise `undefined` keeps the
- * default.
+ * `node_modules/.vite`; in a git worktree that shares the main checkout's
+ * install through a symlinked `node_modules`, that is the main checkout's
+ * cache, and a worktree's dev server would re-optimize it from under the main
+ * one's. A worktree sharing the install (a symlink, or the link farm of
+ * `linked worktree add`) gets `<appRoot>/.vite-cache` instead; otherwise
+ * `undefined` keeps the default.
  */
 export function viteCacheDir(appRoot: string): string | undefined {
-  try {
-    if (fsExtra.lstatSync(path.join(appRoot, 'node_modules')).isSymbolicLink()) {
-      return path.join(appRoot, '.vite-cache');
-    }
-  } catch {
-    /* no node_modules: the default */
-  }
-  return undefined;
+  return sharedInstall(appRoot) ? path.join(appRoot, '.vite-cache') : undefined;
 }
 
 export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType<typeof defineConfig> {
@@ -840,7 +835,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     // of the standalone-gated branches below apply.
     const isStandalone = isDev && workspaces.length === 0;
 
-    // The app's installed framework deps (by their `linkedPackage` flag) —
+    // The app's installed framework deps (by their `linked.kind`) —
     // excluded from Vite's dep-optimizer below (`optimizeDeps.exclude`) in EVERY
     // dev mode, so the browser's native ESM graph loads ONE copy of each. Without
     // the exclude, esbuild inlines a duplicate `@_linked/core` into each

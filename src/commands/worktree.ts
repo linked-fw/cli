@@ -4,12 +4,13 @@
  *
  * Layout: `<dir>` (default `<parent of the app root>/wt/<agent>`) is a git
  * worktree of the app, on the agent branch `<base>--<agent>` (or detached at
- * the base tip with `--app-detached`). Its `node_modules` is a symlink to the
- * app root's, so it shares the main checkout's install, and every package
- * the agent changes is a worktree of that package's `packages-local/`
- * checkout at `<dir>/packages-local/<dirName>`, on the same agent branch.
- * The dev server's workspace table then points those names, and only those,
- * at the worktree's copies.
+ * the base tip with `--app-detached`). Every package the agent changes is a
+ * worktree of that package's `packages-local/` checkout at
+ * `<dir>/packages-local/<dirName>`, on the same agent branch. Its
+ * `node_modules` is a link farm into the app root's install (see
+ * worktree-node-modules.ts): it shares the main checkout's install, except
+ * that those package names, and only those, link to the worktree's copies, so
+ * Vite, tsc and Node all load them.
  *
  * The base is the root's integration branch, or the root's current branch
  * when it has none. Agents land by fast-forwarding the base to their branch;
@@ -34,6 +35,7 @@ import {
 } from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
+import {sharedInstall} from '../localize/shared-install.js';
 import {
   branchesContaining,
   localBranchExists,
@@ -42,6 +44,7 @@ import {
   selectCheckouts,
   worktreesOf,
 } from './branch.js';
+import {linkNodeModules, overlaysOf, removeFarm, type LinkResult} from './worktree-node-modules.js';
 
 export interface WorktreeAddOptions {
   /** `packages-local/` checkouts to give a worktree: package name, dir name or short name. */
@@ -74,7 +77,7 @@ export function defaultWorktreeDir(appRoot: string, agent: string): string {
  * `p` with every existing ancestor resolved through symlinks, so paths
  * compare equal however they were spelled (`/tmp` vs `/private/tmp`).
  */
-function realish(p: string): string {
+export function realish(p: string): string {
   const abs = path.resolve(p);
   let head = abs;
   const tail: string[] = [];
@@ -275,8 +278,6 @@ export async function worktreeAdd(
     );
 
     try {
-      linkDir(path.join(root, 'node_modules'), path.join(dir, 'node_modules'));
-      result.messages.push(`${path.join(dir, 'node_modules')} -> ${path.join(root, 'node_modules')}`);
       for (const name of fs.readdirSync(root).filter((n) => ENV_FILE.test(n)).sort()) {
         // Only an untracked, gitignored file: a tracked one is in the worktree already.
         if (run('git', ['check-ignore', '-q', name], {cwd: root}).status !== 0) continue;
@@ -312,6 +313,13 @@ export async function worktreeAdd(
       }
       result.messages.push(`${pkgDir}: ${repo.packageName ?? repo.rel} on ${branch}`);
     }
+
+    try {
+      result.messages.push(farmMessage(root, dir, linkNodeModules(root, dir, overlaysOf(dir))));
+    } catch (error) {
+      result.messages.push(`linking ${path.join(dir, 'node_modules')} failed: ${(error as Error).message}`);
+      return rollback();
+    }
   } catch (error) {
     result.messages.push(`failed: ${(error as Error).message}`);
     return rollback();
@@ -346,11 +354,22 @@ export async function worktreeAdd(
     );
   }
   result.messages.push(
-    "Don't run npm install in the worktree: node_modules is the main checkout's (the git hooks skip it there too).",
+    "Don't run npm install in the worktree: node_modules links into the main checkout's install (the git hooks skip it there too).",
+    'After an npm install in the main checkout, or a package worktree added by hand: linked worktree relink, from the worktree.',
     'Landing (rebase onto the base, then merge --ff-only from the main checkout) is described in the wrapup skill.',
   );
   result.code = 0;
   return result;
+}
+
+/** One line on the farm `linkNodeModules` made. */
+function farmMessage(root: string, dir: string, r: LinkResult): string {
+  const overlays = Object.entries(r.overlays).map(([name, d]) => `${name} -> ${path.relative(dir, d)}`);
+  return (
+    `${path.join(dir, 'node_modules')}: links into ${path.join(root, 'node_modules')} (${r.links} entries)` +
+    (overlays.length ? `, with ${overlays.join(', ')}` : '') +
+    (r.replaced === 'symlink' ? '; replaced the node_modules symlink' : '')
+  );
 }
 
 /** A directory symlink; a junction on Windows, which needs no extra privilege. */
@@ -504,6 +523,44 @@ export interface WorktreeRemoveResult {
 }
 
 /**
+ * The agent's app worktree in `list`: the one at `dir` when given, else the
+ * one on `<base>--<agent>`, a detached one with a package worktree on that
+ * branch, or the one at the default dir.
+ */
+function findAppWorktree(
+  root: string,
+  list: WorktreeList,
+  agent: string,
+  dirOption?: string,
+): {app: AppWorktree; branch: string | null} | {error: string[]} {
+  let branch: string | null = null;
+  try {
+    branch = list.base ? agentBranch(list.base, agent) : null;
+  } catch (error) {
+    return {error: [(error as Error).message]};
+  }
+  if (dirOption) {
+    const dir = realish(dirOption);
+    const app = list.worktrees.find((w) => w.dir === dir);
+    return app ? {app, branch} : {error: [`No worktree of ${root} at ${dir}.`]};
+  }
+  const defaultDir = realish(defaultWorktreeDir(root, agent));
+  const app =
+    (branch ? list.worktrees.find((w) => w.branch === branch) : undefined) ??
+    (branch ? list.worktrees.find((w) => w.branch === null && w.packages.some((p) => p.branch === branch)) : undefined) ??
+    list.worktrees.find((w) => w.dir === defaultDir);
+  if (!app) {
+    return {
+      error: [
+        `No worktree of ${root} for ${agent}: none on ${branch ?? `<base>--${agent}`}, nor at ${defaultDir}.`,
+        'Pass its directory with --dir; `linked worktree list` shows the worktrees.',
+      ],
+    };
+  }
+  return {app, branch};
+}
+
+/**
  * Remove an agent's worktree: the nested package worktrees first, then the
  * app worktree, then the agent branches. The app worktree is the one on
  * `<base>--<agent>`; a detached one is found by its package worktrees on that
@@ -528,30 +585,9 @@ export async function worktreeRemove(
   const refuse = (...m: string[]): WorktreeRemoveResult => ({code: 1, messages: [...messages, ...m]});
 
   const list = await worktreeList(root, {all: true}, run);
-  let branch: string | null = null;
-  try {
-    branch = list.base ? agentBranch(list.base, agent) : null;
-  } catch (error) {
-    return refuse((error as Error).message);
-  }
-  let app: AppWorktree | undefined;
-  if (options.dir) {
-    const dir = realish(options.dir);
-    app = list.worktrees.find((w) => w.dir === dir);
-    if (!app) return refuse(`No worktree of ${root} at ${dir}.`);
-  } else {
-    const defaultDir = realish(defaultWorktreeDir(root, agent));
-    app =
-      (branch ? list.worktrees.find((w) => w.branch === branch) : undefined) ??
-      (branch ? list.worktrees.find((w) => w.branch === null && w.packages.some((p) => p.branch === branch)) : undefined) ??
-      list.worktrees.find((w) => w.dir === defaultDir);
-    if (!app) {
-      return refuse(
-        `No worktree of ${root} for ${agent}: none on ${branch ?? `<base>--${agent}`}, nor at ${defaultDir}.`,
-        'Pass its directory with --dir; `linked worktree list` shows the worktrees.',
-      );
-    }
-  }
+  const found = findAppWorktree(root, list, agent, options.dir);
+  if ('error' in found) return refuse(...found.error);
+  const {app, branch} = found;
 
   const items: {label: string; repoDir: string; dir: string; branch: string | null; landed: boolean | null; ours: string[]}[] = [
     ...app.packages.map((p) => ({
@@ -597,6 +633,9 @@ export async function worktreeRemove(
     // The links unlinked below, so a failed `git worktree remove` can put them
     // back and leave the worktree usable.
     const unlinked: {path: string; target: string; type: 'dir' | 'file'}[] = [];
+    // The app's node_modules link farm, rebuilt the same way if the removal fails.
+    const farm = sharedInstall(it.dir);
+    const removedFarm = farm?.layout === 'farm' && removeFarm(it.dir) ? farm.installRoot : null;
     for (const name of it.ours) {
       const p = path.join(it.dir, name);
       let stat: fs.Stats | undefined;
@@ -632,6 +671,13 @@ export async function worktreeRemove(
           fs.symlinkSync(link.target, link.path, link.type);
         } catch {
           /* already back, or the dir is gone: the error below is what matters */
+        }
+      }
+      if (removedFarm) {
+        try {
+          linkNodeModules(removedFarm, it.dir, overlaysOf(it.dir));
+        } catch {
+          /* the error below is what matters; linked worktree relink rebuilds it */
         }
       }
       return refuse(`${it.label}: git ${args.join(' ')} failed: ${failed(r)}`);
@@ -673,6 +719,81 @@ function envLinks(dir: string): string[] {
   }
 }
 
+export interface WorktreeRelinkOptions {
+  /** The app worktree's directory, instead of the agent name or the current directory. */
+  dir?: string;
+}
+
+/**
+ * Rebuild an app worktree's `node_modules` link farm: after an `npm install`
+ * in the main checkout, after a package worktree was added to its
+ * `packages-local/` by hand, and to move a worktree made with a symlinked
+ * `node_modules` (the earlier layout) to the farm. A package worktree without
+ * a `node_modules` gets the link to its checkout's, as `add` makes it.
+ *
+ * The worktree is `dir`, else the agent's, else `appRoot` itself when it is a
+ * worktree rather than the main checkout. A real install of the worktree's own
+ * is left alone.
+ */
+export async function worktreeRelink(
+  appRoot: string,
+  agent: string | undefined,
+  options: WorktreeRelinkOptions = {},
+  run: Run = makeRun(appRoot),
+): Promise<WorktreeRemoveResult> {
+  const here = realish(appRoot);
+  const all = worktreesOf(run, here);
+  if (!all.length) return {code: 1, messages: [`${here} is not in a git repository.`]};
+  // git lists the main worktree first.
+  const root = realish(all[0].path);
+  const list = await worktreeList(root, {all: true}, run);
+  let dir: string;
+  if (options.dir) {
+    dir = realish(options.dir);
+  } else if (agent) {
+    const found = findAppWorktree(root, list, agent);
+    if ('error' in found) return {code: 1, messages: found.error};
+    dir = found.app.dir;
+  } else if (here !== root) {
+    dir = here;
+  } else {
+    return {code: 1, messages: ['Run it in the worktree, or name the agent (or --dir).']};
+  }
+  if (dir === root) return {code: 1, messages: [`${dir} is the main checkout: it has its own install.`]};
+  if (!list.worktrees.some((w) => w.dir === dir)) return {code: 1, messages: [`No worktree of ${root} at ${dir}.`]};
+
+  const messages: string[] = [];
+  try {
+    for (const name of Object.values(overlaysOf(dir)).map((d) => path.basename(d))) {
+      const own = path.join(dir, 'packages-local', name, 'node_modules');
+      const nested = path.join(root, 'packages-local', name, 'node_modules');
+      if (fs.existsSync(own) || isLink(own) || !fs.existsSync(nested)) continue;
+      linkDir(nested, own);
+      messages.push(`${own} -> ${nested}`);
+    }
+    messages.push(farmMessage(root, dir, linkNodeModules(root, dir, overlaysOf(dir))));
+  } catch (error) {
+    return {code: 1, messages: [...messages, `relinking ${dir} failed: ${(error as Error).message}`]};
+  }
+  return {code: 0, messages};
+}
+
+function isLink(p: string): boolean {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** The commander action for `worktree relink`. */
+export async function runWorktreeRelink(agent: string | undefined, options: {dir?: string}): Promise<void> {
+  const result = await worktreeRelink(process.cwd(), agent, {dir: resolveDir(options.dir)});
+  const write = result.code === 0 ? console.log : console.error;
+  for (const m of result.messages) write(m);
+  process.exitCode = result.code;
+}
+
 const resolveDir = (dir?: string): string | undefined => (dir ? path.resolve(process.cwd(), dir) : undefined);
 
 /** The commander action for `worktree add`. */
@@ -707,14 +828,18 @@ export async function runWorktreeList(options: {json?: boolean; all?: boolean}):
 /** The commander action for `worktree remove`. */
 export async function runWorktreeRemove(
   agent: string,
-  options: {force?: boolean; deleteUnlanded?: boolean; dir?: string},
+  options: {force?: boolean; deleteUnlanded?: boolean; dir?: string; json?: boolean},
 ): Promise<void> {
   const result = await worktreeRemove(findAppRoot(process.cwd()), agent, {
     force: options.force,
     deleteUnlanded: options.deleteUnlanded,
     dir: resolveDir(options.dir),
   });
-  const write = result.code === 0 ? console.log : console.error;
-  for (const m of result.messages) write(m);
+  if (options.json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  } else {
+    const write = result.code === 0 ? console.log : console.error;
+    for (const m of result.messages) write(m);
+  }
   process.exitCode = result.code;
 }

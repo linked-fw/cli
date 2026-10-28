@@ -1,8 +1,8 @@
 // `optimizeDeps.include` entries for the third-party client dependencies of
 // linked framework packages.
 //
-// Apps exclude the framework packages (`@_linked/*`, `lincd-*`, anything marked
-// `"linkedPackage": true`) from Vite's dependency optimizer, so the browser
+// Apps exclude the framework packages (`@_linked/*`, `lincd-*`, anything with
+// a package `linked.kind`) from Vite's dependency optimizer, so the browser
 // loads exactly one copy of each. The cost of that exclusion: Vite no longer
 // crawls into those packages, so it never learns about THEIR dependencies until
 // the browser happens to request one. Two things then go wrong:
@@ -24,7 +24,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {isBuiltin} from 'node:module';
 import {init as initLexer, parse as parseImports} from 'es-module-lexer';
-import {isFrameworkPkg, readInstalledPkg} from './installed-packages.js';
+import {
+  isFrameworkPkg,
+  isLinkedPackageJson,
+  readInstalledPkg,
+} from './installed-packages.js';
 import type {Plugin} from 'vite';
 
 export interface SourceWorkspace {
@@ -680,7 +684,7 @@ export async function scanLinkedClientDeps(
             unresolvedExcludes.push(name);
             return null;
           }
-          if (!isFrameworkPkg(name) && installed.json.linkedPackage !== true)
+          if (!isFrameworkPkg(name) && !isLinkedPackageJson(installed.json))
             return null;
           return {
             name,
@@ -743,7 +747,7 @@ export async function scanLinkedClientDeps(
           if (depName === pkg.name || isFrameworkPkg(depName)) return null;
           const installed = await lookup(depName, pkg.root);
           if (!installed) return {reason: 'unresolved', depName};
-          if (installed.json.linkedPackage === true) return null;
+          if (isLinkedPackageJson(installed.json)) return null;
           const depRoot = await realpath(installed.root);
           const cacheKey = `${depRoot}\0${subpathOf(spec)}`;
           if (!serverOnly.has(cacheKey)) {

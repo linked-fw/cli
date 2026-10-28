@@ -41,12 +41,12 @@ describe('discoverWorkspaces', () => {
     });
     makePackage(path.join(mono, 'packages', 'shapes'), {
       name: 'shapes',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
       dependencies: {'nested-linked': '1.0.0'},
     });
     makePackage(path.join(mono, 'packages', 'nested-linked'), {
       name: 'nested-linked',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     makePackage(path.join(mono, 'packages', 'plain'), {name: 'plain'});
     const app = path.join(mono, 'services', 'api');
@@ -71,7 +71,7 @@ describe('discoverWorkspaces', () => {
     // A linked package installed ABOVE the workspace root is out of scope.
     makePackage(path.join(tmp, 'node_modules', 'outside'), {
       name: 'outside',
-      linkedPackage: true,
+      linked: {kind: 'assets'},
     });
     const names = (await discoverWorkspaces([], app)).map((w) => w.name);
     expect(names).toContain('shapes');

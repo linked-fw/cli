@@ -16,6 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import type {PackageKind} from './packageKind.js';
+import {linkedKind} from '../installed-packages.js';
 
 export const PACKAGE_LOCATIONS = ['packages', 'packages-local'] as const;
 export type PackageLocation = (typeof PACKAGE_LOCATIONS)[number];
@@ -63,7 +64,7 @@ export class CreatePackageError extends Error {
 
 /**
  * The nearest directory, from `start` upwards, whose package.json says
- * `linkedApp: true`. That is the app — whether or not it has `workspaces`,
+ * `linked.kind: "app"`. That is the app — whether or not it has `workspaces`,
  * which the app template does not.
  */
 export function findLinkedAppRoot(start: string): string | null {
@@ -74,7 +75,7 @@ export function findLinkedAppRoot(start: string): string | null {
       const pkg = JSON.parse(
         fs.readFileSync(path.join(dir, 'package.json'), 'utf8'),
       );
-      if (pkg?.linkedApp === true) return dir;
+      if (linkedKind(pkg) === 'app') return dir;
     } catch {
       // no package.json here, or not one we can read: keep walking
     }
@@ -111,7 +112,7 @@ export function decideCreatePackageTarget({
     return given
       ? refuse(
           `--location, --remote and --push only apply inside a linked app, and no package.json ` +
-            `with "linkedApp": true was found above this directory.`,
+            `with "linked": {"kind": "app"} was found above this directory.`,
         )
       : {kind: 'outside'};
   }

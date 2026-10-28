@@ -44,7 +44,7 @@ test('the topmost one, preferring an app over a linked package with workspaces',
   write(inner, {name: 'mono', workspaces: ['packages/*']});
   assert.equal(findAppRoot(inner), top);
 
-  write(top, {name: 'lib', linkedPackage: true, workspaces: ['x/*']});
+  write(top, {name: 'lib', linked: {kind: 'assets'}, workspaces: ['x/*']});
   const app = path.join(top, 'x', 'app');
   write(app, {name: 'app', workspaces: ['packages/*']});
   assert.equal(findAppRoot(app), app);

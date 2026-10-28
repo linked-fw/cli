@@ -10,7 +10,11 @@ import fs from 'fs-extra';
 import path from 'path';
 import chalk from 'chalk';
 import {getPackageJSON} from './utils.js';
-import {hasWorkspaceMembers, isLinkedPackageJson} from './installed-packages.js';
+import {
+  hasWorkspaceMembers,
+  isLinkedPackageJson,
+  linkedKind,
+} from './installed-packages.js';
 import {LOCAL_DIR, localMembers} from './localize/members.js';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from './workspace-globs.js';
 // Shared with the CSS loader's mode resolution, which must pick the same profiles.
@@ -226,16 +230,16 @@ export async function loadBackendFileStorage(
  *
  * The facts are recorded rather than filtered on, because the bug this type
  * exists to fix was a SILENT filter: `build-all` discovered only packages
- * carrying `linkedPackage: true` and printed nothing about the rest, so
+ * carrying the linked-package flag and printed nothing about the rest, so
  * `@_linked/maps` — a shipped dependency that simply never got the flag — was
  * dropped from a green build for as long as nobody counted the names.
  */
 export interface LocalPackage extends PackageDetails {
   /** Where the walk found it. */
   source: 'workspace' | 'local-packages-dir';
-  /** `linkedPackage: true` — see `isLinkedPackageJson`. */
+  /** A `linked.kind` other than `app` — see `isLinkedPackageJson`. */
   isLinkedPackage: boolean;
-  /** `linkedApp: true` — built by `linked build-app`, not `linked build`. */
+  /** `linked.kind: "app"` — built by `linked build-app`, not `linked build`. */
   isApp: boolean;
   /** Has a `build` script of its own, which is what `build-all` invokes. */
   hasBuildScript: boolean;
@@ -251,7 +255,7 @@ export const LOCAL_PACKAGES_DIR = LOCAL_DIR;
 
 /**
  * Walk the app's `package.json` `workspaces` field and return every
- * workspace package that declares `"linkedPackage": true`.
+ * workspace package that is a linked package (`isLinkedPackageJson`).
  *
  * Lives here (not in cli-methods.ts) so consumers like LinkedServer can
  * import it without dragging the rest of the legacy cli-methods flow into
@@ -272,7 +276,7 @@ export function getLincdPackages(
 
 /**
  * Every local package directory this app can see, whether or not it declares
- * `linkedPackage: true`.
+ * a `linked.kind`.
  *
  * Two sources, because the workspace globs are not the whole picture any more:
  *
@@ -406,7 +410,7 @@ function addPackage(
     source,
     // The one definition, shared with `linked build-package`.
     isLinkedPackage: isLinkedPackageJson(pack),
-    isApp: pack.linkedApp === true,
+    isApp: linkedKind(pack) === 'app',
     hasBuildScript: !!pack.scripts?.build,
   });
 }
@@ -582,7 +586,7 @@ export function orderBuildToolFirst(
  * Every discovered package lands in exactly one of `build` or `skipped`, and
  * `skipped` carries a reason — because the failure mode this replaces was not
  * a narrow scan, it was a SILENT one. `@_linked/maps` is a shipped Create Now
- * dependency that never got `linkedPackage: true`; `build-all` dropped it and
+ * dependency that never got the linked-package flag; `build-all` dropped it and
  * printed nothing, so a build covering half the workspace exited 0 and people
  * acted on it. A skip nobody can see is worse than a failure.
  *

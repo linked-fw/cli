@@ -5,7 +5,8 @@ summary: >
   works (glob, lock-at-rest hook, git hooks incl. core.hooksPath/husky and worktrees, drift check),
   the app root (nested worktrees stay their own), the one-step app set-up, what to commit and
   `.setup-aside/` recovery, the missing-hooks notice, commands, purge rules, monorepos (`.repos/`), building (incl. the cli), drift, parking, changing
-  dependencies while localized, Docker/CI, exit codes.
+  dependencies while localized, Docker/CI, exit codes; `--listed` clones what the app lists in
+  `linked.unpublishedPackages` (transitively), and a token comes only from `LINKED_GIT_TOKEN`.
 ---
 
 # `linked localize` — develop a dependency from a git checkout
@@ -193,6 +194,7 @@ npx linked localize --parked        # take the checkouts back
 | `linked localize <pkg…>` | set-up if needed, then per package: take back a parked checkout, else clone it; write the git hooks; one `npm install` at the app root; build each new checkout |
 | `linked localize <pkg…> --adopt` | the same for a checkout already in `packages-local/`: no registry lookup, no clone |
 | `linked localize --parked` | take back every parked checkout, then one `npm install`. No builds |
+| `linked localize --listed` | clone every package the app's committed `package.json` lists in `linked.unpublishedPackages`, and those their lists name, that is not in `packages-local/` yet; one `npm install`; build the new clones ([below](#unpublished-packages)) |
 | `linked localize`, `linked localize --list` | each checkout (name, directory, branch, version), the parked ones, and the drift. Never writes, exits 0 |
 | `linked localize --list --check` | print only the drift (on stderr) and exit 1 when there is any (for CI) |
 | `linked delocalize [pkg…]` | park: move the checkout to `.packages-local.parked/`, then reinstall the registry copies. No names: every checkout |
@@ -210,6 +212,7 @@ npx linked localize --parked        # take the checkouts back
 | `--purge`, `--force` | `delocalize` only. `--force` deletes with `--purge` despite a refusal |
 
 `--adopt` takes no `--repo` or `--subdir` (exit 2): an adopted checkout is used as it is.
+`--listed` takes no names, `--adopt`, `--repo`, `--subdir` or `--list` (exit 2).
 `--parked` takes no names. `delocalize` also accepts the part after the scope (`rdfs` for
 `@_linked/rdfs`) when only one checkout matches.
 
@@ -230,6 +233,41 @@ would clone to, whose `package.json` has that name, and it never clones, pulls o
 followed by `npm rebuild <names>` (an install that replaces a link with the registry copy leaves
 that package's bin without its execute bit; the rebuild restores it). The log line says which ran,
 and why.
+
+### Unpublished packages
+
+A package an app uses that is not on npm — a project's ontology or asset package in a private
+repo — has no registry `repository` to clone from, so the app lists it in its committed
+`package.json`:
+
+```json
+"linked": {
+  "kind": "app",
+  "unpublishedPackages": {
+    "acme-ont": {"repo": "https://github.com/org/acme-ont.git"},
+    "acme-assets": {"repo": "https://github.com/org/acme-assets.git"}
+  }
+}
+```
+
+A package lists the unpublished packages it uses the same way (an asset package lists its
+ontology package). `linked localize --listed` walks the lists breadth first: each listed package
+not in `packages-local/` is cloned from its `repo` and checked out on the app's current branch
+when the package repo has it, else left on its default branch; a listed package already in
+`packages-local/` (or parked) is used as it is. Its own list is then followed. The same name
+listed with two repos refuses (exit 6) before anything is installed; a repo whose `package.json`
+declares another name is removed and refused. Then one install and the builds, as for named
+packages.
+
+A `repo` must be an `https://` URL (`file://` for local repos); anything else, or an entry without
+one, is an error, not skipped. Credentials in the URL are ignored with a warning: a token comes
+from `LINKED_GIT_TOKEN` ([Docker and CI](#docker-and-ci)). Once a package is published, it leaves
+the list and goes into `dependencies` with a range. `dependencyOrder` (`build-all`, `release
+plan`, `branch merge`) reads the list as dependency edges.
+
+A server that keeps one checkout per branch uses [`linked
+checkout`](integration-branches-and-worktrees.md#linked-checkout-branch) instead: the same lists,
+as worktrees of shared base clones.
 
 ### Purge
 
@@ -462,6 +500,13 @@ That is the rule `pre-commit` applies: any `"packages-local/…` string except t
 `npx linked localize --list --check` after `npm ci` (it reports a nested copy of a package that
 must load once).
 
+**Private repos in CI or a server.** Put a token (a GitHub App installation token, say) in
+`LINKED_GIT_TOKEN`, and its user in `LINKED_GIT_USERNAME` when it is not `x-access-token`. Every
+clone then gets `GIT_ASKPASS` (the cli's `hooks/git-askpass.cjs`), `GIT_TERMINAL_PROMPT=0`, an empty
+`credential.helper` and no git hooks, through `GIT_CONFIG_COUNT` rather than `-c`; the install
+and the builds run without the token. Never put the token in a URL: it would land in the clone's
+`.git/config` (localize strips it, with a warning).
+
 ## A checkout's own lockfile
 
 A checkout is still its own repository and is released from its own lockfile. To change its
@@ -507,6 +552,8 @@ administrator rights; a CRLF `package.json` or `.gitignore` stays CRLF. Known li
   `HEAD`) or a stash, or one git cannot check (without `--force`)
 - write into a `core.hooksPath` directory
 - guess a repository URL
+- write a token anywhere: not in a URL, not in a git config, not in the environment of an
+  install, a build or a git hook
 
 ## Exit codes
 
@@ -514,10 +561,10 @@ administrator rights; a CRLF `package.json` or `.gitignore` stays CRLF. Known li
 |---|---|
 | 0 | fine (`--relink` and `--ensure` always) |
 | 1 | `--list --check` found drift |
-| 2 | bad command line (`--dir` other than `packages-local`, `--adopt` with `--repo`/`--subdir`, `--parked` with names) |
+| 2 | bad command line (`--dir` other than `packages-local`, `--adopt` with `--repo`/`--subdir`, `--parked` with names, `--listed` with names or `--repo`) |
 | 4 | no repository could be resolved. Pass `--repo` |
 | 5 | something was warned about and skipped; the rest worked (a failed build, a name that is not localized, a park blocked by an existing directory, a failed `npm rebuild`) |
-| 6 | a guard refused: a worktree whose `node_modules` is a symlink, an existing directory, a parked checkout whose name is already a member, a conflicting override, a clone that is not the package, a failed `git clone`, an unusable `package.json`, a refused `--purge` (it was 5 before this version) |
+| 6 | a guard refused: a worktree whose `node_modules` is a symlink, an existing directory, a parked checkout whose name is already a member, a conflicting override, a clone that is not the package, a failed `git clone`, an unusable `package.json`, a malformed `linked.unpublishedPackages`, one name listed with two repos, a refused `--purge` (it was 5 before this version) |
 | 7 | `npm install` (or `npm ci`) at the app root failed |
 
 Each package is processed independently, and the exit code is the highest of the per-package codes

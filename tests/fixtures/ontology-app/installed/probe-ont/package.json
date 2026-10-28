@@ -2,7 +2,7 @@
   "name": "@_linked/probe-ont",
   "version": "0.0.0",
   "type": "module",
-  "linkedPackage": true,
+  "linked": {"kind": "ontology"},
   "exports": {
     "./*": "./lib/esm/*"
   }

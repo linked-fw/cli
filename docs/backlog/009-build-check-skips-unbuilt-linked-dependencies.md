@@ -1,38 +1,32 @@
 ---
 summary: >
-  The post-build shape check calls core's `registerInstalledOntologies` without `importModule`,
-  so a linked dependency that is not built yet registers no ontology data. When packages build
-  out of order, a shape extending a dependency's shape can be reported `extends-without-subclass`
-  although the dependency's data declares the subclass.
-status: Open -- a low from the review of the shape check (CN plan 070); not fixed
+  The post-build shape check now loads a linked dependency's `src/ontologies/*.register.ts` when
+  its `lib/` has no register modules (report 035). Left: a dependency whose `lib/` has some register
+  modules but predates a newer one in `src/` still registers only the built ones, because core's
+  `registerInstalledOntologies` falls back to `src/` per package, not per module; and the check
+  still says nothing when a linked dependency registers nothing at all.
+status: Open -- the partly stale lib case; the main case is fixed (report 035)
 ---
 
-# 009 — The build check skips unbuilt linked dependencies
+# 009 — The build check skips a dependency's register modules its `lib/` lacks
 
-Source: CN plan 070, independent review of `store-inference` (report 025).
+Source: CN plan 070, independent review of `store-inference` (report 025). The unbuilt-dependency
+case is fixed in report 035: `collectShapeCheckInputs` sets `tsLoader` when a dependency has register
+modules only in `src/`, and the check's child passes core an `importModule` through the cli's TS
+loader.
 
-## Problem
+## What is left
 
-`src/utils/shapeHierarchy.ts` runs the shape check in a child process that registers the
-ontology data of the package and of every linked dependency through
-`registerInstalledOntologies(packageDirs)` (line 202), with no `options.importModule`. Core then
-reads only `lib/esm/ontologies/*.register.js`; a dependency without a built `lib/` (a workspace
-package not built yet) is skipped silently. Its `rdfs:subClassOf` triples are missing from the
-hierarchy, so a shape of the package that extends one of that dependency's shapes can get a false
-`extends-without-subclass` error, depending on the order in which `build-all` (or the developer)
-builds packages.
+- **A partly stale `lib/`.** Core's `registerInstalledOntologies` imports `lib/esm/ontologies/*.register.js`
+  and falls back to `options.importModule` over `src/ontologies/*.register.ts` only when `lib/` has
+  none. A dependency built before it gained a second ontology registers the first only, and a shape
+  extending a class of the second can still get a false `extends-without-subclass`. A fix belongs in
+  core (fall back per module, or prefer `src/` when `importModule` is given and `src/` is newer).
+- **A silent skip.** A linked dependency that registers nothing (no register modules anywhere, or
+  no TS loader found beside the cli's build) is not mentioned. A warning naming it would make a
+  false finding explainable.
 
 ## First questions
 
-- Pass an `importModule` that can load `src/ontologies/*.register.ts` (tsx, or a Vite SSR loader)
-  in the check's child process, or make the check build order explicit (dependencies first, which
-  `build-all` already does) and report a skipped dependency instead of staying silent?
-- At least: warn when a linked dependency registered nothing, so a false finding is explainable.
-- A test: a package whose dependency has only `src/` gets no false `extends-without-subclass`.
-
-## Fixed: the unit test that expected a widening override to warn
-
-`tests/unit/shapeHierarchy.test.ts` expected `override-not-tightened` with `severity: 'warning'`
-and a passing build. Core reports it as an error for a decorated shape (core report 044), so the
-test failed. It now asserts the error and that `checkShapeHierarchyStep` fails the build
-("override-not-tightened: a widening override of a decorated shape fails the build"), and passes.
+- Per-module fallback in core, or compare `src/` and `lib/` modification times?
+- Warn in the build step's output, or only when the check reports an `extends-without-subclass`?
