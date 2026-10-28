@@ -58,6 +58,7 @@
   "linked": {
     "kind": "library"
   },
+  "linkedPackage": true,
   "publishConfig": {
     "access": "public"
   },
