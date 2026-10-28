@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import {type CheckoutResult} from '../../../src/commands/checkout.js';
 import {scrubbedNpmEnv} from '../localize/helpers.js';
-import {assertNoToken, cleanup, commitOn, git, gitEnv, setup, TOKEN} from './helpers.js';
+import {assertNoToken, cleanup, commitOn, git, gitEnv, makeRemote, setup, TOKEN} from './helpers.js';
 
 afterEach(cleanup);
 
@@ -119,6 +119,71 @@ describe('linked checkout', () => {
     assert.equal(assets.unlisted, true);
     assert.ok(fs.existsSync(assets.dir));
     assertNoToken(root);
+  });
+
+  test('--add checks out a package no list names, without an install or a build; a later run reports it unlisted', () => {
+    const {r, root, run} = setup();
+    const extra = makeRemote(r.base, 'acme-extra', {
+      'package.json': JSON.stringify({name: 'acme-extra', version: '1.0.0', linked: {kind: 'ontology'}}) + '\n',
+    });
+    assert.equal(run('change-1').code, 0);
+    const appDir = path.join(root, 'acme-app', 'change-1');
+    const manifests = () => git(appDir, 'status', '--porcelain', '--', 'package.json', 'package-lock.json');
+    // The app has its install: only the added worktree moves, which installs and builds nothing.
+    fs.mkdirSync(path.join(appDir, 'node_modules'), {recursive: true});
+
+    const res = run('change-1', {add: [r.url(extra)], install: true});
+    console.log(JSON.stringify(byName(res, 'acme-extra'), null, 2));
+    assert.equal(res.code, 0, res.messages.join('\n'));
+    const added = byName(res, 'acme-extra');
+    assert.deepEqual(
+      {added: added.added, unlisted: added.unlisted, detached: added.detached, fellBack: added.fellBack, status: added.status, requiredBy: added.requiredBy},
+      {added: true, unlisted: undefined, detached: true, fellBack: true, status: 'created', requiredBy: []},
+    );
+    assert.equal(added.dir, path.join(appDir, 'packages-local', 'acme-extra'));
+    assert.deepEqual(res.install, {ran: false, ok: true});
+    assert.deepEqual(res.builds, []);
+    assert.equal(manifests(), '');
+    assert.deepEqual(res.packages.map((p) => p.name).sort(), ['acme-assets', 'acme-extra', 'acme-ont']);
+
+    // Its repo gets the branch: the next --add switches it, as a listed fallback is.
+    commitOn(r.base, extra, 'change-1', 'extra.ttl', '# on the branch\n');
+    const switched = byName(run('change-1', {add: [r.url(extra)]}), 'acme-extra');
+    assert.deepEqual({status: switched.status, branch: switched.branch, added: switched.added}, {status: 'switched', branch: 'change-1', added: true});
+
+    // Without --add it is a checkout no list names: reported, kept.
+    const later = byName(run('change-1'), 'acme-extra');
+    assert.equal(later.unlisted, true);
+    assert.equal(later.added, undefined);
+    assert.ok(fs.existsSync(later.dir));
+    assertNoToken(root);
+  });
+
+  test('--add of a listed package is the listed one; with another repo, or one name twice, it is refused', () => {
+    const {r, run} = setup();
+    const same = run('change-1', {add: [r.url(r.ont)]});
+    assert.equal(same.code, 0, same.messages.join('\n'));
+    assert.equal(same.packages.filter((p) => p.name === 'acme-ont').length, 1);
+    assert.equal(byName(same, 'acme-ont').added, undefined);
+    assert.ok(same.messages.some((m) => /acme-ont is listed/.test(m)), same.messages.join('\n'));
+
+    const impostor = makeRemote(r.base, 'acme-ont-copy', {
+      'package.json': JSON.stringify({name: 'acme-ont', version: '1.0.0'}) + '\n',
+    });
+    const other = run('change-1', {add: [r.url(impostor)]});
+    assert.equal(other.code, 6);
+    assert.match(other.messages.join('\n'), /--add .* is acme-ont, which the lists name with/);
+
+    const twin = makeRemote(r.base, 'acme-twin', {'package.json': JSON.stringify({name: 'acme-twin'}) + '\n'});
+    const twin2 = makeRemote(r.base, 'acme-twin-2', {'package.json': JSON.stringify({name: 'acme-twin'}) + '\n'});
+    const twice = run('change-1', {add: [r.url(twin), r.url(twin2)]});
+    assert.equal(twice.code, 6);
+    assert.match(twice.messages.join('\n'), /--add names acme-twin twice/);
+
+    const nameless = makeRemote(r.base, 'acme-nameless', {'README.md': 'no package\n'});
+    const none = run('change-1', {add: [r.url(nameless)]});
+    assert.equal(none.code, 6);
+    assert.match(none.messages.join('\n'), /has no package\.json naming a package/);
   });
 
   test('an existing app branch is checked out, not created; --from makes a new one from a branch', () => {

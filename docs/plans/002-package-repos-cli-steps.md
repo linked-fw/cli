@@ -42,7 +42,7 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
   reads them as edges.
 - **K-checkout** (provider CO, landed; consumers BC, PC, deploy): `linked checkout <branch>
   [--repo <app https url>] [--root <dir>] [--dir <dir>] [--from <ref>] [--no-install]
-  [--build <cmd>] [--json]` in a projects root: one bare base clone per repo at
+  [--build <cmd>] [--add <repo>]... [--json]` in a projects root: one bare base clone per repo at
   `<root>/.repos/<owner>/<name>.git`, the app as a `git worktree` on `<branch>` at `--dir`
   (default `<root>/<name>/<branch with / as __>`; created from `--from`, default the remote's
   default branch, and pushed `-u`, when the remote lacks it), the packages of
@@ -53,7 +53,10 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
   an app whose `workspaces` lacks `packages-local/*` is refused. `--json` (also on refusal):
   `{code, branch, root, app: {name, repo, dir, branch, created, head, status, reason?},
   packages: [{name, repo, dir, branch, detached, fellBack, head, requiredBy, status, reason?,
-  unlisted?}], install: {ran, ok}, builds: [{name, result: ok|failed|skipped}], messages}`;
+  unlisted?, added?}], install: {ran, ok}, builds: [{name, result: ok|failed|skipped}], messages}`;
+  `--add <repo>` (added by plan 070 NO) checks out one more package no list names into
+  `packages-local/` by the same branch rule (`added: true`), its name from its `package.json`; it
+  never triggers the install and is never built; a later run without it reports it `unlisted`;
   `status` ∈ `created|updated|unchanged|switched|kept`; exit 0, 2 usage, 4 remote unreachable,
   5 build failed, 6 refused, 7 install failed. Re-runs fast-forward clean worktrees, switch a
   fallback whose branch appeared, push a new app branch a failed run left unpushed, and report the

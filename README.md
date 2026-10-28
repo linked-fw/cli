@@ -480,7 +480,8 @@ linked doctor resolve                             # where Vite and Node load eac
 (`<root>/.repos/<owner>/<name>.git`), the app as a worktree on `<branch>` (created from `--from`
 and pushed when the remote lacks it) and each package of `linked.unpublishedPackages` as a
 worktree in its `packages-local/` (on `<branch>` where its repo has it, else detached at
-`origin/<default>`), then installs once in the app worktree. `--json` prints what it did.
+`origin/<default>`), then installs once in the app worktree. `--add <repo>` checks out one more
+package no list names, without an install or a build. `--json` prints what it did.
 Credentials come only from `LINKED_GIT_TOKEN`: remote git calls get it through `GIT_ASKPASS`
 (`hooks/git-askpass.cjs`) with credential helpers and git hooks off; the install, the builds and
 every local git call run without it.

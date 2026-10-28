@@ -328,6 +328,7 @@ LINKED_GIT_TOKEN=<short-lived token> npx linked checkout change-1 \
 | `--from <ref>` | what a new app branch is created from: a branch of the remote, or a commit; default the remote's default branch |
 | `--no-install` | make the worktrees only: no install, no builds |
 | `--build <cmd>` | the build run in each package worktree that moved; default its own `npm run build` when it has a build script; `''` builds nothing |
+| `--add <repo>` | also check out the package in this `https://` (or `file://`) repo, which no list names (repeatable; see **Added packages**) |
 | `--json` | print the result (also on a refusal) |
 
 **Layout.**
@@ -371,6 +372,16 @@ fallback is moved to the new default tip (`updated`). Changes, unpushed or diver
 another branch leave it as it is, `kept` with the `reason`. A package no list names any more is
 reported `unlisted: true` and never deleted. A new app branch a failed run left unpushed is
 pushed.
+
+**Added packages.** `--add <repo>` places a package that no list names beside the listed ones:
+its npm name is what its `package.json` declares on `<branch>` (else on its default branch), its
+worktree is `packages-local/<dir>` by the same branch rule, under its base clone's lock, and the
+result marks it `"added": true`. It never makes the install run and is never built, so the app's
+`package.json` and lock stay as committed (Create Now edits a workspace ontology the app does not
+use this way). `linked branch fork`, `branch push` and `branch merge` treat it as every other
+checkout in `packages-local/`. A later run without `--add` reports it `unlisted`. An `--add` of a
+package a list names with the same repo is that listed package; with another repo it is refused
+(exit 6), as is one name added with two repos.
 
 **JSON.**
 

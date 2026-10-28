@@ -820,6 +820,11 @@ program
   .option('--from <ref>', "What a new app branch is created from (a branch of the remote, or a commit). Default: the remote's default branch.")
   .option('--no-install', 'Make the worktrees only: no npm install, no builds.')
   .option('--build <cmd>', "The build run in each package worktree that moved. Default: its own `npm run build` when it has a build script. '' builds nothing.")
+  .option(
+    '--add <repo>',
+    "Also check out the package in this https (or file) repo into packages-local/, though no list names it (repeatable): on <branch> when its repo has it, else detached at origin/<default branch>. It never makes the install run and is not built, so the app's package.json and lock stay as committed; a later run without --add reports it unlisted.",
+    (value: string, previous: string[] = []) => [...previous, value],
+  )
   .option('--json', 'Print the result as JSON (also on a refusal): code, branch, root, app, packages, install, builds, messages.')
   .action(async (branch: string, options) => {
     const {runCheckout} = await import('./commands/checkout.js');

@@ -16,6 +16,11 @@
  * fast-forward on a clean tree; anything else is left as it is and reported `kept` with the
  * reason. Nothing is ever deleted: a package no longer listed is reported `unlisted`.
  *
+ * `--add <repo>` places one more package worktree that no list names (`added`): checked out by
+ * the same rules from its base clone, its npm name read from its `package.json` there, never a
+ * reason to install and never built, so the app's install and lock stay as committed. A later run
+ * without `--add` reports it `unlisted`, as any checkout no list names.
+ *
  * Credentials come only from the environment (integration/credentials.ts): remote git calls get
  * the askpass environment, everything else runs without the token, and no URL with userinfo
  * reaches git. Base clones are shared between apps, so the run takes each one's lock
@@ -84,6 +89,8 @@ export interface CheckoutOptions {
   env?: NodeJS.ProcessEnv;
   /** How long to wait for another run's lock on a base clone (integration/repo-lock.ts). */
   lock?: RepoLockOptions;
+  /** Repos of packages to check out beside the listed ones, unlisted (`--add`). */
+  add?: string[];
 }
 
 /** What happened to a worktree in this run. */
@@ -119,6 +126,8 @@ export interface CheckoutPackage {
   reason?: string;
   /** In `packages-local/` but no list names it any more; left as it is. */
   unlisted?: true;
+  /** Placed by `--add`: no list names it; it triggers no install and is not built. */
+  added?: true;
 }
 
 export interface CheckoutResult {
@@ -226,6 +235,8 @@ class Checkout {
   private readonly remoteRun: (cwd: string, args: string[]) => RunResult;
   private readonly bases = new Map<string, string>();
   private readonly moved: Head[] = [];
+  /** The worktrees `--add` placed: left out of the install trigger and the builds. */
+  private readonly addedDirs = new Set<string>();
 
   constructor(
     private readonly branch: string,
@@ -325,8 +336,16 @@ class Checkout {
       (m) => this.say(m),
     );
     for (const {entry, pkg} of reached) pkg.requiredBy = [...entry.requiredBy];
+    const added = this.addPackages(
+      appDir,
+      reached.map((r) => r.entry),
+    );
+    this.result.packages.push(...added);
     this.result.packages.push(
-      ...this.unlisted(appDir, new Set(reached.map((r) => r.pkg.dir))),
+      ...this.unlisted(
+        appDir,
+        new Set([...reached.map((r) => r.pkg.dir), ...added.map((p) => p.dir)]),
+      ),
     );
 
     const hooks = installGitHooks(appDir);
@@ -815,6 +834,79 @@ class Checkout {
     return {status: 'updated'};
   }
 
+  /**
+   * The `--add` repos as package worktrees beside the listed ones: the npm name each declares on
+   * the branch (else on the default branch) of its base clone; a package the lists reach already
+   * is theirs (the same repo) or refused (another repo).
+   */
+  private addPackages(
+    appDir: string,
+    listed: ListedPackage[],
+  ): CheckoutPackage[] {
+    const out: CheckoutPackage[] = [];
+    for (const raw of this.options.add ?? []) {
+      const repo = cleanRepo(raw, (m) => this.say(m));
+      const pkg = this.withBase(repo, (base) => {
+        const name = this.declaredName(base, repo);
+        const known = listed.find((e) => e.name === name);
+        if (known) {
+          if (stripUserinfo(normalizeGitUrl(known.repo)).url !== repo) {
+            throw new LocalizeError(
+              `--add ${repo} is ${name}, which the lists name with ${known.repo}. Add nothing, or make them agree.`,
+              EXIT_REFUSED,
+            );
+          }
+          this.say(
+            `--add ${repo}: ${name} is listed, so it is checked out as listed.`,
+          );
+          return null;
+        }
+        const twin = out.find((p) => p.name === name);
+        if (twin) {
+          if (twin.repo !== repo) {
+            throw new LocalizeError(
+              `--add names ${name} twice, with ${twin.repo} and ${repo}.`,
+              EXIT_REFUSED,
+            );
+          }
+          return null;
+        }
+        const placed = this.packageWorktreeIn(
+          {name, repo, requiredBy: []},
+          appDir,
+          base,
+        );
+        this.addedDirs.add(placed.dir);
+        return {...placed, added: true as const};
+      });
+      if (pkg) out.push(pkg);
+    }
+    return out;
+  }
+
+  /** The npm name a package repo's `package.json` declares: on the run's branch when it has it, else on its default branch. */
+  private declaredName(base: string, repo: string): string {
+    const ref = this.hasRemoteBranch(base, this.branch)
+      ? `refs/remotes/origin/${this.branch}`
+      : `refs/remotes/origin/${this.defaultBranch(base)}`;
+    const shown = this.local('git', ['show', `${ref}:package.json`], {
+      cwd: base,
+    });
+    let name: unknown;
+    try {
+      name = (JSON.parse(shown.stdout) as {name?: unknown}).name;
+    } catch {
+      name = undefined;
+    }
+    if (shown.status !== 0 || typeof name !== 'string' || !name) {
+      throw new LocalizeError(
+        `--add ${repo}: its ${ref.replace('refs/remotes/', '')} has no package.json naming a package.`,
+        EXIT_REFUSED,
+      );
+    }
+    return name;
+  }
+
   /** The package worktrees in `packages-local/` no list names any more: reported, never deleted. */
   private unlisted(appDir: string, listed: Set<string>): CheckoutPackage[] {
     const local = path.join(appDir, LOCAL_DIR);
@@ -854,6 +946,7 @@ class Checkout {
   private needsInstall(appDir: string): boolean {
     if (!fs.existsSync(path.join(appDir, 'node_modules'))) return true;
     for (const {dir, before} of this.moved) {
+      if (this.addedDirs.has(dir)) continue;
       if (before === null) return true;
       const changed = this.git(dir, [
         'diff',
@@ -886,7 +979,7 @@ class Checkout {
     }
     const movedDirs = new Set(this.moved.map((m) => m.dir));
     const toBuild = result.packages.filter(
-      (p) => !p.unlisted && movedDirs.has(p.dir),
+      (p) => !p.unlisted && !p.added && movedDirs.has(p.dir),
     );
     const ordered = dependencyOrder(
       toBuild.map((p) => ({
@@ -928,7 +1021,7 @@ export function formatCheckout(r: CheckoutResult): string {
   for (const p of r.packages) {
     const where = p.detached ? `detached at ${p.branch}` : p.branch;
     lines.push(
-      `  ${p.name}  ${where}${p.fellBack && !p.unlisted ? ' (fell back)' : ''}  ${p.status}${p.reason ? ` (${p.reason})` : ''}  ${p.dir}`,
+      `  ${p.name}  ${where}${p.fellBack && !p.unlisted ? ' (fell back)' : ''}${p.added ? ' (added)' : ''}  ${p.status}${p.reason ? ` (${p.reason})` : ''}  ${p.dir}`,
     );
   }
   if (r.install.ran) lines.push(`install: ${r.install.ok ? 'ok' : 'failed'}`);
@@ -946,6 +1039,7 @@ export async function runCheckout(
     from?: string;
     install?: boolean;
     build?: string;
+    add?: string[];
     json?: boolean;
   },
 ): Promise<void> {
@@ -956,6 +1050,7 @@ export async function runCheckout(
     from: options.from,
     install: options.install,
     build: options.build,
+    add: options.add,
   });
   if (options.json)
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
