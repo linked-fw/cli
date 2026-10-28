@@ -57,7 +57,7 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
   `status` ∈ `created|updated|unchanged|switched|kept`; exit 0, 2 usage, 4 remote unreachable,
   5 build failed, 6 refused, 7 install failed. Re-runs fast-forward clean worktrees, switch a
   fallback whose branch appeared, push a new app branch a failed run left unpushed, and report the
-  rest `kept`; nothing is deleted. One run per base clone at a time (callers serialise per app).
+  rest `kept`; nothing is deleted. One run per base clone at a time: each run takes the base clone's lock (`<base clone>/linked.lock`, `{pid, host, at, what}`) around its git work on that repo, one repo at a time, in `checkout`, `branch fork`, `branch push`, `branch merge` and `worktree remove --branch`; a waiter is refused (6) after 120 s, a dead holder's lock is taken over; a new base clone is cloned beside its place and renamed in. Callers still serialise per app checkout.
   `linked branch fork <branch> <package> [--dir <app>] [--json]`: create the branch in that
   package checkout from its current head and push it; `{code, package, dir, branch, from,
   pushed, messages}`. `linked branch push <branch> [--dir <app>] [--json]`: in every repo of the

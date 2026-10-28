@@ -410,8 +410,13 @@ other git call, the install and the builds run without the token. A URL with use
 without it, with a warning; error text is scrubbed of the token. Nothing writes it to disk.
 Without `LINKED_GIT_TOKEN`, git's own credentials apply.
 
-**One run per base clone at a time.** Two concurrent runs for the same app can fail on git's ref
-locks in the shared base clone; a caller serialises them per app.
+**One run per base clone at a time.** A package's base clone is shared by every app checkout under
+the root that lists it, so `linked checkout`, `branch fork`, `branch push`, `branch merge` and
+`worktree remove --branch` take the base clone's lock (a `linked.lock` file in it, holding the
+run's pid, host and command) around their git work on that repo, one repo at a time. A second run
+waits up to 120 s, then is refused (exit 6) naming the holder; a lock whose process is gone (same
+host) is taken over. A missing base clone is cloned beside its place and renamed into it. A
+caller still serialises the runs of one app checkout (its worktrees and files are not locked).
 
 ## `linked release plan [--json]`
 

@@ -18,7 +18,9 @@
  *
  * Credentials come only from the environment (integration/credentials.ts): remote git calls get
  * the askpass environment, everything else runs without the token, and no URL with userinfo
- * reaches git. One checkout per base clone at a time: callers serialise per app.
+ * reaches git. Base clones are shared between apps, so the run takes each one's lock
+ * (integration/repo-lock.ts) around its git work on that repo, one at a time; a missing base clone
+ * is cloned beside its place and renamed into it, so a lock never sits in a half-made clone.
  *
  * The core function takes options and an optional `run` and returns the JSON result; printing
  * is separate, so tests drive it against real throwaway repos.
@@ -32,6 +34,7 @@ import {
   scrubSecret,
   stripUserinfo,
 } from '../integration/credentials.js';
+import {withRepoLock, type RepoLockOptions} from '../integration/repo-lock.js';
 import {currentBranch} from '../integration/repos.js';
 import {
   appBranch,
@@ -79,6 +82,8 @@ export interface CheckoutOptions {
   cwd?: string;
   /** The environment (LINKED_GIT_TOKEN comes from here); default `process.env`. */
   env?: NodeJS.ProcessEnv;
+  /** How long to wait for another run's lock on a base clone (integration/repo-lock.ts). */
+  lock?: RepoLockOptions;
 }
 
 /** What happened to a worktree in this run. */
@@ -285,14 +290,15 @@ class Checkout {
       this.say(m),
     );
     const {name} = baseClonePath(this.root, repo);
-    const base = this.baseClone(repo);
     const appDir = realish(
       this.options.dir
         ? path.resolve(this.cwd, this.options.dir)
         : path.join(this.root, name, branchDir(branch)),
     );
 
-    this.result.app = this.appWorktree(repo, base, appDir);
+    this.result.app = this.withBase(repo, (base) =>
+      this.appWorktree(repo, base, appDir),
+    );
     const appJson = readJson(path.join(appDir, 'package.json'));
     const list = unpublishedPackages(appJson, (m) => this.say(m));
     if (list.length) this.requireSetup(appJson, appDir);
@@ -349,34 +355,69 @@ class Checkout {
   }
 
   /**
-   * The bare base clone of `repo`, made on first use and fetched (`--prune`) once per run. Its
-   * fetch refspec makes remote-tracking refs; its copied local heads are deleted, so every
-   * worktree's branch is a local branch tracking `origin/<branch>` and `origin/HEAD` is the
-   * default branch.
+   * Run `fn` on the base clone of `repo` while holding its lock: the base clone is shared by every
+   * app checkout under the root that uses the repo.
    */
-  private baseClone(repo: string): string {
-    const known = this.bases.get(repo);
-    if (known) return known;
+  private withBase<T>(repo: string, fn: (base: string) => T): T {
     const {dir} = baseClonePath(this.root, repo);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(path.dirname(dir), {recursive: true});
-      this.remote(this.root, ['clone', '--bare', '-q', '--', repo, dir]);
-      this.git(dir, [
+    if (!fs.existsSync(dir)) this.cloneBase(repo, dir);
+    return withRepoLock(
+      dir,
+      `linked checkout ${this.branch}`,
+      () => fn(this.baseClone(repo)),
+      this.options.lock,
+    );
+  }
+
+  /**
+   * Make the bare base clone of `repo` at `dir`: cloned into a directory beside it and renamed
+   * into place, so another run never sees it half made. Its fetch refspec makes remote-tracking
+   * refs; its copied local heads are deleted, so every worktree's branch is a local branch
+   * tracking `origin/<branch>` and `origin/HEAD` is the default branch. When another run's clone
+   * got there first, this one is dropped and that one is used.
+   */
+  private cloneBase(repo: string, dir: string): void {
+    fs.mkdirSync(path.dirname(dir), {recursive: true});
+    const tmp = fs.mkdtempSync(`${dir}.new-`);
+    try {
+      this.remote(this.root, ['clone', '--bare', '-q', '--', repo, tmp]);
+      this.git(tmp, [
         'config',
         'remote.origin.fetch',
         '+refs/heads/*:refs/remotes/origin/*',
       ]);
-      const heads = this.git(dir, [
+      const heads = this.git(tmp, [
         'for-each-ref',
         '--format=%(refname)',
         'refs/heads',
       ]);
       for (const ref of heads.split('\n').filter(Boolean))
-        this.git(dir, ['update-ref', '-d', ref]);
-      this.remote(dir, ['fetch', '--prune', '-q', 'origin']);
-      this.remote(dir, ['remote', 'set-head', 'origin', '--auto']);
+        this.git(tmp, ['update-ref', '-d', ref]);
+      this.remote(tmp, ['fetch', '--prune', '-q', 'origin']);
+      this.remote(tmp, ['remote', 'set-head', 'origin', '--auto']);
+      try {
+        fs.renameSync(tmp, dir);
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code !== 'ENOTEMPTY' && code !== 'EEXIST') throw e;
+        return; // another run's clone is in place: baseClone verifies and fetches it
+      }
+      this.bases.set(repo, dir);
       this.say(`base clone ${dir} <- ${repo}`);
-    } else {
+    } finally {
+      fs.rmSync(tmp, {recursive: true, force: true});
+    }
+  }
+
+  /**
+   * The bare base clone of `repo` (made by {@link cloneBase}), checked and fetched (`--prune`)
+   * once per run. Called under its lock ({@link withBase}).
+   */
+  private baseClone(repo: string): string {
+    const known = this.bases.get(repo);
+    if (known) return known;
+    const {dir} = baseClonePath(this.root, repo);
+    {
       const bare = this.local('git', ['rev-parse', '--is-bare-repository'], {
         cwd: dir,
       }).stdout.trim();
@@ -622,8 +663,17 @@ class Checkout {
     entry: ListedPackage,
     appDir: string,
   ): CheckoutPackage {
+    return this.withBase(entry.repo, (base) =>
+      this.packageWorktreeIn(entry, appDir, base),
+    );
+  }
+
+  private packageWorktreeIn(
+    entry: ListedPackage,
+    appDir: string,
+    base: string,
+  ): CheckoutPackage {
     const {branch} = this;
-    const base = this.baseClone(entry.repo);
     const dir = path.join(appDir, LOCAL_DIR, checkoutNameFor(entry.name));
     const def = this.defaultBranch(base);
     const rule = packageBranch(branch, this.hasRemoteBranch(base, branch), def);
@@ -921,6 +971,8 @@ export interface CheckoutRemoveOptions {
   force?: boolean;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** How long to wait for another run's lock on a base clone (integration/repo-lock.ts). */
+  lock?: RepoLockOptions;
 }
 
 export interface CheckoutRemoveResult {
@@ -944,9 +996,6 @@ export function checkoutRemove(
   options: CheckoutRemoveOptions = {},
   run?: Run,
 ): CheckoutRemoveResult {
-  const cwd = options.cwd ?? process.cwd();
-  const env = options.env ?? process.env;
-  const {local, remote} = gitRunners(run ?? makeRun(cwd), env);
   const result: CheckoutRemoveResult = {
     code: 0,
     removed: [],
@@ -954,12 +1003,40 @@ export function checkoutRemove(
     branches: [],
     messages: [],
   };
+  try {
+    return removeCheckout(branch, options, run, result);
+  } catch (e) {
+    // A base clone's lock another run held too long; what was removed before it is reported.
+    if (!(e instanceof LocalizeError)) throw e;
+    result.code = e.code;
+    result.messages.push(e.message);
+    return result;
+  }
+}
+
+function removeCheckout(
+  branch: string,
+  options: CheckoutRemoveOptions,
+  run: Run | undefined,
+  result: CheckoutRemoveResult,
+): CheckoutRemoveResult {
+  const cwd = options.cwd ?? process.cwd();
+  const env = options.env ?? process.env;
+  const {local, remote} = gitRunners(run ?? makeRun(cwd), env);
   const refuse = (code: number, ...m: string[]): CheckoutRemoveResult => {
     result.code = code;
     result.messages.push(...m);
     return result;
   };
   const git = (dir: string, args: string[]) => local('git', args, {cwd: dir});
+  /** Under the lock of the base clone `common` (shared with other app checkouts). */
+  const locked = <T>(common: string, fn: () => T): T =>
+    withRepoLock(
+      common,
+      `linked worktree remove --branch ${branch}`,
+      fn,
+      options.lock,
+    );
 
   let appDir: string;
   if (options.dir) {
@@ -1047,8 +1124,11 @@ export function checkoutRemove(
     })();
     if (!common)
       return refuse(EXIT_REFUSED, `${dir} is not a linked worktree.`);
-    const f = remote(dir, ['fetch', '--prune', '-q', 'origin']);
-    remote(dir, ['remote', 'set-head', 'origin', '--auto']);
+    const f = locked(common, () => {
+      const fetched = remote(dir, ['fetch', '--prune', '-q', 'origin']);
+      remote(dir, ['remote', 'set-head', 'origin', '--auto']);
+      return fetched;
+    });
     if (f.status !== 0)
       return refuse(
         EXIT_NOT_FOUND,
@@ -1110,7 +1190,11 @@ export function checkoutRemove(
       ...(options.force ? ['--force'] : []),
       it.dir,
     ];
-    const r = git(it.common, args);
+    const r = locked(it.common, () => {
+      const removed = git(it.common, args);
+      if (removed.status === 0) git(it.common, ['worktree', 'prune']);
+      return removed;
+    });
     if (r.status !== 0) {
       result.kept.push({dir: it.dir, reason: (r.stderr || r.stdout).trim()});
       return refuse(
@@ -1118,7 +1202,6 @@ export function checkoutRemove(
         `${it.label}: git ${args.join(' ')} failed: ${(r.stderr || r.stdout).trim()}`,
       );
     }
-    git(it.common, ['worktree', 'prune']);
     result.removed.push(it.dir);
   }
   for (const it of items) {
@@ -1128,8 +1211,12 @@ export function checkoutRemove(
       `refs/heads/${it.branch}`,
     ]).stdout.trim();
     let deleted = false;
+    const name = it.branch;
     if (it.landed)
-      deleted = git(it.common, ['branch', '-D', it.branch]).status === 0;
+      deleted = locked(
+        it.common,
+        () => git(it.common, ['branch', '-D', name]).status === 0,
+      );
     else
       result.messages.push(
         `${it.label}: kept ${it.branch} at ${sha} (not landed)`,

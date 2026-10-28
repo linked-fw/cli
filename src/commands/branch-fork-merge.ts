@@ -24,9 +24,18 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {gitRunners, stripUserinfo} from '../integration/credentials.js';
+import {
+  withCheckoutLock,
+  type RepoLockOptions,
+} from '../integration/repo-lock.js';
 import {listRepos, type RepoInfo} from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
-import {EXIT_NOT_FOUND, EXIT_REFUSED, EXIT_USAGE} from '../localize/errors.js';
+import {
+  EXIT_NOT_FOUND,
+  EXIT_REFUSED,
+  EXIT_USAGE,
+  LocalizeError,
+} from '../localize/errors.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {refExists, selectCheckouts} from './branch.js';
 import {dependencyOrder} from './release.js';
@@ -35,6 +44,8 @@ export interface ForkOptions {
   /** The app checkout; default the app root `cwd` is in. */
   dir?: string;
   env?: NodeJS.ProcessEnv;
+  /** How long to wait for another run's lock on a shared base clone. */
+  lock?: RepoLockOptions;
 }
 
 export interface ForkResult {
@@ -59,6 +70,26 @@ function commonSetup(
 
 const out = (r: {stdout: string; stderr: string}): string =>
   (r.stderr || r.stdout).trim();
+
+/**
+ * `fn` under the lock of the git dir of the checkout at `dir` (integration/repo-lock.ts); a lock
+ * another run held past the wait is answered by `refuse`.
+ */
+function locked<T, R>(
+  run: Run,
+  dir: string,
+  what: string,
+  options: {lock?: RepoLockOptions},
+  refuse: (code: number, message: string) => R,
+  fn: () => T,
+): T | R {
+  try {
+    return withCheckoutLock(run, dir, what, fn, options.lock);
+  } catch (e) {
+    if (!(e instanceof LocalizeError)) throw e;
+    return refuse(e.code, e.message);
+  }
+}
 
 /**
  * Create `branch` in the `packages-local/` checkout `pkg` names (npm name, dir name or short
@@ -107,74 +138,92 @@ export async function branchFork(
       EXIT_REFUSED,
       `${repo.rel} has uncommitted or untracked changes: commit or stash them first.`,
     );
-  const fetch = remote(repo.dir, ['fetch', '--prune', '-q', 'origin']);
-  if (fetch.status !== 0)
-    return refuse(
-      EXIT_NOT_FOUND,
-      `git fetch failed in ${repo.dir}: ${out(fetch)}`,
-    );
-  const onRemote = refExists(local, repo.dir, `refs/remotes/origin/${branch}`);
-  const push = (): ForkResult => {
-    const r = remote(repo.dir, [
-      'push',
-      '-q',
-      '--no-verify',
-      '-u',
-      'origin',
-      branch,
-    ]);
-    if (r.status !== 0)
-      return refuse(
-        EXIT_REFUSED,
-        `git push origin ${branch} failed in ${repo.dir}: ${out(r)}`,
+  // The checkout's git dir is the package's base clone, which other app checkouts share.
+  return locked(
+    local,
+    repo.dir,
+    `linked branch fork ${branch}`,
+    options,
+    refuse,
+    () => {
+      const fetch = remote(repo.dir, ['fetch', '--prune', '-q', 'origin']);
+      if (fetch.status !== 0)
+        return refuse(
+          EXIT_NOT_FOUND,
+          `git fetch failed in ${repo.dir}: ${out(fetch)}`,
+        );
+      const onRemote = refExists(
+        local,
+        repo.dir,
+        `refs/remotes/origin/${branch}`,
       );
-    result.pushed = true;
-    result.messages.push(`${result.package}: pushed ${branch}`);
-    return result;
-  };
+      const push = (): ForkResult => {
+        const r = remote(repo.dir, [
+          'push',
+          '-q',
+          '--no-verify',
+          '-u',
+          'origin',
+          branch,
+        ]);
+        if (r.status !== 0)
+          return refuse(
+            EXIT_REFUSED,
+            `git push origin ${branch} failed in ${repo.dir}: ${out(r)}`,
+          );
+        result.pushed = true;
+        result.messages.push(`${result.package}: pushed ${branch}`);
+        return result;
+      };
 
-  if (repo.branch === branch) {
-    if (!onRemote) return push();
-    const ahead = local(
-      'git',
-      ['rev-list', '--count', `refs/remotes/origin/${branch}..HEAD`],
-      {cwd: repo.dir},
-    ).stdout.trim();
-    if (ahead === '0') {
-      result.messages.push(`${result.package}: on ${branch} already, pushed`);
-      return result;
-    }
-    return push();
-  }
-  if (onRemote) {
-    return refuse(
-      EXIT_REFUSED,
-      `origin of ${result.package} has ${branch} already; \`linked checkout ${branch}\` switches the package worktree to it.`,
-    );
-  }
-  const exists = refExists(local, repo.dir, `refs/heads/${branch}`);
-  const args = exists
-    ? ['switch', '-q', branch]
-    : ['switch', '-q', '-c', branch];
-  const sw = local('git', args, {cwd: repo.dir});
-  if (sw.status !== 0)
-    return refuse(
-      EXIT_REFUSED,
-      `git ${args.join(' ')} failed in ${repo.dir}: ${out(sw)}`,
-    );
-  result.from = local('git', ['rev-parse', 'HEAD'], {
-    cwd: repo.dir,
-  }).stdout.trim();
-  result.messages.push(
-    `${result.package}: ${exists ? 'switched to' : 'created'} ${branch} at ${result.from}`,
+      if (repo.branch === branch) {
+        if (!onRemote) return push();
+        const ahead = local(
+          'git',
+          ['rev-list', '--count', `refs/remotes/origin/${branch}..HEAD`],
+          {cwd: repo.dir},
+        ).stdout.trim();
+        if (ahead === '0') {
+          result.messages.push(
+            `${result.package}: on ${branch} already, pushed`,
+          );
+          return result;
+        }
+        return push();
+      }
+      if (onRemote) {
+        return refuse(
+          EXIT_REFUSED,
+          `origin of ${result.package} has ${branch} already; \`linked checkout ${branch}\` switches the package worktree to it.`,
+        );
+      }
+      const exists = refExists(local, repo.dir, `refs/heads/${branch}`);
+      const args = exists
+        ? ['switch', '-q', branch]
+        : ['switch', '-q', '-c', branch];
+      const sw = local('git', args, {cwd: repo.dir});
+      if (sw.status !== 0)
+        return refuse(
+          EXIT_REFUSED,
+          `git ${args.join(' ')} failed in ${repo.dir}: ${out(sw)}`,
+        );
+      result.from = local('git', ['rev-parse', 'HEAD'], {
+        cwd: repo.dir,
+      }).stdout.trim();
+      result.messages.push(
+        `${result.package}: ${exists ? 'switched to' : 'created'} ${branch} at ${result.from}`,
+      );
+      return push();
+    },
   );
-  return push();
 }
 
 export interface PushOptions {
   /** The app checkout; default the app root `cwd` is in. */
   dir?: string;
   env?: NodeJS.ProcessEnv;
+  /** How long to wait for another run's lock on a shared base clone. */
+  lock?: RepoLockOptions;
 }
 
 export type PushRepoResult = 'pushed' | 'up-to-date' | 'refused';
@@ -234,63 +283,82 @@ export async function branchPush(
     );
   }
   for (const r of all.filter((x) => x.branch === branch)) {
-    const entry: PushRepo = {
-      name: r.packageName ?? path.basename(r.dir),
-      dir: r.dir,
-      repo: stripUserinfo(
-        local('git', ['config', '--get', 'remote.origin.url'], {
-          cwd: r.dir,
-        }).stdout.trim(),
-      ).url,
-      result: 'up-to-date',
-      sha: r.head,
-    };
-    result.repos.push(entry);
-    const f = remote(r.dir, ['fetch', '--prune', '-q', 'origin']);
-    if (f.status !== 0)
-      return refuse(EXIT_NOT_FOUND, `git fetch failed in ${r.dir}: ${out(f)}`);
-    const originBranch = `refs/remotes/origin/${branch}`;
-    if (refExists(local, r.dir, originBranch)) {
-      const ahead = local(
-        'git',
-        ['rev-list', '--count', `${originBranch}..HEAD`],
-        {cwd: r.dir},
-      ).stdout.trim();
-      if (ahead === '0') {
-        // Nothing to push; origin may be ahead, which a merge's fast-forward takes.
-        continue;
-      }
-      const diverged =
-        local('git', ['merge-base', '--is-ancestor', originBranch, 'HEAD'], {
-          cwd: r.dir,
-        }).status !== 0;
-      if (diverged) {
-        entry.result = 'refused';
-        result.code = EXIT_REFUSED;
-        result.messages.push(
-          `${entry.name}: ${branch} has diverged from origin/${branch}; nothing was pushed for it.`,
-        );
-        continue;
-      }
-    }
-    const p = remote(r.dir, [
-      'push',
-      '-q',
-      '--no-verify',
-      '-u',
-      'origin',
-      branch,
-    ]);
-    if (p.status !== 0) {
-      entry.result = 'refused';
-      result.code = EXIT_REFUSED;
-      result.messages.push(
-        `${entry.name}: git push origin ${branch} was refused: ${out(p)}`,
-      );
-      continue;
-    }
-    entry.result = 'pushed';
-    result.messages.push(`${entry.name}: pushed ${branch}`);
+    // Each repo under its git dir's lock: a package's base clone is shared between app checkouts.
+    const stop = locked(
+      local,
+      r.dir,
+      `linked branch push ${branch}`,
+      options,
+      refuse,
+      (): PushResult | null => {
+        const entry: PushRepo = {
+          name: r.packageName ?? path.basename(r.dir),
+          dir: r.dir,
+          repo: stripUserinfo(
+            local('git', ['config', '--get', 'remote.origin.url'], {
+              cwd: r.dir,
+            }).stdout.trim(),
+          ).url,
+          result: 'up-to-date',
+          sha: r.head,
+        };
+        result.repos.push(entry);
+        const f = remote(r.dir, ['fetch', '--prune', '-q', 'origin']);
+        if (f.status !== 0)
+          return refuse(
+            EXIT_NOT_FOUND,
+            `git fetch failed in ${r.dir}: ${out(f)}`,
+          );
+        const originBranch = `refs/remotes/origin/${branch}`;
+        if (refExists(local, r.dir, originBranch)) {
+          const ahead = local(
+            'git',
+            ['rev-list', '--count', `${originBranch}..HEAD`],
+            {cwd: r.dir},
+          ).stdout.trim();
+          if (ahead === '0') {
+            // Nothing to push; origin may be ahead, which a merge's fast-forward takes.
+            return null;
+          }
+          const diverged =
+            local(
+              'git',
+              ['merge-base', '--is-ancestor', originBranch, 'HEAD'],
+              {
+                cwd: r.dir,
+              },
+            ).status !== 0;
+          if (diverged) {
+            entry.result = 'refused';
+            result.code = EXIT_REFUSED;
+            result.messages.push(
+              `${entry.name}: ${branch} has diverged from origin/${branch}; nothing was pushed for it.`,
+            );
+            return null;
+          }
+        }
+        const p = remote(r.dir, [
+          'push',
+          '-q',
+          '--no-verify',
+          '-u',
+          'origin',
+          branch,
+        ]);
+        if (p.status !== 0) {
+          entry.result = 'refused';
+          result.code = EXIT_REFUSED;
+          result.messages.push(
+            `${entry.name}: git push origin ${branch} was refused: ${out(p)}`,
+          );
+          return null;
+        }
+        entry.result = 'pushed';
+        result.messages.push(`${entry.name}: pushed ${branch}`);
+        return null;
+      },
+    );
+    if (stop) return stop;
   }
   return result;
 }
@@ -301,6 +369,8 @@ export interface MergeOptions {
   dir?: string;
   mode?: MergeMode;
   env?: NodeJS.ProcessEnv;
+  /** How long to wait for another run's lock on a shared base clone. */
+  lock?: RepoLockOptions;
 }
 
 export type MergeRepoResult =
@@ -387,7 +457,15 @@ export async function branchMerge(
   }
   const problems: string[] = [];
   for (const r of repos) {
-    const f = remote(r.dir, ['fetch', '--prune', '-q', 'origin']);
+    const f = locked(
+      local,
+      r.dir,
+      `linked branch merge ${branch}`,
+      options,
+      refuse,
+      () => remote(r.dir, ['fetch', '--prune', '-q', 'origin']),
+    );
+    if ('code' in f) return f;
     if (f.status !== 0)
       return refuse(EXIT_NOT_FOUND, `git fetch failed in ${r.dir}: ${out(f)}`);
     if (!refExists(local, r.dir, `refs/remotes/origin/${into}`))
@@ -434,8 +512,15 @@ export async function branchMerge(
     const originInto = `refs/remotes/origin/${into}`;
     entry.landed = isAncestor(r.dir, originBranch, originInto);
     if (stopped) continue;
-    const step =
-      mode === 'push' ? mergePush(r.dir, entry) : mergeUpdate(r.dir, entry);
+    const step = locked(
+      local,
+      r.dir,
+      `linked branch merge ${branch}`,
+      options,
+      (_c, m) => m,
+      () =>
+        mode === 'push' ? mergePush(r.dir, entry) : mergeUpdate(r.dir, entry),
+    );
     if (step) {
       stopped = true;
       result.code = EXIT_REFUSED;
