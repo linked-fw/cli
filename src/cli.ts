@@ -711,6 +711,18 @@ branch
   });
 
 branch
+  .command('push <branch>')
+  .description(
+    "Run in an app checkout. Push <branch> in every repo on it -- the app (which must be on <branch>) and each packages-local/ checkout on <branch>; detached fallbacks and checkouts on another branch are left alone -- so that branch merge finds nothing unpushed. Fetches each first; pushes only commits origin lacks (-u when origin has no <branch>); a repo whose branch has diverged from origin is refused, never forced, and the others still push. Exit 0, 2 usage, 4 a fetch failed, 6 refused. A token comes only from LINKED_GIT_TOKEN.",
+  )
+  .option('--dir <dir>', 'The app checkout. Default: the app the current directory is in.')
+  .option('--json', 'Print {code, branch, repos: [{name, dir, repo, result: pushed|up-to-date|refused, sha}], messages}, the app first.')
+  .action(async (name: string, options) => {
+    const {runBranchPush} = await import('./commands/branch-fork-merge.js');
+    return runBranchPush(name, options);
+  });
+
+branch
   .command('merge <branch>')
   .description(
     "Run in an app checkout. Land <branch> in --into across the repos on it -- each packages-local/ checkout on <branch>, in dependency order (dependencies and linked.unpublishedPackages), then the app; checkouts on another branch or detached are skipped. Fetches each first, and refuses, merging nothing, while one has changes or commits origin lacks. --mode push (default): merge origin/<branch> into origin/<into> with --no-ff (\"Merge branch '<branch>' into <into>\") in a temporary worktree and push <into>. --mode update: merge origin/<into> into <branch> and push <branch>, for a protected <into> that lands by PRs in the order printed. Stops at the first conflict (aborted, files named) or refused push; later repos are skipped, earlier ones stay merged. A token comes only from LINKED_GIT_TOKEN.",

@@ -152,6 +152,26 @@ pushed is switched to and pushed.
  "branch": "change-1", "from": "4be1…", "pushed": true, "messages": ["acme-ont: created change-1 at 4be1…", "acme-ont: pushed change-1"]}
 ```
 
+### `linked branch push <branch> [--dir <app>] [--json]`
+
+In an app checkout: pushes `<branch>` in every repo that is on it -- the app, which must be on
+`<branch>` (else exit 6), and each `packages-local/` checkout on `<branch>`. Detached fallbacks and
+checkouts on another branch are left alone. Each repo is fetched first and pushes only the commits
+origin lacks (`push -u` when origin has no `<branch>` yet); uncommitted changes stay where they
+are. A repo whose `<branch>` has diverged from `origin/<branch>` is `refused` (exit 6), never
+forced; the other repos still push. Run it before `linked branch merge`, which refuses commits
+origin lacks.
+
+```json
+{"code": 0, "branch": "change-1", "messages": ["acme-app: pushed change-1"],
+ "repos": [
+   {"name": "acme-app", "dir": "…", "repo": "https://github.com/org/acme-app.git", "result": "pushed", "sha": "e07b…"},
+   {"name": "acme-ont", "dir": "…/packages-local/acme-ont", "repo": "https://github.com/org/acme-ont.git", "result": "up-to-date", "sha": "9c1e…"}]}
+```
+
+`result` is `pushed`, `up-to-date` or `refused`; `sha` is the branch tip. Exit 0, 2 usage, 4 a
+fetch failed, 6 refused.
+
 ### `linked branch merge <branch> --into <default> [--mode push|update] [--dir <app>] [--json]`
 
 Lands `<branch>` in every repo of an app checkout that is on it: the `packages-local/` checkouts
@@ -159,7 +179,7 @@ on `<branch>` in dependency order (their `dependencies`, `devDependencies`, `pee
 `linked.unpublishedPackages`), then the app. Checkouts on another branch or detached (fallbacks)
 are not part of it. It fetches each repo first and refuses, merging nothing, while one has
 changes, lacks `origin/<branch>` or `origin/<into>`, or has commits origin lacks (it merges
-`origin/<branch>`, so push first).
+`origin/<branch>`, so push first: `linked branch push`).
 
 - `--mode push` (default): per repo, `git merge --no-ff origin/<branch>` with the message
   `Merge branch '<branch>' into <into>` in a temporary worktree detached at `origin/<into>`

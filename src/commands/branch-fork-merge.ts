@@ -5,6 +5,8 @@
  *
  * - `fork <branch> <package>`: the package checkout (usually a fallback detached at
  *   `origin/<default>`) gets `<branch>` from its current head, pushed. Idempotent.
+ * - `push <branch>`: every repo of the checkout on `<branch>` (the app and each package checkout on
+ *   it) pushes what origin lacks, so a later `merge` (which refuses unpushed commits) finds them.
  * - `merge <branch> --into <default>`: the repos on `<branch>` (the app and each package
  *   checkout on it; fallbacks are skipped), packages in dependency order (with the
  *   `linked.unpublishedPackages` edges), the app last. `--mode push` (the default) merges
@@ -167,6 +169,130 @@ export async function branchFork(
     `${result.package}: ${exists ? 'switched to' : 'created'} ${branch} at ${result.from}`,
   );
   return push();
+}
+
+export interface PushOptions {
+  /** The app checkout; default the app root `cwd` is in. */
+  dir?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export type PushRepoResult = 'pushed' | 'up-to-date' | 'refused';
+
+export interface PushRepo {
+  /** The package name, or the app's. */
+  name: string;
+  dir: string;
+  /** Its origin, without userinfo. */
+  repo: string;
+  result: PushRepoResult;
+  /** The branch tip: what origin has after the push. */
+  sha: string;
+}
+
+export interface PushResult {
+  code: number;
+  branch: string;
+  /** The app first, then the package checkouts on the branch. */
+  repos: PushRepo[];
+  messages: string[];
+}
+
+/**
+ * Push `branch` in every repo of the app checkout that is on it: the app (which must be on it)
+ * and each `packages-local/` checkout on it; detached fallbacks and checkouts on another branch
+ * are left alone. Each is fetched first; a repo whose `origin/<branch>` is not an ancestor of its
+ * head (diverged) is refused, never forced, and later repos still push. Uncommitted changes stay
+ * where they are: only commits are pushed.
+ */
+export async function branchPush(
+  appDir: string,
+  branch: string,
+  options: PushOptions = {},
+  run?: Run,
+): Promise<PushResult> {
+  const env = options.env ?? process.env;
+  const {local, remote} = commonSetup(run, appDir, env);
+  const result: PushResult = {code: 0, branch, repos: [], messages: []};
+  const refuse = (code: number, m: string): PushResult => ({
+    ...result,
+    code,
+    messages: [...result.messages, m],
+  });
+  if (
+    local('git', ['check-ref-format', '--branch', branch], {cwd: appDir})
+      .status !== 0
+  ) {
+    return refuse(EXIT_USAGE, `"${branch}" is not a valid branch name.`);
+  }
+  const all = await listRepos(appDir, local);
+  const [app] = all;
+  if (app.branch !== branch) {
+    return refuse(
+      EXIT_REFUSED,
+      `${appDir} is on ${app.branch ?? 'a detached HEAD'}, not ${branch}.`,
+    );
+  }
+  for (const r of all.filter((x) => x.branch === branch)) {
+    const entry: PushRepo = {
+      name: r.packageName ?? path.basename(r.dir),
+      dir: r.dir,
+      repo: stripUserinfo(
+        local('git', ['config', '--get', 'remote.origin.url'], {
+          cwd: r.dir,
+        }).stdout.trim(),
+      ).url,
+      result: 'up-to-date',
+      sha: r.head,
+    };
+    result.repos.push(entry);
+    const f = remote(r.dir, ['fetch', '--prune', '-q', 'origin']);
+    if (f.status !== 0)
+      return refuse(EXIT_NOT_FOUND, `git fetch failed in ${r.dir}: ${out(f)}`);
+    const originBranch = `refs/remotes/origin/${branch}`;
+    if (refExists(local, r.dir, originBranch)) {
+      const ahead = local(
+        'git',
+        ['rev-list', '--count', `${originBranch}..HEAD`],
+        {cwd: r.dir},
+      ).stdout.trim();
+      if (ahead === '0') {
+        // Nothing to push; origin may be ahead, which a merge's fast-forward takes.
+        continue;
+      }
+      const diverged =
+        local('git', ['merge-base', '--is-ancestor', originBranch, 'HEAD'], {
+          cwd: r.dir,
+        }).status !== 0;
+      if (diverged) {
+        entry.result = 'refused';
+        result.code = EXIT_REFUSED;
+        result.messages.push(
+          `${entry.name}: ${branch} has diverged from origin/${branch}; nothing was pushed for it.`,
+        );
+        continue;
+      }
+    }
+    const p = remote(r.dir, [
+      'push',
+      '-q',
+      '--no-verify',
+      '-u',
+      'origin',
+      branch,
+    ]);
+    if (p.status !== 0) {
+      entry.result = 'refused';
+      result.code = EXIT_REFUSED;
+      result.messages.push(
+        `${entry.name}: git push origin ${branch} was refused: ${out(p)}`,
+      );
+      continue;
+    }
+    entry.result = 'pushed';
+    result.messages.push(`${entry.name}: pushed ${branch}`);
+  }
+  return result;
 }
 
 export type MergeMode = 'push' | 'update';
@@ -464,6 +590,18 @@ export async function runBranchFork(
 ): Promise<void> {
   const result = await branchFork(resolveDir(options.dir), branch, pkg);
   print(options.json, result, () => result.messages);
+}
+
+/** The commander action for `branch push`. */
+export async function runBranchPush(
+  branch: string,
+  options: {dir?: string; json?: boolean},
+): Promise<void> {
+  const result = await branchPush(resolveDir(options.dir), branch);
+  print(options.json, result, () => [
+    ...result.repos.map((r) => `${r.name}  ${r.result} ${r.sha.slice(0, 12)}`),
+    ...result.messages,
+  ]);
 }
 
 /** The commander action for `branch merge`. */

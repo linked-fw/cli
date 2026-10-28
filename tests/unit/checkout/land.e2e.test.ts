@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {branchFork, branchMerge} from '../../../src/commands/branch-fork-merge.js';
+import {branchFork, branchMerge, branchPush} from '../../../src/commands/branch-fork-merge.js';
 import {checkoutRemove, type CheckoutResult} from '../../../src/commands/checkout.js';
 import {assertNoToken, cleanup, commitOn, git, gitEnv, setup, TOKEN} from './helpers.js';
 
@@ -115,6 +115,58 @@ describe('linked branch fork / merge / worktree remove --branch', () => {
     assert.deepEqual(merge.repos[0].files, ['same.txt']);
     assert.equal(git(r.app, 'rev-parse', 'refs/heads/main'), appMain);
     assert.equal(git(appDir, 'worktree', 'list').split('\n').length, 2);
+  });
+
+  test('branch push pushes the app and the packages on the branch; a diverged repo is refused, never forced', async () => {
+    const {r, root, run} = setup();
+    const co = run('change-1');
+    const appDir = co.app!.dir;
+    const ontDir = dirOf(co, 'acme-ont');
+    const assetsDir = dirOf(co, 'acme-assets');
+    // The ontology package stays detached (a fallback): push leaves it alone.
+    const local = (dir: string, file: string): string => {
+      fs.writeFileSync(path.join(dir, file), `${file}\n`);
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-q', '-m', file);
+      return git(dir, 'rev-parse', 'HEAD');
+    };
+    const appSha = local(appDir, 'app.txt');
+    const assetsSha = local(assetsDir, 'asset.txt');
+    fs.writeFileSync(path.join(appDir, 'uncommitted.txt'), 'stays\n');
+
+    const pushed = await branchPush(appDir, 'change-1', {env});
+    console.log(JSON.stringify(pushed, null, 2));
+    assert.equal(pushed.code, 0, pushed.messages.join('\n'));
+    assert.deepEqual(
+      pushed.repos.map((x) => [x.name, x.result, x.sha]),
+      [
+        ['acme-app', 'pushed', appSha],
+        ['acme-assets', 'pushed', assetsSha],
+      ],
+    );
+    assert.equal(git(r.app, 'rev-parse', 'refs/heads/change-1'), appSha);
+    assert.equal(git(r.assets, 'rev-parse', 'refs/heads/change-1'), assetsSha);
+    assert.ok(fs.existsSync(path.join(appDir, 'uncommitted.txt')));
+    assert.equal(git(ontDir, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD');
+
+    const again = await branchPush(appDir, 'change-1', {env});
+    assert.equal(again.code, 0);
+    assert.deepEqual(again.repos.map((x) => x.result), ['up-to-date', 'up-to-date']);
+
+    // Someone else moved the app's branch: the app is refused, the asset package still pushes.
+    const theirs = commitOn(r.base, r.app, 'change-1', 'theirs.txt', 'elsewhere\n');
+    local(appDir, 'mine.txt');
+    const assetsNext = local(assetsDir, 'asset2.txt');
+    const diverged = await branchPush(appDir, 'change-1', {env});
+    assert.equal(diverged.code, 6);
+    assert.deepEqual(diverged.repos.map((x) => x.result), ['refused', 'pushed']);
+    assert.match(diverged.messages.join('\n'), /acme-app: change-1 has diverged/);
+    assert.equal(git(r.app, 'rev-parse', 'refs/heads/change-1'), theirs);
+    assert.equal(git(r.assets, 'rev-parse', 'refs/heads/change-1'), assetsNext);
+
+    const wrong = await branchPush(appDir, 'change-2', {env});
+    assert.equal(wrong.code, 6);
+    assertNoToken(root);
   });
 
   test('a protected default branch refuses the push; --mode update pushes the branch instead', async () => {

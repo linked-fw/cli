@@ -468,6 +468,7 @@ linked worktree relink                            # in a worktree: rebuild its n
 linked worktree list                              # agent worktrees and whether each branch has landed
 linked worktree remove agent1                     # refuses while a branch has not landed (--force, --delete-unlanded)
 linked branch fork change-1 acme-ont              # in an app checkout: create and push change-1 in that package checkout
+linked branch push change-1                       # in an app checkout: push change-1 in the app and every package checkout on it
 linked branch merge change-1 --into main          # packages in dependency order, then the app: --no-ff merge, push main
 linked branch merge change-1 --into main --mode update  # protected main: merge main into change-1, push it, land by PRs
 linked release plan                               # per repo: commits, reports, changesets, release PRs, next action
