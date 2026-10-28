@@ -184,6 +184,11 @@ describe('linked checkout', () => {
     const none = run('change-1', {add: [r.url(nameless)]});
     assert.equal(none.code, 6);
     assert.match(none.messages.join('\n'), /has no package\.json naming a package/);
+
+    const escape = makeRemote(r.base, 'acme-escape', {'package.json': JSON.stringify({name: '../../outside'}) + '\n'});
+    const out = run('change-1', {add: [r.url(escape)]});
+    assert.equal(out.code, 6);
+    assert.match(out.messages.join('\n'), /by an npm name/);
   });
 
   test('an existing app branch is checked out, not created; --from makes a new one from a branch', () => {

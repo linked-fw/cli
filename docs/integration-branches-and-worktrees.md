@@ -376,9 +376,12 @@ pushed.
 **Added packages.** `--add <repo>` places a package that no list names beside the listed ones:
 its npm name is what its `package.json` declares on `<branch>` (else on its default branch), its
 worktree is `packages-local/<dir>` by the same branch rule, under its base clone's lock, and the
-result marks it `"added": true`. It never makes the install run and is never built, so the app's
-`package.json` and lock stay as committed (Create Now edits a workspace ontology the app does not
-use this way). `linked branch fork`, `branch push` and `branch merge` treat it as every other
+result marks it `"added": true`. It never makes the install run and is never built, so adding it
+leaves the app's `package.json` and lock as committed (Create Now edits a workspace ontology the app
+does not use this way). It is still in the `packages-local/*` glob: an install a later run makes
+for a listed package links it like every checkout there, and the app's lock-at-rest hook puts the
+committed lockfile back. Its npm name must be one (a name that would leave `packages-local/` is
+refused). `linked branch fork`, `branch push` and `branch merge` treat it as every other
 checkout in `packages-local/`. A later run without `--add` reports it `unlisted`. An `--add` of a
 package a list names with the same repo is that listed package; with another repo it is refused
 (exit 6), as is one name added with two repos.

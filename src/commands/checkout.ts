@@ -898,9 +898,11 @@ class Checkout {
     } catch {
       name = undefined;
     }
-    if (shown.status !== 0 || typeof name !== 'string' || !name) {
+    // An npm name, so its directory under packages-local/ is one segment there.
+    const npmName = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/;
+    if (shown.status !== 0 || typeof name !== 'string' || !npmName.test(name)) {
       throw new LocalizeError(
-        `--add ${repo}: its ${ref.replace('refs/remotes/', '')} has no package.json naming a package.`,
+        `--add ${repo}: its ${ref.replace('refs/remotes/', '')} has no package.json naming a package by an npm name.`,
         EXIT_REFUSED,
       );
     }
