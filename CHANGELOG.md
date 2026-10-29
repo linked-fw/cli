@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.59.0
+
+### Minor Changes
+
+- [#333](https://github.com/linked-fw/cli/pull/333) [`767ae16`](https://github.com/linked-fw/cli/commit/767ae16d5e2f7eccd5388717187a8c1328a72dfb) Thanks [@flyon](https://github.com/flyon)! - `linked checkout` takes `--pin <npm>=<branch>` (repeatable: a package follows its pin, detached at `origin/<branch>` while another worktree holds the branch, and fast-forwards on a re-run) and `--pins-only` (no same-name rule: a package without a pin sits at `origin/<default>`); in either mode a clean worktree moves when its pin changes. `linked branch fork <branch> <pkg> --worktree <dir> [--from <ref>]` makes the branch in a worktree of its own from the package's base clone, outside every app checkout (pruning a deleted one, fast-forwarding a stale one, and taking the branch from a clean app checkout that holds it), and `linked branch push <branch> --worktree <dir>` pushes that one worktree. Without the new flags nothing changes.
+
+### Patch Changes
+
+- [#333](https://github.com/linked-fw/cli/pull/333) [`6f5065c`](https://github.com/linked-fw/cli/commit/6f5065cff79d8d78744155919b5f3160321c81b3) Thanks [@flyon](https://github.com/flyon)! - `linked checkout --pin`: a pin to a branch other than the run's own is always checked out detached at `origin/<pin>` (it is written in its own worktree), so no app checkout holds it; `linked branch fork --worktree` no longer detaches another checkout's worktree, and refuses a `--from` that starts with `-`.
+
 ## 1.58.0
 
 ### Minor Changes
