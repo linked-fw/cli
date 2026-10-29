@@ -690,12 +690,47 @@ branch
 branch
   .command('start <name> [packages...]')
   .description(
-    'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when: any of them has uncommitted or untracked changes; --target is missing in a repo where <name> has to be created; <name> equals the target; <name> contains "--" (it separates agent branches); or another worktree has <name> checked out. If a switch fails partway, the repos already switched go back: each to its previous branch, a branch the run created is deleted (kept, with its sha printed, when it moved or another branch forked from it), and the target entry is restored.',
+    'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when: any of them has uncommitted or untracked changes; --target is missing in a repo where <name> has to be created; <name> equals the target; <name> contains "--" (it separates agent branches); or another worktree has <name> checked out. If a switch fails partway, the repos already switched go back: each to its previous branch, a branch the run created is deleted (kept, with its sha printed, when it moved or another branch forked from it), and the target entry is restored. With --worktree: start a master instead, switching nothing -- <name> in a new app worktree (default <parent of the app root>/wt/<name>) with a nested worktree on <name> of each named package (positional or --with), each created from the branch that repo\'s checkout is on (or --target), node_modules a link farm into the main checkout\'s install; records branch.<name>.linked-target, -worktree, -port (first free of 4510, 4520, ... 4590, or --port) and -dataset in each repo, and prints the preview start command (PORT, SITE_ROOT and CN_PROJECTS_ROOT when the .env sets them, FUSEKI_DATASET). Run in the main checkout; refuses, making nothing, when <name> exists in a repo, the directory exists, or the port is another master\'s.',
   )
-  .requiredOption('--target <branch>', 'The branch the work lands in, e.g. main or dev.')
+  .option('--target <branch>', 'The branch the work lands in, e.g. main or dev. Required without --worktree; with it, the default is the branch each checkout is on.')
+  .option('--worktree', "Start a master: <name> in a worktree of its own; the checkouts stay where they are.")
+  .option('--with <packages>', 'With --worktree: comma-separated packages-local/ checkouts to give a worktree on <name> (as the positional packages).')
+  .option('--port <n>', "With --worktree: the master's preview port.")
+  .option('--dataset <name>', "With --worktree: a dataset of the master's own for its preview (FUSEKI_DATASET).")
+  .option('--dir <path>', "With --worktree: where to put the master's worktree.")
   .action(async (name: string, packages: string[], options) => {
+    if (options.worktree) {
+      const {runBranchStartWorktree} = await import('./commands/master.js');
+      return runBranchStartWorktree(name, packages, options);
+    }
+    const extra = ['with', 'port', 'dataset', 'dir'].filter((o) => options[o] !== undefined);
+    if (extra.length) {
+      console.error(`${extra.map((o) => `--${o}`).join(', ')} only go with --worktree.`);
+      process.exitCode = 2;
+      return;
+    }
+    if (!options.target) {
+      console.error("error: required option '--target <branch>' not specified");
+      process.exitCode = 1;
+      return;
+    }
     const {runBranchStart} = await import('./commands/branch.js');
     return runBranchStart(name, packages, options);
+  });
+
+branch
+  .command('land <name>')
+  .description(
+    "Run in the main checkout, once the owner approves. Land master <name> (linked branch start <name> --worktree) into the owner's checkouts, per repo of the master's worktree, frameworks first in dependency order and the app last. Refuses, changing nothing, while a master worktree is dirty, off <name> or mid-merge, a step worktree has not landed in <name>, or an owner checkout is dirty or off its target. Then: merges each target into <name> in the master's worktree where the target moved (a merge, so step SHAs stay) and stops (exit 3) so the master re-tests, unless --no-retest; a conflict stays in progress in the master's worktree (exit 4, files named); then git merge --ff-only <name> in each owner checkout, npx linked build in each landed framework checkout, and git push origin <target> per landed repo. Exit 0 landed, 1 refused, 3 re-test, 4 conflict, 5 landed but a build or push failed.",
+  )
+  .option('--dry-run', 'Check and say what would be merged and fast-forwarded; change nothing.')
+  .option('--no-retest', 'Go on to land right after merging a moved target into <name>.')
+  .option('--no-build', 'Do not build the landed framework checkouts.')
+  .option('--no-push', 'Do not push the landed targets.')
+  .option('--json', 'Print {code, messages, repos: [{rel, worktree, checkout, target, result, commits, files, built, pushed}]}.')
+  .action(async (name: string, options) => {
+    const {runBranchLand} = await import('./commands/master.js');
+    return runBranchLand(name, options);
   });
 
 branch
@@ -742,7 +777,7 @@ branch
 const worktree = program
   .command('worktree')
   .description(
-    "An agent's worktree of the app (default <parent of the app root>/wt/<agent>) with a nested worktree of each package it changes, on the branch <base>--<agent>. The base is the root's integration branch, or its current branch. node_modules is a link farm into the main checkout's install, with the worktree's own packages-local/ checkouts linked in place of the main checkout's.",
+    "An agent's worktree of the app (default <parent of the app root>/wt/<agent>) with a nested worktree of each package it changes, on the branch <base>--<agent>. The base is the root's integration branch, or its current branch. node_modules is a link farm into the main checkout's install, with the worktree's own packages-local/ checkouts (and its built packages/ members) linked in place of the main checkout's. A master (linked branch start <m> --worktree) has steps: worktree add <agent> --from <m>.",
   );
 
 worktree
@@ -755,6 +790,7 @@ worktree
   .option('--port <n>', 'The port for the printed start command.')
   .option('--dataset <name>', 'A dataset of its own for the printed start command (FUSEKI_DATASET).')
   .option('--dir <path>', 'Where to put the worktree.')
+  .option('--from <master>', "A step of this master (linked branch start <master> --worktree): branch <master>--<agent> from <master>, default dir <master's worktree dir>/../<master>--<agent>, --with from the master's package worktrees, node_modules linking straight into the master's install with the master's packages under the step's own. Implied when run in the master's worktree.")
   .action(async (agent: string, options) => {
     const {runWorktreeAdd} = await import('./commands/worktree.js');
     return runWorktreeAdd(agent, options);
@@ -763,7 +799,7 @@ worktree
 worktree
   .command('list')
   .description(
-    "Run in an app. The app's agent worktrees (on <base>--<agent>, or detached with a package worktree on one) with their nested package worktrees: branch or detached, and whether each branch has landed in the base.",
+    "Run in an app. The app's agent worktrees (on <base>--<agent>, or detached with a package worktree on one) with their nested package worktrees: branch or detached, and whether each branch has landed in the base. Then each master with its target, preview port and dataset, its worktree (landed meaning in its target) and its steps (landed meaning in the master's branch).",
   )
   .option('--all', 'List every worktree of the app, not only agent worktrees.')
   .option('--json', 'Print the base and the worktrees as JSON.')
@@ -781,6 +817,7 @@ worktree
   .option('--force', 'Remove even when a worktree has changes or a branch has not landed; unlanded branches are kept and their sha printed.')
   .option('--delete-unlanded', 'Also delete agent branches that have not landed (git branch -D), printing the sha each was at.')
   .option('--dir <path>', 'The app worktree directory, instead of finding it by its branch.')
+  .option('--from <master>', 'The agent is a step of this master (same as naming it <master>--<agent>). Naming the master itself removes the master: refused while it has steps or a branch has not landed in its target.')
   .option('--json', 'Print the result as JSON: with --branch {code, removed, kept: [{dir, reason}], branches: [{repo, branch, deleted, sha}], messages}; for an agent {code, messages}.')
   .action(async (agent: string | undefined, options) => {
     if (options.branch) {
@@ -804,9 +841,10 @@ worktree
 worktree
   .command('relink [agent]')
   .description(
-    "Rebuild an app worktree's node_modules link farm (the agent's, or the worktree it runs in): after an npm install in the main checkout, after adding a package worktree to its packages-local/ by hand, or to move a worktree whose node_modules is a symlink (made by an earlier cli) to the farm. Every package in its packages-local/ links to that checkout. A real install of the worktree's own is left alone.",
+    "Rebuild an app worktree's node_modules link farm (the agent's, or the worktree it runs in): after an npm install in the main checkout, after adding a package worktree to its packages-local/ by hand, or to move a worktree whose node_modules is a symlink (made by an earlier cli) to the farm. Every package in its packages-local/ (and every built packages/ member) links to that checkout; a step of a master keeps the master's packages under its own and links into the install its node_modules marker names. A real install of the worktree's own is left alone.",
   )
   .option('--dir <path>', 'The app worktree directory, instead of the agent name or the current directory.')
+  .option('--from <master>', 'The agent is a step of this master (same as naming it <master>--<agent>).')
   .action(async (agent: string | undefined, options) => {
     const {runWorktreeRelink} = await import('./commands/worktree.js');
     return runWorktreeRelink(agent, options);

@@ -1,7 +1,7 @@
 ---
 summary: >
   Integration branches and worktrees across an app and its `packages-local/` checkouts:
-  `linked branch status|start|fork|merge`, `linked worktree add|list|relink|remove`,
+  `linked branch status|start|land|fork|merge`, `linked worktree add|list|relink|remove`, masters,
   `linked checkout`, `linked release plan` and `linked doctor resolve`. The model (one integration branch per piece of work with a target
   recorded per repo, agent branches `<integration>--<agent>`, landing by rebase plus
   `merge --ff-only`, releases from cut branches merged with merge commits), the shared-install
@@ -59,11 +59,19 @@ real directory in which every entry links to the main checkout's entry of the sa
 - each package with a checkout in the worktree's `packages-local/`, which links to that checkout,
   so Vite, `tsc` (`npm run typecheck`) and Node (the backend, `tsx`, Vitest, Jest) all load the
   worktree's copy; its `@scope` is a real directory whose other entries link one by one;
+- each app workspace member in the worktree's `packages/` that can be loaded as it is (its `main`
+  or `.` export exists, or it declares neither), which links to the worktree's copy too. A member
+  whose entry is an unbuilt `lib/` stays the main checkout's (`add` and `relink` name them) until
+  it is built in the worktree and `linked worktree relink` runs. Each member's nested
+  `node_modules` (npm puts its `@types` there) links to the main checkout's;
 - `.bin`, a real directory of the same relative links, so an overlaid package's bin (`linked` from
   a `@_linked/cli` worktree) is the worktree's and every other bin the main checkout's;
 - npm's hidden lockfile and the caches (`.vite`, `.vite-temp`, `.cache`), left out.
 
-`node_modules/.linked-worktree.json` names the install the farm links into and its overlays.
+`node_modules/.linked-worktree.json` names the install the farm links into and its overlays, and
+for a step of a master (see Masters) the master's worktree as `parent`: the step's farm links
+straight into the install, with the master's overlays under the step's own, and `relink` rebuilds
+it the same way.
 `linked worktree add` makes the farm; `linked worktree relink` rebuilds it after an `npm install`
 in the main checkout (a package installed since is missing from the farm until then; `doctor
 resolve` says so) or after adding a package worktree by hand. A package another installed
@@ -238,6 +246,7 @@ when it has none (then agents land straight into that branch).
 | `--port <n>` | the port in the printed start command (default `<port>`; the main checkout uses 4040) |
 | `--dataset <name>` | adds `FUSEKI_DATASET=<name>` to the printed start command, and the clone commands when the app has them |
 | `--dir <path>` | where to put it; default `<parent of the app root>/wt/<agent>`; refused anywhere inside the app root |
+| `--from <m>` | a step of master `<m>` (see Masters); implied when run in the master's worktree |
 
 It creates:
 
@@ -250,7 +259,8 @@ It creates:
 <dir>/packages-local/<pkg>/node_modules -> packages-local/<pkg>/node_modules (when it has one)
 ```
 
-then prints the start command, e.g. `cd ../wt/agent1 && PORT=4041 npm run start:local`
+then prints the start command, e.g. `cd ../wt/agent1 && PORT=4041 npm run start:local`, with
+`SITE_ROOT=http://localhost:<port>` when the linked `.env` sets `SITE_ROOT`
 (`npm start` when the app has no `start:local`). Private keys (`*.pem`, `*.key`, untracked) are
 never linked; the output names them with the `ln -s` line to run when the app needs one.
 
@@ -324,6 +334,92 @@ branch landed by a squash merge never reads as landed; remove it with `--force`.
  "kept": [], "branches": [{"repo": "https://github.com/org/acme-app.git", "branch": "change-1", "deleted": true, "sha": "e07b…"}],
  "messages": []}
 ```
+
+## Masters: an integration branch in a worktree of its own
+
+For a long run with many agents (a "master" agent running a plan), the owner keeps working on
+his stable branch (`dev`, say) in the main checkout and every `packages-local/` checkout, with his
+own dev server; the master's integration branch lives in a worktree of its own, with its own
+preview server, and lands into the owner's branches only when he approves.
+
+```sh
+npx linked branch start m1 --worktree --with core,server     # ../wt/m1 on m1; nothing switched
+npx linked worktree add step1 --from m1 --with core          # ../wt/m1--step1 on m1--step1
+# … step1 lands into m1: rebase onto m1, then git -C ../wt/m1/... merge --ff-only m1--step1
+npx linked worktree remove m1--step1                         # (or: remove step1 --from m1)
+npx linked branch land m1 --dry-run                          # from the main checkout, after approval
+npx linked branch land m1                                    # merge, fast-forward, build, push
+npx linked worktree remove m1
+```
+
+### `linked branch start <m> --worktree [packages...] [--with <pkgs>] [--target <branch>] [--port <n>] [--dataset <name>] [--dir <path>]`
+
+Run in the main checkout. Makes `<m>` in a new app worktree (default
+`<parent of the app root>/wt/<m>`) with a nested worktree on `<m>` of each named package, each
+created from the branch that repo's checkout is on (or `--target` in every repo), and a link farm
+into the main checkout's install. **No checkout is switched**; one with uncommitted changes is
+named (the master starts at its last commit). Records in each repo `branch.<m>.linked-target`
+and `branch.<m>.linked-worktree` (that repo's worktree), and in the app repo
+`branch.<m>.linked-port` and `branch.<m>.linked-dataset`. Git config is shared by every worktree
+of a repo, so the records are read from anywhere in the app.
+
+The preview port is the first of 4510, 4520, … 4590 no other master holds (outside a CN's
+live-app band 4000-4399; `port + 1` is for the master's test runs, `port + 2` to `port + 9` for
+its steps), or `--port`. It prints the preview command:
+
+```
+cd ../wt/m1 && PORT=4510 SITE_ROOT=http://localhost:4510 CN_PROJECTS_ROOT=../wt/m1/apps npm run start:local
+```
+
+`SITE_ROOT` is set when the linked `.env` sets it (the server writes absolute asset URLs from it,
+so without it a second server serves the first one's bundles; every `worktree add` start command
+sets it too), `CN_PROJECTS_ROOT` when the `.env` sets it (so the preview's app clones are its
+own), `FUSEKI_DATASET` with `--dataset`. Refuses, making nothing, when `<m>` exists in a repo,
+contains `--`, equals a target, the directory exists, the port is another master's, or it runs
+outside the main checkout. Without `--worktree`, `branch start` is unchanged.
+
+### Steps: `linked worktree add <agent> --from <m>`
+
+A step of master `<m>` (`--from` is implied when run in the master's worktree): the app worktree
+on `<m>--<agent>` from `<m>`, default directory `../wt/<m>--<agent>`, and with `--with` a worktree
+of each named package branched from the master's nested worktree. Only the master's packages can
+be named; nothing joins anything. The farm links straight into the master's install (the main
+checkout's), with the master's packages under the step's own, so a package the master changes
+and the step does not resolves to the master's copy. Steps land in the master's worktree (rebase
+onto `<m>`, then `git -C ../wt/<m>[/packages-local/<pkg>] merge --ff-only <m>--<agent>`).
+
+`linked worktree list` shows each master with its target, preview port and dataset, its worktree
+(landed meaning in its target) and its steps (landed meaning in `<m>`); `--json` adds `masters`.
+`linked worktree remove <m>--<agent>` (or `<agent> --from <m>`) removes a step, from anywhere in
+the app; `linked worktree relink <m>--<agent>` relinks one.
+
+### `linked branch land <m> [--dry-run] [--no-retest] [--no-build] [--no-push] [--json]`
+
+Run in the main checkout, once the owner approves. Per repo of the master's worktree, framework
+packages first in dependency order and the app last:
+
+1. **Checks** every repo before changing any: the master's worktrees on `<m>`, clean and not
+   mid-merge; no step worktree with a branch not landed in `<m>`; each owner checkout clean and
+   on its target. A refusal (exit 1) changes nothing.
+2. **Brings the target in**: where the target moved since (another master landed, the owner
+   committed), `git merge <target>` in the master's worktree ("Merge dev into m1"). A merge, not a
+   rebase, so the step commits the reports cite keep their SHAs. A conflict stops it (exit 4) and
+   stays in progress in the master's worktree, files named, for the agents whose work it touches
+   to resolve and commit; earlier repos stay merged. When a merge made a commit, it stops (exit 3)
+   so the master rebuilds and re-tests; the next run has nothing to merge and goes on
+   (`--no-retest` goes on at once).
+3. **Fast-forwards** each owner checkout: `git merge --ff-only <m>`, in the checkout that holds the
+   target (git moves a checked-out branch only there). The `post-merge` hook installs when the
+   manifests changed. A refused fast-forward (the owner committed meanwhile) stops it; run it
+   again.
+4. **Builds** each landed framework checkout (`npx linked build`) and **pushes** each landed
+   target (`git push origin <target>`, where the repo has an `origin`). A failure is reported
+   (exit 5); the landing stands.
+
+Then restart the owner's dev server, and `linked worktree remove <m>`: it refuses while the master
+has steps or a branch has not landed in its target, removes its worktrees, deletes `<m>` and
+forgets its records. Release (PRs to `main`) is unchanged: it runs from the main checkout on the
+owner's branch.
 
 ## `linked checkout <branch>`
 

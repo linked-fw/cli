@@ -467,6 +467,9 @@ linked worktree add agent1 --with core --port 4041  # ../wt/agent1 with its own 
 linked worktree relink                            # in a worktree: rebuild its node_modules link farm (after npm install in the main checkout)
 linked worktree list                              # agent worktrees and whether each branch has landed
 linked worktree remove agent1                     # refuses while a branch has not landed (--force, --delete-unlanded)
+linked branch start m1 --worktree --with core     # a master: m1 in ../wt/m1 with its own core worktree; nothing switched
+linked worktree add step1 --from m1 --with core   # a step of m1: ../wt/m1--step1, lands into ../wt/m1
+linked branch land m1                             # owner approved: merge dev into m1, ff dev in each checkout, build, push
 linked branch fork change-1 acme-ont              # in an app checkout: create and push change-1 in that package checkout
 linked branch push change-1                       # in an app checkout: push change-1 in the app and every package checkout on it
 linked branch merge change-1 --into main          # packages in dependency order, then the app: --no-ff merge, push main

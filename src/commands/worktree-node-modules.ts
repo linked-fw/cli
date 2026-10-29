@@ -10,9 +10,12 @@
  *
  * So `<worktree>/node_modules` is a real directory: each entry links to the
  * main checkout's entry of the same name, except
- * - a package with a checkout in the worktree's `packages-local/` (an
- *   overlay), which links to that checkout; its `@scope` is a real directory
- *   whose other entries link one by one;
+ * - a package with a checkout in the worktree's `packages-local/`, or a built
+ *   app workspace member in its `packages/` (an overlay), which links to the
+ *   worktree's copy; its `@scope` is a real directory whose other entries link
+ *   one by one. A step of a master (`linked worktree add --from`) also gets the
+ *   master's overlays under its own, so its farm links straight into the
+ *   install (the marker records the master as `parent`);
  * - `.bin`, a real directory whose relative links are copied as they are, so
  *   an overlay's bin (`linked` from a `@_linked/cli` checkout) runs the
  *   worktree's copy and every other bin the main checkout's;
@@ -165,29 +168,91 @@ export function readListing(source: string, overlays: Record<string, string>): S
   return {top: listDir(source), scopes, bin: listDir(path.join(source, '.bin'))};
 }
 
+/** `name` from `<dir>/package.json`, with the manifest; null when it has none. */
+function readManifest(dir: string): {name: string; pkg: Record<string, unknown>} | null {
+  try {
+    const pkg: unknown = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+    const name = (pkg as {name?: unknown})?.name;
+    return typeof name === 'string' && name ? {name, pkg: pkg as Record<string, unknown>} : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The file `exports['.']` resolves to for an import (its `import` or `default` leaf), if any. */
+function dotExport(exportsField: unknown): string | null {
+  let e: unknown = exportsField;
+  if (e && typeof e === 'object' && !Array.isArray(e) && '.' in e) e = (e as Record<string, unknown>)['.'];
+  else if (e && typeof e === 'object' && Object.keys(e).some((k) => k.startsWith('.'))) return null;
+  for (let depth = 0; depth < 5 && e && typeof e === 'object'; depth++) {
+    const o = e as Record<string, unknown>;
+    e = o.import ?? o.default ?? o.require ?? null;
+  }
+  return typeof e === 'string' ? e : null;
+}
+
 /**
- * The packages in `<worktreeDir>/packages-local/*`, by package name: each
- * directory there with a `package.json` that names it.
+ * Whether a workspace member can be loaded as it is: its entry point (`main`,
+ * or what `exports['.']` imports) exists, or it declares none. A member whose
+ * entry is a build output (`lib/`) that has not been built yet is not.
+ */
+export function memberUsable(dir: string, pkg: Record<string, unknown>): boolean {
+  const entries = [typeof pkg.main === 'string' ? pkg.main : null, dotExport(pkg.exports)].filter(
+    (e): e is string => !!e,
+  );
+  return entries.every((e) => fs.existsSync(path.join(dir, e)));
+}
+
+/**
+ * The packages a worktree gives its own copy of, by package name: each
+ * directory in `<worktreeDir>/packages-local/*` with a `package.json` that
+ * names it, and each app workspace member in `<worktreeDir>/packages/*` that
+ * is usable (see `memberUsable`; an unbuilt one stays the install's until a
+ * build and `linked worktree relink`). A `packages-local/` checkout wins over a
+ * `packages/` member of the same name.
  */
 export function overlaysOf(worktreeDir: string): Record<string, string> {
-  const local = path.join(worktreeDir, 'packages-local');
   const out: Record<string, string> = {};
-  let dirs: string[];
-  try {
-    dirs = fs.readdirSync(local).sort();
-  } catch {
-    return out;
-  }
-  for (const d of dirs) {
+  for (const sub of ['packages', 'packages-local']) {
+    const parent = path.join(worktreeDir, sub);
+    let dirs: string[];
     try {
-      const pkg: unknown = JSON.parse(fs.readFileSync(path.join(local, d, 'package.json'), 'utf8'));
-      const name = (pkg as {name?: unknown})?.name;
-      if (typeof name === 'string' && name) out[name] = path.join(local, d);
+      dirs = fs.readdirSync(parent).sort();
     } catch {
-      /* not a package */
+      continue;
+    }
+    for (const d of dirs) {
+      const dir = path.join(parent, d);
+      const m = readManifest(dir);
+      if (!m) continue;
+      if (sub === 'packages' && !memberUsable(dir, m.pkg)) continue;
+      out[m.name] = dir;
     }
   }
   return out;
+}
+
+/** `packages/*` members of `worktreeDir` left out of its overlays because they are not built. */
+export function unbuiltMembers(worktreeDir: string): string[] {
+  const parent = path.join(worktreeDir, 'packages');
+  let dirs: string[];
+  try {
+    dirs = fs.readdirSync(parent).sort();
+  } catch {
+    return [];
+  }
+  return dirs.flatMap((d) => {
+    const m = readManifest(path.join(parent, d));
+    return m && !memberUsable(path.join(parent, d), m.pkg) ? [m.name] : [];
+  });
+}
+
+/**
+ * The overlays of a worktree whose farm has `parent` (a step of a master):
+ * the parent's overlays, then the worktree's own, which win.
+ */
+export function farmOverlays(worktreeDir: string, parent?: string | null): Record<string, string> {
+  return parent ? {...overlaysOf(parent), ...overlaysOf(worktreeDir)} : overlaysOf(worktreeDir);
 }
 
 export interface FarmMarker {
@@ -195,6 +260,21 @@ export interface FarmMarker {
   installRoot: string;
   /** Package name → the directory it links to instead. */
   overlays: Record<string, string>;
+  /** The master's worktree whose overlays this farm includes under its own (a step of a master). */
+  parent?: string;
+}
+
+/** The marker of `<worktreeDir>/node_modules`, or null when it is not a farm. */
+export function readFarmMarker(worktreeDir: string): FarmMarker | null {
+  try {
+    const value: unknown = JSON.parse(fs.readFileSync(path.join(worktreeDir, 'node_modules', FARM_MARKER), 'utf8'));
+    const m = value as Partial<FarmMarker> | null;
+    return m && typeof m.installRoot === 'string'
+      ? {installRoot: m.installRoot, overlays: m.overlays ?? {}, ...(typeof m.parent === 'string' ? {parent: m.parent} : {})}
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A directory link; a junction on Windows, which needs no extra privilege. */
@@ -239,7 +319,12 @@ export interface LinkResult {
  * touched. The farm is built next to it and swapped in by rename, so a
  * running process sees one or the other.
  */
-export function linkNodeModules(installRoot: string, worktreeDir: string, overlays: Record<string, string>): LinkResult {
+export function linkNodeModules(
+  installRoot: string,
+  worktreeDir: string,
+  overlays: Record<string, string>,
+  parent?: string,
+): LinkResult {
   const source = path.join(installRoot, 'node_modules');
   if (!fs.existsSync(source)) throw new Error(`${source} does not exist: install the main checkout first.`);
   const target = path.join(worktreeDir, 'node_modules');
@@ -264,7 +349,7 @@ export function linkNodeModules(installRoot: string, worktreeDir: string, overla
   fs.mkdirSync(building);
   try {
     apply(building, ops);
-    const marker: FarmMarker = {installRoot, overlays};
+    const marker: FarmMarker = {installRoot, overlays, ...(parent ? {parent} : {})};
     fs.writeFileSync(path.join(building, FARM_MARKER), JSON.stringify(marker, null, 2) + '\n');
   } catch (error) {
     fs.rmSync(building, {recursive: true, force: true});
@@ -312,7 +397,7 @@ export function farmStaleness(worktreeDir: string): string[] {
   for (const name of fs.readdirSync(path.join(shared.installRoot, 'node_modules'))) {
     if (!FARM_SKIP.has(name) && !have.has(name)) missing.push(name);
   }
-  for (const [name, dir] of Object.entries(overlaysOf(worktreeDir))) {
+  for (const [name, dir] of Object.entries(farmOverlays(worktreeDir, readFarmMarker(worktreeDir)?.parent))) {
     let real: string | null = null;
     try {
       real = fs.realpathSync(path.join(farm, name));
