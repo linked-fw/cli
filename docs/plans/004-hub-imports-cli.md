@@ -492,6 +492,6 @@ Plan doc CN `290-…`; reports CN `291-…`, cli `043-…`.
 - [x] CL — machine-wide port lock and registry, `withRepoLockAsync`, `worktree relink --all`,
   `branch list`, `branch add-package` (report 041)
 - [ ] CL landed in `hub-imports` and built in the master's cli worktree; master on the built bin
-- [ ] CI — component index build: core terms, react generator, `Writing components.ttl` (reports
-  cli 042, react 004)
+- [x] CI — component index build: core terms, react generator, `Writing components.ttl` (reports
+  cli 042, react 004, core 085; follow-ups cli backlog 014, 015, react plan 001 §Release)
 - [ ] BK — `branch` key, cli side (detailed at wave 3; report 043)
