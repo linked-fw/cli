@@ -94,6 +94,20 @@ Time:        115.954 s, estimated 118 s
 npm run test:unit  171.77s user 186.46s system 307% cpu 1:56.53 total
 ```
 
+After the M42 condition (below), `pins.e2e` and `checkout.e2e` (50 s):
+
+```
+Test Suites: 2 passed, 2 total
+Tests:       28 passed, 28 total
+```
+
+and `npm run test:unit` again (1:00):
+
+```
+Test Suites: 103 passed, 103 total
+Tests:       1261 passed, 1261 total
+```
+
 End to end with the built bin (`node lib/esm/launch.js`) in
 `/private/tmp/claude-501/-Users-rene-web-create-now/f0df7a7f-565a-4b79-a371-d7fb1ca89a28/scratchpad/cli-sandbox`,
 `file://` remotes `acme-app`, `acme-ont` (branch `rene/topic`), `acme-assets` (branch `change-1`);
@@ -144,7 +158,10 @@ Not run: `npm run test:e2e` (Docker); CN's tests (CN half).
   only fast-forwarded, so changing a pin from `rene/topic` back to `main` (or a key overridden by
   `--pin`) left it where it was, against the documented "a clean worktree whose head origin has
   moves to its target when the pins change". The pinned path now moves when origin has the head,
-  as the default-branch path already did. Applies to `--pin` changes too. Test added.
+  as the default-branch path already did. Applies to `--pin` changes too. Test added. Accepted by
+  the master as M42 with a condition: the move happens only when the worktree has no uncommitted
+  changes and no commits origin lacks; otherwise it is `kept` with a reason that starts with the
+  worktree's path and a run message `<dir>: not moved: …` (both refusals tested).
 - The keys become pins **before** the walk (the plan says after): packages are placed during the
   walk, so the app list's keys must be known first. They come from the app worktree's
   `package.json` after the app is brought up to date, the same file the walk reads.
@@ -157,10 +174,8 @@ Not run: `npm run test:e2e` (Docker); CN's tests (CN half).
 - Push mode with an app already in `<into>` does not strip keys `<into>` might list (message
   only); the strip reflows one-line objects; no command sets a key: cli backlog
   [016](../backlog/016-branch-key-follow-ups.md).
-- CN half (CN reads `pinFrom`/`strippedKeys`/`via`, passes `--pins-only` without `--pin`, lands
-  keyed branches by PR before update mode): CN plan 283 §BK.
-- Landing into `hub-imports` and building in the master's cli worktree: the step agent (this
-  report leaves the work on `hub-imports--bk`).
+- CN half (passes `--pins-only` without `--pin`, lands keyed branches by PR before update mode,
+  M41): done in the same step, CN report 291.
 
 ## Details
 
@@ -184,7 +199,7 @@ pre-check, so a refusal never leaves a half merge (M33).
 | B2 | checkout | Keys must be pins before packages are placed, which happens inside the walk | Read the keys from the app list before the walk (after the app worktree is up to date) | After the walk, as the plan worded it | The only order that places keyed packages; same file |
 | B3 | checkout | A key git's `check-ref-format` refuses (the parser already checked) | Refused with exit 6 (a list error), not 2 | Exit 2 like a bad `--pin` | A key is committed data, not the command line; matches the parser |
 | B4 | checkout | Override message when `--pin` equals the key | No message; `pinFrom: "flag"` | Always a message | Nothing is overridden |
-| B5 ⚠ risky | checkout | A detached pinned worktree was kept on a non-fast-forward pin change (also for `--pin` alone, before this step) | Move it when origin has its head, as the default-branch path does | Leave it; record a backlog item | Documented behaviour; without it `--pin` over a key, and a key change, never take effect on an existing checkout. Changes today's `--pin` behaviour in that case |
+| B5 ⚠ risky | checkout | A detached pinned worktree was kept on a non-fast-forward pin change (also for `--pin` alone, before this step) | Move it when origin has its head, as the default-branch path does; only a clean worktree with nothing unpushed (master M42), else `kept`, naming the worktree | Leave it; record a backlog item | Documented behaviour; without it `--pin` over a key, and a key change, never take effect on an existing checkout. Changes today's `--pin` behaviour in that case |
 | B6 | merge | A keyed other-name package whose checkout is on `<branch>` too | The key decides: merged from `origin/<k>` only, left out of the same-name set | Merge both | The app list says which branch the app uses |
 | B7 | merge | Strip commit message: plan says `Use main of <pkgs>` | `Use <into> of <pkgs>` | Literal `main` | Same text for `--into main` (CN's case); correct for any target |
 | B8 | merge | Hooks on the strip commit and the amend | `--no-verify` | Run the app's hooks | A mechanical edit by the cli; the merge itself runs no pre-commit hook either; the pushes already use `--no-verify` |
