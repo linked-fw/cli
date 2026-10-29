@@ -76,6 +76,16 @@ export function walkUnpublished(
   return [...seen.values()];
 }
 
+/**
+ * The app list's `branch` keys as pins (npm name -> branch): `linked checkout` places a keyed
+ * package as a `--pin` places it, and an explicit `--pin` for the same name wins.
+ */
+export function pinsFromKeys(list: readonly UnpublishedPackage[]): Record<string, string> {
+  const pins: Record<string, string> = {};
+  for (const entry of list) if (entry.branch !== undefined) pins[entry.name] = entry.branch;
+  return pins;
+}
+
 function nameOf(json: unknown): string | undefined {
   const name =
     json && typeof json === 'object'

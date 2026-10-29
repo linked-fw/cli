@@ -110,7 +110,7 @@ export interface LocalizeOptions {
   build?: string;
   /**
    * Check a new clone out on this branch when its repo has it, else leave it on its default
-   * branch (`packageBranch`). `--listed` passes the app's branch.
+   * branch (`packageBranch`). `--listed` passes the entry's `branch` key, else the app's branch.
    */
   branch?: string | null;
 }
@@ -233,8 +233,9 @@ function finish(
 /**
  * `linked localize --listed`: clone every package of the app's `linked.unpublishedPackages`,
  * and of theirs (`walkUnpublished`), that is not in `packages-local/` yet, from the repo the
- * list names, on the app's branch where the package repo has it (else its default branch:
- * `packageBranch`); then the one install and the builds. A listed package already in
+ * list names, on the branch the app's list keys for it (`branch`), else on the app's branch, where
+ * the package repo has that branch (else its default branch: `packageBranch`); then the one
+ * install and the builds. A listed package already in
  * `packages-local/` (or parked) is used as it is, and its own list followed. A refusal (two
  * repos for one name, a clone that fails or is not the package) stops the walk before the
  * install; the clones made so far stay.
@@ -287,7 +288,8 @@ export function localizeListed(opts: LocalizeOptions, deps: Deps): number {
             ...opts,
             repo: entry.repo,
             subdir: undefined,
-            branch: branch === 'HEAD' ? null : branch,
+            // The app list's `branch` key first, else the app's own branch (same-name rule).
+            branch: entry.branch ?? (branch === 'HEAD' ? null : branch),
           },
           deps,
         );

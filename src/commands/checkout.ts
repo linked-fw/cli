@@ -54,10 +54,11 @@ import {
   appBranch,
   branchDir,
   packageBranch,
+  pinsFromKeys,
   walkUnpublished,
   type ListedPackage,
 } from '../integration/unpublished.js';
-import {unpublishedPackages} from '../installed-packages.js';
+import {unpublishedPackages, type UnpublishedPackage} from '../installed-packages.js';
 import {
   EXIT_INSTALL_FAILED,
   EXIT_NOT_FOUND,
@@ -132,8 +133,13 @@ export interface CheckoutPackage {
   detached: boolean;
   /** Its repo has no `<branch>` (in pins mode: it has no usable pin): detached at `origin/<default>`. */
   fellBack: boolean;
-  /** The branch its `--pin` names; with `detached`, another worktree holds that branch. */
+  /**
+   * The branch its pin names (a `--pin`, or the app list's `branch` key); with `detached`, the pin
+   * is not the run's branch or another worktree holds that branch.
+   */
   pin?: string;
+  /** Where `pin` came from: the app list's `branch` key, or a `--pin` (which wins over a key). */
+  pinFrom?: 'key' | 'flag';
   head: string;
   /** The packages whose lists name it, the app first. */
   requiredBy: string[];
@@ -244,8 +250,9 @@ export function checkout(
 interface Target {
   branch: string | null;
   def: string;
-  /** The `--pin` for the package, if any. */
+  /** The pin for the package (a `--pin` or the app list's `branch` key), if any. */
   pin?: string;
+  pinFrom?: 'key' | 'flag';
   /** Chosen by the same-name rule (no pins mode for it). */
   sameName?: true;
   /** A pin to another branch than the run's: always detached at origin/<pin>, never attached here. */
@@ -264,6 +271,10 @@ class Checkout {
   private readonly moved: Head[] = [];
   /** The worktrees `--add` placed: left out of the install trigger and the builds. */
   private readonly addedDirs = new Set<string>();
+  /** The run's pins: the app list's `branch` keys, then the `--pin`s over them. */
+  private pins: Record<string, string> = {};
+  /** The npm names whose pin is a `branch` key (not overridden by a `--pin`). */
+  private readonly keyed = new Set<string>();
 
   constructor(
     private readonly branch: string,
@@ -332,6 +343,7 @@ class Checkout {
         );
       }
     }
+    this.pins = {...(this.options.pins ?? {})};
     const repo = cleanRepo(this.options.repo ?? this.originOfCwd(), (m) =>
       this.say(m),
     );
@@ -348,6 +360,7 @@ class Checkout {
     const appJson = readJson(path.join(appDir, 'package.json'));
     const list = unpublishedPackages(appJson, (m) => this.say(m));
     if (list.length) this.requireSetup(appJson, appDir);
+    this.pinKeys(list);
 
     const published = {
       ...((appJson?.dependencies as Record<string, unknown> | undefined) ?? {}),
@@ -726,9 +739,34 @@ class Checkout {
     );
   }
 
-  /** Whether the run is in pins mode: some `--pin`, or `--pins-only`. */
+  /**
+   * The app list's `branch` keys become pins, under the explicit ones: `{...keys, ...--pin}`. A
+   * `--pin` that overrides a key says so. The parser accepted the keys; git checks them as it
+   * checks a `--pin`.
+   */
+  private pinKeys(list: readonly UnpublishedPackage[]): void {
+    const keys = pinsFromKeys(list);
+    const flags = this.options.pins ?? {};
+    for (const [name, key] of Object.entries(keys)) {
+      if (!this.ok(this.root, ['check-ref-format', '--branch', key])) {
+        throw new LocalizeError(
+          `linked.unpublishedPackages: "${name}" has branch "${key}", which is not a valid branch name.`,
+          EXIT_REFUSED,
+        );
+      }
+      if (flags[name] !== undefined) {
+        if (flags[name] !== key)
+          this.say(`pin ${name}=${flags[name]} from --pin overrides the app's branch key ${key}.`);
+        continue;
+      }
+      this.keyed.add(name);
+    }
+    this.pins = {...keys, ...flags};
+  }
+
+  /** Whether the run is in pins mode: some pin (a `--pin` or a `branch` key), or `--pins-only`. */
   private get pinsMode(): boolean {
-    return !!this.options.pinsOnly || Object.keys(this.options.pins ?? {}).length > 0;
+    return !!this.options.pinsOnly || Object.keys(this.pins).length > 0;
   }
 
   /**
@@ -736,13 +774,14 @@ class Checkout {
    * repo has it, else detached at `origin/<default>`. With `--pins-only` there is no same-name rule.
    */
   private targetOf(name: string, base: string, def: string): Target {
-    const pin = this.options.pins?.[name];
+    const pin = this.pins[name];
     if (pin) {
+      const pinFrom = this.keyed.has(name) ? ('key' as const) : ('flag' as const);
       // A pin to the run's own branch is written here (attached); any other pin is a branch written
       // elsewhere (its own worktree), so the checkout only reads it: detached at origin/<pin>.
-      if (this.hasRemoteBranch(base, pin)) return {branch: pin, pin, def, ...(pin !== this.branch ? {readOnly: true as const} : {})};
+      if (this.hasRemoteBranch(base, pin)) return {branch: pin, pin, pinFrom, def, ...(pin !== this.branch ? {readOnly: true as const} : {})};
       this.say(`${name}: its pin ${pin} is not on origin; it is checked out at origin/${def}.`);
-      return {branch: null, pin, def};
+      return {branch: null, pin, pinFrom, def};
     }
     if (this.options.pinsOnly) return {branch: null, def};
     const rule = packageBranch(this.branch, this.hasRemoteBranch(base, this.branch), def);
@@ -779,7 +818,7 @@ class Checkout {
         branch: on ?? (target.pin && target.branch ? target.branch : def),
         detached: on === null,
         fellBack,
-        ...(target.pin ? {pin: target.pin} : {}),
+        ...(target.pin ? {pin: target.pin, pinFrom: target.pinFrom} : {}),
         head: this.head(dir),
         requiredBy: entry.requiredBy,
         status,

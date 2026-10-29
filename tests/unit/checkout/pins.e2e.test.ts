@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import {branchFork, branchPush} from '../../../src/commands/branch-fork-merge.js';
 import {parsePins, type CheckoutResult} from '../../../src/commands/checkout.js';
-import {assertNoToken, cleanup, commitOn, git, gitEnv, setup, TOKEN} from './helpers.js';
+import {assertNoToken, cleanup, commitOn, git, gitEnv, keyAppBranch, setup, TOKEN} from './helpers.js';
 
 afterEach(cleanup);
 
@@ -104,6 +104,66 @@ describe('linked checkout --pin / --pins-only', () => {
     assert.deepEqual(parsePins(['@acme/ont=u1/edits', 'acme-assets=x']), {'@acme/ont': 'u1/edits', 'acme-assets': 'x'});
     assert.throws(() => parsePins(['acme-ont']), /<npm name>=<branch>/);
     assert.throws(() => parsePins(['acme-ont=a', 'acme-ont=b']), /twice/);
+  });
+});
+
+describe("the app list's branch keys", () => {
+  test('a key places the package as a pin (read-only on another branch); --pins-only keeps the others on the default', () => {
+    const {r, run} = setup();
+    const pinned = commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
+    keyAppBranch(r, 'change-1', {'acme-ont': 'rene/topic'});
+    const res = run('change-1', {pinsOnly: true});
+    assert.equal(res.code, 0, res.messages.join('\n'));
+    const ont = byName(res, 'acme-ont');
+    assert.deepEqual(where(ont), {branch: 'rene/topic', detached: true, fellBack: false, pin: 'rene/topic', status: 'created'});
+    assert.equal(ont.pinFrom, 'key');
+    assert.equal(ont.head, pinned);
+    assert.deepEqual(where(byName(res, 'acme-assets')), {branch: 'main', detached: true, fellBack: true, pin: undefined, status: 'created'});
+    assert.equal(byName(res, 'acme-assets').pinFrom, undefined);
+  });
+
+  test('without --pins-only a key is a pin as a --pin is: the unkeyed packages keep the same-name rule', () => {
+    const {r, run} = setup();
+    commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
+    keyAppBranch(r, 'change-1', {'acme-ont': 'rene/topic'});
+    const res = run('change-1');
+    assert.equal(res.code, 0, res.messages.join('\n'));
+    assert.deepEqual(where(byName(res, 'acme-ont')), {branch: 'rene/topic', detached: true, fellBack: false, pin: 'rene/topic', status: 'created'});
+    assert.deepEqual(where(byName(res, 'acme-assets')), {branch: 'change-1', detached: false, fellBack: false, pin: undefined, status: 'created'});
+  });
+
+  test('an explicit --pin overrides a key, and says so', () => {
+    const {r, run} = setup();
+    commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
+    keyAppBranch(r, 'change-1', {'acme-ont': 'rene/topic'});
+    const res = run('change-1', {pins: {'acme-ont': 'main'}, pinsOnly: true});
+    assert.equal(res.code, 0, res.messages.join('\n'));
+    const ont = byName(res, 'acme-ont');
+    assert.deepEqual(where(ont), {branch: 'main', detached: true, fellBack: false, pin: 'main', status: 'created'});
+    assert.equal(ont.pinFrom, 'flag');
+    assert.ok(
+      res.messages.includes("pin acme-ont=main from --pin overrides the app's branch key rene/topic."),
+      res.messages.join('\n'),
+    );
+  });
+
+  test('a key to a branch origin lacks: a message, detached on the default', () => {
+    const {r, run} = setup();
+    keyAppBranch(r, 'change-1', {'acme-ont': 'u9/gone'});
+    const res = run('change-1', {pinsOnly: true});
+    assert.equal(res.code, 0, res.messages.join('\n'));
+    assert.deepEqual(where(byName(res, 'acme-ont')), {branch: 'main', detached: true, fellBack: true, pin: 'u9/gone', status: 'created'});
+    assert.ok(res.messages.some((m) => /u9\/gone is not on origin/.test(m)), res.messages.join('\n'));
+  });
+
+  test('a same-name key is a pin on the run branch: writable', () => {
+    const {r, run} = setup();
+    keyAppBranch(r, 'change-1', {'acme-assets': 'change-1'});
+    const res = run('change-1', {pinsOnly: true});
+    assert.equal(res.code, 0, res.messages.join('\n'));
+    const assets = byName(res, 'acme-assets');
+    assert.deepEqual(where(assets), {branch: 'change-1', detached: false, fellBack: false, pin: 'change-1', status: 'created'});
+    assert.equal(assets.pinFrom, 'key');
   });
 });
 
