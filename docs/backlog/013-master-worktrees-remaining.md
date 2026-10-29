@@ -55,6 +55,19 @@ relinks every worktree after an install. What still blocks running them side by 
   the step's build, `tsc` gave 0 errors. The farm could link every package that depends on a
   `--with` package so it resolves the step's copy, or `worktree add` could print the `paths`
   override for typechecks.
+- **A master with core, server or react needs every localized dependent in it too.** Master
+  `hub-imports` started `--with core,server,react,cli`; its farm linked those to its checkouts while
+  the other localized packages (auth, fuseki, server-utils, schema, …) resolved core from the main
+  checkout: two cores, and CN's `npm run typecheck:gate` there reported ~117 errors. Fixed by hand
+  with `branch add-package hub-imports` of the 19 localized packages that depend on them
+  (transitively), `linked build-all` in the master (26 packages, 6 min), `worktree relink`: `doctor
+  resolve` then showed every `@_linked/*` but css in the master, and the gate gave `No new type
+  errors.` What the CLI could do: `branch start --worktree` and `add-package` compute the localized
+  dependents of the `--with` packages and add them (or refuse, naming them); `doctor resolve`
+  flags a package whose dependencies resolve to another copy than the app's (today it shows each
+  package's own location only, so the two cores did not show); `add-package` prints
+  `linked build-all` for the master. The same still holds for a step: step `ci` of that master has
+  its own core and react, while the master's fuseki and server it links resolve the master's core.
 
 ## Safety nets
 
