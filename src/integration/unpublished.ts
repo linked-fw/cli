@@ -23,6 +23,8 @@ export type LoadListed = (entry: ListedPackage) => unknown;
 
 /**
  * Breadth first from `root` (the app's `package.json`): each package of its list, then of theirs.
+ * Only the root list's `branch` keys are kept: a key in a package's list is dropped with one
+ * warning (the app's list decides which package branch the app uses).
  * Keyed by npm name: a name listed again with the same repo is loaded once and gains a
  * `requiredBy`; listed with another repo it refuses (code 6), naming both requirers, before the
  * second is loaded. Cycles end at the names already seen. `load` runs once per package, in walk
@@ -35,12 +37,19 @@ export function walkUnpublished(
 ): ListedPackage[] {
   const rootName = nameOf(root) ?? 'the app';
   const seen = new Map<string, ListedPackage>();
-  const queue: {from: string; entries: UnpublishedPackage[]}[] = [
-    {from: rootName, entries: unpublishedPackages(root, warn)},
+  const queue: {from: string; fromRoot: boolean; entries: UnpublishedPackage[]}[] = [
+    {from: rootName, fromRoot: true, entries: unpublishedPackages(root, warn)},
   ];
   while (queue.length) {
-    const {from, entries} = queue.shift()!;
-    for (const entry of entries) {
+    const {from, fromRoot, entries} = queue.shift()!;
+    for (const keyed of entries) {
+      let entry = keyed;
+      if (!fromRoot && keyed.branch !== undefined) {
+        warn(
+          `${from}'s list names branch ${keyed.branch} for ${keyed.name}; ignored, the app's list decides.`,
+        );
+        entry = {name: keyed.name, repo: keyed.repo};
+      }
       const known = seen.get(entry.name);
       if (known) {
         if (known.repo !== entry.repo) {
@@ -59,6 +68,7 @@ export function walkUnpublished(
       if (json)
         queue.push({
           from: entry.name,
+          fromRoot: false,
           entries: unpublishedPackages(json, warn),
         });
     }

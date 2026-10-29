@@ -5,6 +5,7 @@ import {globSync} from 'glob';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {isBranchName} from './integration/branchName.js';
 import {stripUserinfo} from './integration/credentials.js';
 import {EXIT_REFUSED, LocalizeError} from './localize/errors.js';
 import {normalizeGitUrl} from './localize/resolve.js';
@@ -155,17 +156,24 @@ export interface UnpublishedPackage {
   name: string;
   /** Its git repository: normalized (`normalizeGitUrl`), with no userinfo. */
   repo: string;
+  /**
+   * The package branch the app uses, when the entry names one: a valid git branch name other
+   * than `main`. Only the app's own list counts (`walkUnpublished` drops it from a package's).
+   */
+  branch?: string;
 }
 
 /**
- * THE reader of `"linked": {"unpublishedPackages": {"<npm name>": {"repo": "<url>"}}}`, the
- * committed list of the packages an app (or a package) uses that are not published, so
- * `linked localize --listed` and `linked checkout` clone them from their repos. A published
- * package moves into `dependencies` with a range instead.
+ * THE reader of `"linked": {"unpublishedPackages": {"<npm name>": {"repo": "<url>", "branch"?:
+ * "<branch>"}}}`, the committed list of the packages an app (or a package) uses that are not
+ * published, so `linked localize --listed` and `linked checkout` clone them from their repos. A
+ * published package moves into `dependencies` with a range instead. `branch` names the package
+ * branch an app branch uses; `linked branch merge` strips it, so `main` lists none.
  *
  * Absent list: `[]`. Anything malformed -- a list that is not an object, an entry without a
- * string `repo`, a URL that is neither `https:` nor `file:` -- throws a `LocalizeError` (code 6)
- * naming the entry: a list the cli cannot read must not shrink silently. A URL with userinfo
+ * string `repo`, a URL that is neither `https:` nor `file:`, a `branch` that is not a valid git
+ * branch name or is `main` -- throws a `LocalizeError` (code 6) naming the entry: a list the cli
+ * cannot read must not shrink silently. A URL with userinfo
  * (`https://user:token@…`) is used without it, with a warning: tokens come from the environment.
  */
 export function unpublishedPackages(
@@ -211,7 +219,19 @@ export function unpublishedPackages(
           `LINKED_GIT_TOKEN instead). Remove them from package.json.`,
       );
     }
-    out.push({name, repo: url});
+    const branch: unknown = (entry as {branch?: unknown}).branch;
+    if (branch === undefined) {
+      out.push({name, repo: url});
+      continue;
+    }
+    if (typeof branch !== 'string' || branch === 'main' || !isBranchName(branch)) {
+      throw new LocalizeError(
+        `${where}: "${name}" has branch ${JSON.stringify(branch)}, which is not a git branch ` +
+          `name other than main. Name the package branch the app uses, or remove the key.`,
+        EXIT_REFUSED,
+      );
+    }
+    out.push({name, repo: url, branch});
   }
   return out;
 }

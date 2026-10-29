@@ -98,8 +98,76 @@ describe('unpublishedPackages', () => {
   });
 });
 
+describe('the branch key', () => {
+  const keyed = (branch: unknown) => ({
+    name: 'app',
+    linked: {unpublishedPackages: {ont: {repo: 'https://github.com/org/ont.git', branch}}},
+  });
+
+  test('a valid branch is kept', () => {
+    assert.deepEqual(unpublishedPackages(keyed('rene/topic')), [
+      {name: 'ont', repo: 'https://github.com/org/ont.git', branch: 'rene/topic'},
+    ]);
+  });
+
+  test('main, HEAD, empty, invalid names and non-strings refuse, naming the entry', () => {
+    for (const bad of ['main', 'HEAD', '', 'a..b', '-x', 'a b', 'x.lock', 3, null, {}]) {
+      const e = refusal(() => unpublishedPackages(keyed(bad)));
+      assert.equal(e.code, 6, String(bad));
+      assert.match(e.message, /linked\.unpublishedPackages of app: "ont" has branch/);
+    }
+  });
+});
+
 describe('walkUnpublished', () => {
   const R = (n: string) => `https://github.com/org/${n}.git`;
+  const withKeys = (name: string, entries: Record<string, {repo: string; branch?: string}>) => ({
+    name,
+    linked: {kind: 'app', unpublishedPackages: entries},
+  });
+
+  test("keeps the root's keys, drops a package's with one warning each", () => {
+    const warnings: string[] = [];
+    const got = walkUnpublished(
+      withKeys('app', {a: {repo: R('a'), branch: 'rene/topic'}, b: {repo: R('b')}}),
+      (e) => (e.name === 'b' ? withKeys('b', {c: {repo: R('c'), branch: 'other'}}) : null),
+      (m) => warnings.push(m),
+    );
+    assert.deepEqual(
+      got.map((p) => [p.name, p.branch]),
+      [
+        ['a', 'rene/topic'],
+        ['b', undefined],
+        ['c', undefined],
+      ],
+    );
+    assert.ok(!('branch' in got[2]));
+    assert.deepEqual(warnings, ["b's list names branch other for c; ignored, the app's list decides."]);
+  });
+
+  test('a name reached twice with differing keys is no conflict; the root key stays', () => {
+    const warnings: string[] = [];
+    const got = walkUnpublished(
+      withKeys('app', {a: {repo: R('a'), branch: 'x'}, b: {repo: R('b')}}),
+      (e) =>
+        e.name === 'b'
+          ? withKeys('b', {a: {repo: R('a'), branch: 'y'}, c: {repo: R('c'), branch: 'z'}})
+          : e.name === 'c'
+            ? withKeys('c', {d: {repo: R('d'), branch: 'w'}, a: {repo: R('a')}})
+            : null,
+      (m) => warnings.push(m),
+    );
+    assert.deepEqual(
+      got.map((p) => [p.name, p.branch, p.requiredBy]),
+      [
+        ['a', 'x', ['app', 'b', 'c']],
+        ['b', undefined, ['app']],
+        ['c', undefined, ['b']],
+        ['d', undefined, ['c']],
+      ],
+    );
+    assert.equal(warnings.length, 3);
+  });
 
   test('breadth first, each package once, with every requirer', () => {
     const packages: Record<string, unknown> = {
