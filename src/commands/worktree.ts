@@ -40,7 +40,16 @@ import {
   setTarget,
   type RepoInfo,
 } from '../integration/repos.js';
-import {forgetMaster, listMasters, masterOf, stepPorts, type Master} from '../integration/masters.js';
+import {
+  forgetMaster,
+  listMasters,
+  masterOf,
+  MASTER_PORTS_LOCK,
+  releasePort,
+  stepPorts,
+  type Master,
+} from '../integration/masters.js';
+import {withMachineLockAsync} from '../integration/repo-lock.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {sharedInstall} from '../localize/shared-install.js';
@@ -1067,6 +1076,14 @@ async function removeMaster(
   const repos = [main, ...(master.worktree?.packages.map((p) => p.checkout) ?? [])];
   for (const repo of repos) forgetMaster(run, repo, name);
   result.messages.push(`Forgot master ${name} (its branch.${name}.linked-worktree, -port and -dataset records).`);
+  try {
+    const released = await withMachineLockAsync(MASTER_PORTS_LOCK, `linked worktree remove ${name} (${main})`, async () =>
+      releasePort(main, name),
+    );
+    if (released.length) result.messages.push(`Released preview port ${released.join(', ')} on this machine.`);
+  } catch (error) {
+    result.messages.push(`Could not release its preview port in the machine registry: ${(error as Error).message}`);
+  }
   if (master.dataset) {
     result.messages.push(`Its dataset ${master.dataset} is still in Fuseki: drop it when no longer needed (DELETE /$/datasets/${master.dataset}).`);
   }

@@ -11,6 +11,11 @@
  * 120 s), then is refused (exit 6) with the holder named. A lock whose holder process is gone (same
  * host) is taken over; one from another host is never broken. A process that holds a lock already
  * re-enters it.
+ *
+ * `withRepoLockAsync` holds the same lock around an async `fn` until its promise settles. It never
+ * re-enters: overlapping calls in one process queue behind each other, so a nested call on the same
+ * lock waits for its caller forever. `withMachineLockAsync` is it on a lock under
+ * `<linkedHome()>/locks/<name>`, for state one machine's runs share (the masters' preview ports).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -87,6 +92,53 @@ const sameHolder = (a: Holder, b: Holder | null): boolean =>
 const describe = (h: Holder | null): string =>
   h ? `${h.what} (pid ${h.pid} on ${h.host}, since ${h.at})` : 'another run';
 
+function newHolder(what: string): Holder {
+  return {pid: process.pid, host: os.hostname(), at: new Date().toISOString(), what};
+}
+
+/**
+ * One try at the lock file `file`: true when `mine` now holds it. A stale lock is moved aside
+ * (the caller tries again at once); `{holder}` names the live holder to wait for.
+ */
+function tryAcquire(file: string, mine: Holder): true | {holder: Holder | null; retry: boolean} {
+  try {
+    fs.writeFileSync(file, JSON.stringify(mine) + '\n', {flag: 'wx'});
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+  }
+  const holder = readHolder(file);
+  if (isStale(file, holder)) {
+    // Moved aside first: of two runs that both found it stale, only one moves it.
+    const aside = `${file}.stale-${process.pid}-${Date.now()}`;
+    try {
+      fs.renameSync(file, aside);
+    } catch {
+      return {holder, retry: true}; // the other run moved it
+    }
+    const moved = readHolder(aside);
+    if (moved && !sameHolder(moved, holder)) {
+      // A run took it over between the read and the move: give it back.
+      try {
+        fs.linkSync(aside, file);
+      } catch {
+        /* taken again meanwhile */
+      }
+    }
+    fs.rmSync(aside, {force: true});
+    return {holder, retry: true};
+  }
+  return {holder, retry: false};
+}
+
+function timedOut(gitDir: string, file: string, holder: Holder | null, timeoutMs: number): LocalizeError {
+  return new LocalizeError(
+    `${gitDir} is locked by ${describe(holder)}; waited ${Math.round(timeoutMs / 1000)} s for it. ` +
+      `Run this again when that run has finished; if no run is working on it, delete ${file}.`,
+    EXIT_REFUSED,
+  );
+}
+
 function acquire(
   gitDir: string,
   what: string,
@@ -96,48 +148,28 @@ function acquire(
   const timeoutMs = options.timeoutMs ?? DEFAULT_REPO_LOCK_TIMEOUT_MS;
   const pollMs = options.pollMs ?? 200;
   const deadline = Date.now() + timeoutMs;
-  const mine: Holder = {
-    pid: process.pid,
-    host: os.hostname(),
-    at: new Date().toISOString(),
-    what,
-  };
+  const mine = newHolder(what);
   for (;;) {
-    try {
-      fs.writeFileSync(file, JSON.stringify(mine) + '\n', {flag: 'wx'});
-      return mine;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    }
-    const holder = readHolder(file);
-    if (isStale(file, holder)) {
-      // Moved aside first: of two runs that both found it stale, only one moves it.
-      const aside = `${file}.stale-${process.pid}-${Date.now()}`;
-      try {
-        fs.renameSync(file, aside);
-      } catch {
-        continue; // the other run moved it
-      }
-      const moved = readHolder(aside);
-      if (moved && !sameHolder(moved, holder)) {
-        // A run took it over between the read and the move: give it back.
-        try {
-          fs.linkSync(aside, file);
-        } catch {
-          /* taken again meanwhile */
-        }
-      }
-      fs.rmSync(aside, {force: true});
-      continue;
-    }
-    if (Date.now() >= deadline) {
-      throw new LocalizeError(
-        `${gitDir} is locked by ${describe(holder)}; waited ${Math.round(timeoutMs / 1000)} s for it. ` +
-          `Run this again when that run has finished; if no run is working on it, delete ${file}.`,
-        EXIT_REFUSED,
-      );
-    }
+    const r = tryAcquire(file, mine);
+    if (r === true) return mine;
+    if (r.retry) continue;
+    if (Date.now() >= deadline) throw timedOut(gitDir, file, r.holder, timeoutMs);
     sleep(pollMs);
+  }
+}
+
+async function acquireAsync(gitDir: string, what: string, options: RepoLockOptions): Promise<Holder> {
+  const file = path.join(gitDir, REPO_LOCK_FILE);
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REPO_LOCK_TIMEOUT_MS;
+  const pollMs = options.pollMs ?? 200;
+  const deadline = Date.now() + timeoutMs;
+  const mine = newHolder(what);
+  for (;;) {
+    const r = tryAcquire(file, mine);
+    if (r === true) return mine;
+    if (r.retry) continue;
+    if (Date.now() >= deadline) throw timedOut(gitDir, file, r.holder, timeoutMs);
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 }
 
@@ -192,4 +224,55 @@ export function withCheckoutLock<T>(
 ): T {
   const gitDir = commonDirOf(run, dir);
   return gitDir ? withRepoLock(gitDir, what, fn, options) : fn();
+}
+
+/** Async holders in this process, by lock dir: each call waits for the one before it. */
+const asyncTails = new Map<string, Promise<void>>();
+
+/**
+ * {@link withRepoLock} for an async `fn`: the lock is held until `fn`'s promise settles. Waiting
+ * uses timers, never blocks the event loop, and is not re-entrant (see the module header).
+ */
+export async function withRepoLockAsync<T>(
+  gitDir: string,
+  what: string,
+  fn: () => Promise<T>,
+  options: RepoLockOptions = {},
+): Promise<T> {
+  const key = path.resolve(gitDir);
+  const before = asyncTails.get(key) ?? Promise.resolve();
+  let done!: () => void;
+  const mine = new Promise<void>((resolve) => (done = resolve));
+  const tail = before.then(() => mine);
+  asyncTails.set(key, tail);
+  try {
+    await before;
+    const holder = await acquireAsync(key, what, options);
+    try {
+      return await fn();
+    } finally {
+      const file = path.join(key, REPO_LOCK_FILE);
+      if (sameHolder(holder, readHolder(file))) fs.rmSync(file, {force: true});
+    }
+  } finally {
+    done();
+    if (asyncTails.get(key) === tail) asyncTails.delete(key);
+  }
+}
+
+/** The directory linked keeps machine-wide state in: `$LINKED_HOME`, else `~/.linked`. */
+export function linkedHome(): string {
+  return process.env.LINKED_HOME ?? path.join(os.homedir(), '.linked');
+}
+
+/** {@link withRepoLockAsync} on the machine-wide lock `<linkedHome()>/locks/<name>`, made on demand. */
+export async function withMachineLockAsync<T>(
+  name: string,
+  what: string,
+  fn: () => Promise<T>,
+  options: RepoLockOptions = {},
+): Promise<T> {
+  const dir = path.join(linkedHome(), 'locks', name);
+  fs.mkdirSync(dir, {recursive: true});
+  return withRepoLockAsync(dir, what, fn, options);
 }

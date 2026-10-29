@@ -12,7 +12,7 @@ import path from 'node:path';
 
 import {branchFork, branchMerge, branchPush} from '../../../src/commands/branch-fork-merge.js';
 import {checkoutRemove} from '../../../src/commands/checkout.js';
-import {REPO_LOCK_FILE, withRepoLock} from '../../../src/integration/repo-lock.js';
+import {linkedHome, REPO_LOCK_FILE, withMachineLockAsync, withRepoLock, withRepoLockAsync} from '../../../src/integration/repo-lock.js';
 import {cleanup, gitEnv, setup, TOKEN} from './helpers.js';
 
 const children: ChildProcess[] = [];
@@ -97,6 +97,92 @@ describe('withRepoLock', () => {
     assert.equal(withRepoLock(d, 'test', () => 'ran', {timeoutMs: 300}), 'ran');
     write('elsewhere.example');
     assert.throws(() => withRepoLock(d, 'test', () => undefined, {timeoutMs: 200, pollMs: 50}), /crashed run/);
+  });
+});
+
+describe('withRepoLockAsync', () => {
+  const tick = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  test('holds the lock until fn\'s promise settles; a waiter gets it only after', async () => {
+    const d = gitDir();
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const first = withRepoLockAsync(d, 'first', async () => {
+      order.push('first in');
+      await gate;
+      assert.ok(fs.existsSync(lockIn(d)), 'held across the await');
+      order.push('first out');
+    });
+    await tick(30);
+    // Another process waits on the file; simulate it with a sync acquire in a child.
+    const child = spawn(
+      process.execPath,
+      ['-e', `const fs=require('fs');const f=${JSON.stringify(lockIn(d))};const t=Date.now();for(;;){try{fs.writeFileSync(f,JSON.stringify({pid:process.pid,host:require('os').hostname(),at:'x',what:'child'}),{flag:'wx'});fs.rmSync(f);process.stdout.write(String(Date.now()));process.exit(0)}catch{} if(Date.now()-t>10000)process.exit(1); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20)}`],
+      {stdio: ['ignore', 'pipe', 'ignore']},
+    );
+    children.push(child);
+    let out = '';
+    child.stdout!.on('data', (b) => (out += b));
+    const exited = new Promise<number | null>((resolve) => child.on('exit', resolve));
+    await tick(300);
+    assert.equal(out, '', 'the other run is still waiting');
+    const releasedAt = Date.now();
+    release();
+    await first;
+    assert.equal(await exited, 0);
+    assert.ok(Number(out) >= releasedAt, 'the other run got it after the promise settled');
+    assert.deepEqual(order, ['first in', 'first out']);
+    assert.equal(fs.existsSync(lockIn(d)), false);
+  });
+
+  test('two overlapping calls in one process run one after the other, also when one throws', async () => {
+    const d = gitDir();
+    const events: string[] = [];
+    const call = (name: string, fail = false) =>
+      withRepoLockAsync(d, name, async () => {
+        events.push(`${name} in`);
+        await tick(50);
+        events.push(`${name} out`);
+        if (fail) throw new Error(`${name} failed`);
+        return name;
+      });
+    const [a, b, c] = await Promise.allSettled([call('a', true), call('b'), call('c')]);
+    assert.equal(a.status, 'rejected');
+    assert.deepEqual([b, c].map((r) => r.status === 'fulfilled' && r.value), ['b', 'c']);
+    assert.deepEqual(events, ['a in', 'a out', 'b in', 'b out', 'c in', 'c out']);
+    assert.equal(fs.existsSync(lockIn(d)), false);
+  });
+
+  test('takes over a stale holder; refuses after the wait with exit 6 naming the holder', async () => {
+    const d = gitDir();
+    const dead = spawnSync(process.execPath, ['-e', '']).pid;
+    fs.writeFileSync(lockIn(d), JSON.stringify({pid: dead, host: os.hostname(), at: 'then', what: 'crashed run'}));
+    assert.equal(await withRepoLockAsync(d, 'test', async () => 'ran', {timeoutMs: 300}), 'ran');
+
+    const holder = holdBy(d);
+    await assert.rejects(
+      withRepoLockAsync(d, 'test', async () => undefined, {timeoutMs: 300, pollMs: 50}),
+      (e: Error & {code?: number}) =>
+        e.code === 6 && e.message.includes(`pid ${holder.pid}`) && e.message.includes('linked checkout other'),
+    );
+    assert.ok(fs.existsSync(lockIn(d)), 'the holder keeps its lock');
+  });
+
+  test('withMachineLockAsync locks <LINKED_HOME>/locks/<name>, made on demand', async () => {
+    const home = gitDir();
+    const before = process.env.LINKED_HOME;
+    process.env.LINKED_HOME = path.join(home, 'home');
+    try {
+      assert.equal(linkedHome(), path.join(home, 'home'));
+      const lockDir = path.join(home, 'home', 'locks', 'master-ports');
+      const seen = await withMachineLockAsync('master-ports', 'test', async () => JSON.parse(fs.readFileSync(lockIn(lockDir), 'utf8')));
+      assert.equal(seen.what, 'test');
+      assert.equal(fs.existsSync(lockIn(lockDir)), false);
+      assert.ok(fs.statSync(lockDir).isDirectory());
+    } finally {
+      process.env.LINKED_HOME = before;
+    }
   });
 });
 

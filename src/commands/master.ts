@@ -21,7 +21,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
-import {freeMasterPort, listMasters, masterOf, MASTER_PORTS, stepPorts} from '../integration/masters.js';
+import {
+  freeMasterPort,
+  listMasters,
+  masterOf,
+  MASTER_PORTS,
+  MASTER_PORTS_LOCK,
+  portHolder,
+  readPortRegistry,
+  recordPort,
+  stepPorts,
+} from '../integration/masters.js';
+import {withMachineLockAsync} from '../integration/repo-lock.js';
+import {LocalizeError} from '../localize/errors.js';
 import {currentBranch, getTarget, listRepos, setTarget, type RepoInfo} from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
@@ -106,15 +118,6 @@ export async function branchStartWorktree(
   if ('error' in chosen) return refuse(chosen.error);
   const selected: RepoInfo[] = [app, ...chosen.repos];
 
-  const masters = await listMasters(run, root);
-  if (options.port !== undefined) {
-    const holder = masters.find((m) => m.port === options.port);
-    if (holder) return refuse(`Port ${options.port} is master ${holder.name}'s. Pick another, or leave --port out.`);
-  }
-  const port = options.port ?? freeMasterPort(masters);
-  if (port === null) return refuse(`Every preview slot (${MASTER_PORTS.join(', ')}) is taken by a master: remove one, or pass --port.`);
-  result.port = port;
-
   const problems: string[] = [];
   const plan = selected.map((repo) => ({repo, target: options.target ?? repo.branch}));
   for (const {repo, target} of plan) {
@@ -128,6 +131,47 @@ export async function branchStartWorktree(
   }
   if (problems.length) return refuse(...problems, 'Nothing was made.');
 
+  // Choosing the port, making the worktrees and recording the master hold the machine-wide lock, so
+  // two masters started at once (in this app or another) never take one port.
+  try {
+    return await withMachineLockAsync(MASTER_PORTS_LOCK, `linked branch start ${name} --worktree (${root})`, async () => {
+      const masters = await listMasters(run, root);
+      const registry = readPortRegistry();
+      if (options.port !== undefined) {
+        const holder = portHolder(options.port, masters, registry);
+        if (holder) return refuse(`Port ${options.port} is master ${holder.master}'s (${holder.dir}). Pick another, or leave --port out.`);
+      }
+      const port = options.port ?? freeMasterPort(masters, registry);
+      if (port === null) return refuse(`Every preview slot (${MASTER_PORTS.join(', ')}) is taken by a master: remove one, or pass --port.`);
+      result.port = port;
+      const made = await makeMaster(root, name, dir, port, app, plan, local, selected, options, result, run);
+      if (made.code === 0) recordPort({port, app: root, master: name, dir});
+      return made;
+    });
+  } catch (error) {
+    if (error instanceof LocalizeError) {
+      result.code = error.code;
+      result.messages.push(error.message, 'Nothing was made.');
+      return result;
+    }
+    throw error;
+  }
+}
+
+/** Make master `name` on `port` once every check passed: the worktrees, then the records. */
+async function makeMaster(
+  root: string,
+  name: string,
+  dir: string,
+  port: number,
+  app: RepoInfo,
+  plan: {repo: RepoInfo; target: string | null}[],
+  local: RepoInfo[],
+  selected: RepoInfo[],
+  options: BranchStartWorktreeOptions,
+  result: BranchStartWorktreeResult,
+  run: Run,
+): Promise<BranchStartWorktreeResult> {
   const messages = result.messages;
   const undoSet = createWorktreeSet(
     {

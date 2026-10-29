@@ -20,9 +20,21 @@ import {worktreeAdd, worktreeList, worktreeRelink, worktreeRemove} from '../../.
 import {makeRun, type Run} from '../../../src/localize/run.js';
 
 const tmpDirs: string[] = [];
+const linkedHomeBefore = process.env.LINKED_HOME;
+let linkedHome = '';
+beforeEach(() => {
+  // The machine-wide port registry and lock of these tests: never the real ~/.linked.
+  linkedHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'master-home-')));
+  tmpDirs.push(linkedHome);
+  process.env.LINKED_HOME = linkedHome;
+});
 afterEach(() => {
+  process.env.LINKED_HOME = linkedHomeBefore;
   for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, {recursive: true, force: true});
 });
+
+const registry = (): Record<string, {app: string; master: string; dir: string}> =>
+  JSON.parse(fs.readFileSync(path.join(linkedHome, 'master-ports.json'), 'utf8'));
 
 function git(dir: string, ...args: string[]): string {
   const r = makeRun(dir)('git', args, {cwd: dir});
@@ -185,6 +197,69 @@ describe('linked branch start --worktree', () => {
     assert.match(inWorktree.messages.join('\n'), /main checkout/);
     const dashes = await branchStartWorktree(app.root, 'a--b', {});
     assert.equal(dashes.code, 1);
+  });
+});
+
+describe('the machine-wide preview port registry', () => {
+  test('two masters started together in two apps sharing LINKED_HOME get different ports, both recorded', async () => {
+    const a = makeApp();
+    const b = makeApp();
+    const [ra, rb] = await Promise.all([
+      branchStartWorktree(a.root, 'ma', {with: ['server']}),
+      branchStartWorktree(b.root, 'mb', {with: ['core']}),
+    ]);
+    assert.equal(ra.code, 0, ra.messages.join('\n'));
+    assert.equal(rb.code, 0, rb.messages.join('\n'));
+    assert.notEqual(ra.port, rb.port);
+    assert.deepEqual([ra.port, rb.port].sort(), [4510, 4520]);
+    assert.deepEqual(registry(), {
+      [String(ra.port)]: {app: a.root, master: 'ma', dir: ra.dir},
+      [String(rb.port)]: {app: b.root, master: 'mb', dir: rb.dir},
+    });
+    // The lock is released.
+    assert.equal(fs.existsSync(path.join(linkedHome, 'locks', 'master-ports', 'linked.lock')), false);
+  });
+
+  test("--port held by another app's master (registry only) is refused, making nothing", async () => {
+    const a = makeApp();
+    const b = makeApp();
+    await startMaster(a, 'ma');
+    const refused = await branchStartWorktree(b.root, 'mb', {port: 4510});
+    assert.equal(refused.code, 1);
+    assert.match(refused.messages.join('\n'), new RegExp(`Port 4510 is master ma's \\(${path.join(a.container, 'wt', 'ma')}\\)\\. Pick another, or leave --port out\\.`));
+    assert.equal(fs.existsSync(path.join(b.container, 'wt', 'mb')), false);
+    assert.equal(gitOk(b.root, 'rev-parse', '--verify', '-q', 'refs/heads/mb'), false);
+    assert.equal(gitOk(b.root, 'config', 'branch.mb.linked-worktree'), false);
+    // Without --port, b's first master takes the next free slot on the machine.
+    const ok = await branchStartWorktree(b.root, 'mb', {});
+    assert.equal(ok.port, 4520, ok.messages.join('\n'));
+  });
+
+  test('an entry whose worktree is gone is ignored, and dropped at the next write', async () => {
+    const app = makeApp();
+    fs.writeFileSync(
+      path.join(linkedHome, 'master-ports.json'),
+      JSON.stringify({'4510': {app: '/nowhere/app', master: 'old', dir: path.join(app.container, 'gone')}}),
+    );
+    const r = await startMaster(app, 'm1');
+    assert.equal(r.port, 4510);
+    assert.deepEqual(Object.keys(registry()), ['4510']);
+    assert.equal(registry()['4510'].master, 'm1');
+  });
+
+  test('removing a master releases its port', async () => {
+    const a = makeApp();
+    const b = makeApp();
+    await startMaster(a, 'ma');
+    await startMaster(b, 'mb');
+    const landed = await branchLand(a.root, 'ma', {build: false, push: false});
+    assert.equal(landed.code, 0, landed.messages.join('\n'));
+    const removed = await worktreeRemove(a.root, 'ma');
+    assert.equal(removed.code, 0, removed.messages.join('\n'));
+    assert.match(removed.messages.join('\n'), /Released preview port 4510 on this machine/);
+    assert.deepEqual(Object.keys(registry()), ['4520']);
+    const again = await branchStartWorktree(b.root, 'mc', {});
+    assert.equal(again.port, 4510, again.messages.join('\n'));
   });
 });
 
