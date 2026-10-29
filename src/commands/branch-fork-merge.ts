@@ -34,6 +34,8 @@ import {
   type RepoLockOptions,
 } from '../integration/repo-lock.js';
 import {listRepos, type RepoInfo} from '../integration/repos.js';
+import {stripBranchKeys} from '../integration/unpublished.js';
+import {unpublishedPackages, type UnpublishedPackage} from '../installed-packages.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {
   EXIT_NOT_FOUND,
@@ -512,8 +514,13 @@ export interface MergeRepo {
   sha?: string;
   /** The conflicting files. */
   files?: string[];
-  /** Whether `origin/<into>` contains `origin/<branch>` now: no PR needed. */
+  /** Whether `origin/<into>` contains the merged branch now: no PR needed. */
   landed: boolean;
+  /**
+   * What was merged: `branch` = `origin/<branch>` (the same-name rule, and a key naming
+   * `<branch>`); `key` = the other branch the app list's `branch` key names for the package.
+   */
+  via: 'key' | 'branch';
 }
 
 export interface MergeResult {
@@ -521,8 +528,10 @@ export interface MergeResult {
   branch: string;
   into: string;
   mode: MergeMode;
-  /** In merge order: packages by dependency, the app last. */
+  /** In merge order: keyed packages, then the packages on the branch, each by dependency; the app last. */
   repos: MergeRepo[];
+  /** The npm names whose `branch` key this run removed from the app's `package.json`. */
+  strippedKeys: string[];
   messages: string[];
 }
 
@@ -543,6 +552,7 @@ export async function branchMerge(
     into,
     mode,
     repos: [],
+    strippedKeys: [],
     messages: [],
   };
   const refuse = (code: number, ...m: string[]): MergeResult => ({
@@ -580,8 +590,13 @@ export async function branchMerge(
       `Uncommitted or untracked changes in ${dirty.map((r) => r.dir).join(', ')}; nothing was merged.`,
     );
   }
-  const problems: string[] = [];
-  for (const r of repos) {
+  const isAncestor = (dir: string, a: string, b: string) =>
+    local('git', ['merge-base', '--is-ancestor', a, b], {cwd: dir}).status ===
+    0;
+  const fetched = new Set<string>();
+  /** Fetch `r` under its lock; a refusal when the lock or the fetch fails, else null. */
+  const fetch = (r: RepoInfo): MergeResult | null => {
+    if (fetched.has(r.dir)) return null;
     const f = locked(
       local,
       r.dir,
@@ -593,6 +608,13 @@ export async function branchMerge(
     if ('code' in f) return f;
     if (f.status !== 0)
       return refuse(EXIT_NOT_FOUND, `git fetch failed in ${r.dir}: ${out(f)}`);
+    fetched.add(r.dir);
+    return null;
+  };
+  const problems: string[] = [];
+  for (const r of repos) {
+    const stop = fetch(r);
+    if (stop) return stop;
     if (!refExists(local, r.dir, `refs/remotes/origin/${into}`))
       problems.push(`${r.dir}: origin has no ${into}.`);
     else if (!refExists(local, r.dir, `refs/remotes/origin/${branch}`))
@@ -609,6 +631,38 @@ export async function branchMerge(
         );
     }
   }
+
+  // The app's branch keys, as origin/<branch> has them. A key to <branch> is the same-name case
+  // (that package's checkout is on <branch>); a key to another branch <k> lands origin/<k> first.
+  const keys = appKeys(app.dir);
+  if ('code' in keys) return keys;
+  const keyList = keys.list;
+  const keyed: {r: RepoInfo; key: string}[] = [];
+  for (const {name, branch: key} of keyList) {
+    if (key === branch) continue;
+    const r = all.find((x) => x !== app && x.packageName === name);
+    if (!r) {
+      problems.push(
+        `${name}: the app's list keys branch ${key}, but this app checkout has no checkout of ${name} to merge it from.`,
+      );
+      continue;
+    }
+    const stop = fetch(r);
+    if (stop) return stop;
+    if (!refExists(local, r.dir, `refs/remotes/origin/${into}`))
+      problems.push(`${r.dir}: origin has no ${into}.`);
+    else if (!refExists(local, r.dir, `refs/remotes/origin/${key}`))
+      problems.push(`${r.dir}: origin has no ${key}, the branch the app's list keys for ${name}.`);
+    else if (
+      mode === 'update' &&
+      !isAncestor(r.dir, `refs/remotes/origin/${key}`, `refs/remotes/origin/${into}`)
+    )
+      problems.push(
+        `${name}: the app's list keys branch ${key}, which origin/${into} does not contain yet. ` +
+          `--mode update never merges a keyed branch: land ${key} into ${into} first.`,
+      );
+    else keyed.push({r, key});
+  }
   if (problems.length)
     return refuse(EXIT_REFUSED, ...problems, 'Nothing was merged.');
 
@@ -619,24 +673,29 @@ export async function branchMerge(
         cwd: r.dir,
       }).stdout.trim(),
     ).url;
-  const isAncestor = (dir: string, a: string, b: string) =>
-    local('git', ['merge-base', '--is-ancestor', a, b], {cwd: dir}).status ===
-    0;
-  const ordered = dependencyOrder(repos);
+  // Keyed packages first (their key decides, even when the checkout is on <branch>), then the
+  // same-name packages, each in dependency order, the app last.
+  const keyOf = new Map(keyed.map(({r, key}) => [r, key]));
+  const ordered: {r: RepoInfo; source: string; via: 'key' | 'branch'}[] = [
+    ...dependencyOrder(keyed.map((k) => k.r)).map((r) => ({r, source: keyOf.get(r)!, via: 'key' as const})),
+    ...dependencyOrder(repos.filter((r) => !keyOf.has(r))).map((r) => ({r, source: branch, via: 'branch' as const})),
+  ];
   let stopped = false;
-  for (const r of ordered) {
+  for (const {r, source, via} of ordered) {
     const entry: MergeRepo = {
       name: nameOf(r),
       dir: r.dir,
       repo: originOf(r),
       result: 'skipped',
       landed: false,
+      via,
     };
     result.repos.push(entry);
-    const originBranch = `refs/remotes/origin/${branch}`;
+    const originSource = `refs/remotes/origin/${source}`;
     const originInto = `refs/remotes/origin/${into}`;
-    entry.landed = isAncestor(r.dir, originBranch, originInto);
+    entry.landed = isAncestor(r.dir, originSource, originInto);
     if (stopped) continue;
+    const isApp = r === app;
     const step = locked(
       local,
       r.dir,
@@ -644,27 +703,67 @@ export async function branchMerge(
       options,
       (_c, m) => m,
       () =>
-        mode === 'push' ? mergePush(r.dir, entry) : mergeUpdate(r.dir, entry),
+        mode === 'push'
+          ? mergePush(r.dir, entry, source, isApp)
+          : via === 'key'
+            ? keyedUpdate(r.dir, entry)
+            : mergeUpdate(r.dir, entry, isApp),
     );
     if (step) {
       stopped = true;
       result.code = EXIT_REFUSED;
       result.messages.push(step);
     }
-    entry.landed = isAncestor(r.dir, originBranch, originInto);
+    entry.landed = isAncestor(r.dir, originSource, originInto);
   }
   return result;
 
-  /** `origin/<branch>` into `origin/<into>`, `--no-ff`, in a temporary worktree; push `<into>`. Returns why it stopped. */
-  function mergePush(dir: string, entry: MergeRepo): string | null {
+  /** The `linked.unpublishedPackages` entries with a `branch` key in `origin/<branch>:package.json`. */
+  function appKeys(dir: string): {list: UnpublishedPackage[]} | MergeResult {
+    const shown = local('git', ['show', `refs/remotes/origin/${branch}:package.json`], {cwd: dir});
+    if (shown.status !== 0) return {list: []};
+    try {
+      return {list: unpublishedPackages(JSON.parse(shown.stdout)).filter((e) => e.branch !== undefined)};
+    } catch (e) {
+      if (e instanceof LocalizeError) return refuse(e.code, e.message, 'Nothing was merged.');
+      if (e instanceof SyntaxError)
+        return refuse(EXIT_REFUSED, `origin/${branch}:package.json is not JSON: ${e.message}. Nothing was merged.`);
+      throw e;
+    }
+  }
+
+  /**
+   * Strip every `branch` key from the `package.json` in `dir`'s work tree and stage it; the npm
+   * names whose key went (none: nothing staged).
+   */
+  function stripKeys(dir: string): string[] {
+    const file = path.join(dir, 'package.json');
+    if (!fs.existsSync(file)) return [];
+    const before = fs.readFileSync(file, 'utf8');
+    const {text, stripped} = stripBranchKeys(before);
+    if (!stripped.length) return [];
+    fs.writeFileSync(file, text);
+    local('git', ['add', '--', 'package.json'], {cwd: dir});
+    return stripped;
+  }
+
+  /**
+   * `origin/<source>` into `origin/<into>`, `--no-ff`, in a temporary worktree; for the app, the
+   * branch keys stripped inside that merge commit (amended); push `<into>`. Returns why it stopped.
+   */
+  function mergePush(dir: string, entry: MergeRepo, source: string, isApp: boolean): string | null {
     if (
       isAncestor(
         dir,
-        `refs/remotes/origin/${branch}`,
+        `refs/remotes/origin/${source}`,
         `refs/remotes/origin/${into}`,
       )
     ) {
       entry.result = 'up-to-date';
+      if (isApp && keyList.length)
+        result.messages.push(
+          `${entry.name}: origin/${into} already contains ${branch}; its package.json was not changed, so check it lists no branch key.`,
+        );
       return null;
     }
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-merge-'));
@@ -686,8 +785,8 @@ export async function branchMerge(
           '--no-ff',
           '-q',
           '-m',
-          `Merge branch '${branch}' into ${into}`,
-          `refs/remotes/origin/${branch}`,
+          `Merge branch '${source}' into ${into}`,
+          `refs/remotes/origin/${source}`,
         ],
         {cwd: tmp},
       );
@@ -699,7 +798,18 @@ export async function branchMerge(
           .stdout.split('\n')
           .filter(Boolean);
         local('git', ['merge', '--abort'], {cwd: tmp});
-        return `${entry.name}: merging ${branch} into ${into} conflicts in ${entry.files.join(', ') || '(no file named)'}: ${out(m)}. Later repos were skipped.`;
+        return `${entry.name}: merging ${source} into ${into} conflicts in ${entry.files.join(', ') || '(no file named)'}: ${out(m)}. Later repos were skipped.`;
+      }
+      if (isApp) {
+        const stripped = stripKeys(tmp);
+        if (stripped.length) {
+          const amend = local('git', ['commit', '-q', '--amend', '--no-edit', '--no-verify'], {cwd: tmp});
+          if (amend.status !== 0) {
+            entry.result = 'conflict';
+            return `${entry.name}: removing the branch keys from the merge commit failed: ${out(amend)}`;
+          }
+          result.strippedKeys = stripped;
+        }
       }
       entry.sha = local('git', ['rev-parse', 'HEAD'], {cwd: tmp}).stdout.trim();
       const p = remote(tmp, [
@@ -711,6 +821,7 @@ export async function branchMerge(
       ]);
       if (p.status !== 0) {
         entry.result = 'push-refused';
+        result.strippedKeys = [];
         return `${entry.name}: git push origin HEAD:${into} was refused: ${out(p)}. If ${into} is protected, use --mode update; if origin/${into} moved since the fetch, run this again. Later repos were skipped.`;
       }
       entry.result = 'merged';
@@ -721,8 +832,18 @@ export async function branchMerge(
     }
   }
 
-  /** `origin/<into>` into `<branch>` in the checkout itself; push `<branch>`. Returns why it stopped. */
-  function mergeUpdate(dir: string, entry: MergeRepo): string | null {
+  /** A keyed package in update mode: `origin/<into>` contains its key already (checked above). */
+  function keyedUpdate(dir: string, entry: MergeRepo): null {
+    entry.result = 'up-to-date';
+    entry.sha = local('git', ['rev-parse', `refs/remotes/origin/${into}`], {cwd: dir}).stdout.trim();
+    return null;
+  }
+
+  /**
+   * `origin/<into>` into `<branch>` in the checkout itself; for the app, then one commit `Use
+   * <into> of <pkgs>` that strips the branch keys; push `<branch>`. Returns why it stopped.
+   */
+  function mergeUpdate(dir: string, entry: MergeRepo, isApp: boolean): string | null {
     const ff = local(
       'git',
       ['merge', '--ff-only', '-q', `refs/remotes/origin/${branch}`],
@@ -732,34 +853,53 @@ export async function branchMerge(
       entry.result = 'conflict';
       return `${entry.name}: ${branch} could not fast-forward to origin/${branch}: ${out(ff)}`;
     }
-    if (isAncestor(dir, `refs/remotes/origin/${into}`, 'HEAD')) {
-      entry.result = 'up-to-date';
-      entry.sha = local('git', ['rev-parse', 'HEAD'], {cwd: dir}).stdout.trim();
-      return null;
+    let moved = false;
+    if (!isAncestor(dir, `refs/remotes/origin/${into}`, 'HEAD')) {
+      const m = local(
+        'git',
+        [
+          'merge',
+          '--no-ff',
+          '-q',
+          '-m',
+          `Merge branch '${into}' into ${branch}`,
+          `refs/remotes/origin/${into}`,
+        ],
+        {cwd: dir},
+      );
+      if (m.status !== 0) {
+        entry.result = 'conflict';
+        entry.files = local('git', ['diff', '--name-only', '--diff-filter=U'], {
+          cwd: dir,
+        })
+          .stdout.split('\n')
+          .filter(Boolean);
+        local('git', ['merge', '--abort'], {cwd: dir});
+        return `${entry.name}: merging ${into} into ${branch} conflicts in ${entry.files.join(', ') || '(no file named)'}: ${out(m)}. Later repos were skipped.`;
+      }
+      moved = true;
     }
-    const m = local(
-      'git',
-      [
-        'merge',
-        '--no-ff',
-        '-q',
-        '-m',
-        `Merge branch '${into}' into ${branch}`,
-        `refs/remotes/origin/${into}`,
-      ],
-      {cwd: dir},
-    );
-    if (m.status !== 0) {
-      entry.result = 'conflict';
-      entry.files = local('git', ['diff', '--name-only', '--diff-filter=U'], {
-        cwd: dir,
-      })
-        .stdout.split('\n')
-        .filter(Boolean);
-      local('git', ['merge', '--abort'], {cwd: dir});
-      return `${entry.name}: merging ${into} into ${branch} conflicts in ${entry.files.join(', ') || '(no file named)'}: ${out(m)}. Later repos were skipped.`;
+    if (isApp) {
+      const stripped = stripKeys(dir);
+      if (stripped.length) {
+        const c = local(
+          'git',
+          ['commit', '-q', '--no-verify', '-m', `Use ${into} of ${stripped.join(', ')}`],
+          {cwd: dir},
+        );
+        if (c.status !== 0) {
+          entry.result = 'conflict';
+          return `${entry.name}: the commit removing the branch keys failed: ${out(c)}`;
+        }
+        result.strippedKeys = stripped;
+        moved = true;
+      }
     }
     entry.sha = local('git', ['rev-parse', 'HEAD'], {cwd: dir}).stdout.trim();
+    if (!moved) {
+      entry.result = 'up-to-date';
+      return null;
+    }
     const p = remote(dir, [
       'push',
       '-q',

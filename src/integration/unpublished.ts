@@ -86,6 +86,32 @@ export function pinsFromKeys(list: readonly UnpublishedPackage[]): Record<string
   return pins;
 }
 
+/**
+ * `text` (a `package.json`) without the `branch` key of any `linked.unpublishedPackages` entry,
+ * and the npm names whose key went. Everything else stays as it was: key order, the file's
+ * indent and its trailing newline. No key: `text` unchanged and `stripped` empty.
+ */
+export function stripBranchKeys(text: string): {text: string; stripped: string[]} {
+  const json: unknown = JSON.parse(text);
+  const linked: unknown = json && typeof json === 'object' ? (json as {linked?: unknown}).linked : undefined;
+  const list: unknown =
+    linked && typeof linked === 'object' ? (linked as {unpublishedPackages?: unknown}).unpublishedPackages : undefined;
+  const stripped: string[] = [];
+  if (list && typeof list === 'object' && !Array.isArray(list)) {
+    for (const [name, entry] of Object.entries(list as Record<string, unknown>)) {
+      if (entry && typeof entry === 'object' && 'branch' in entry) {
+        delete (entry as {branch?: unknown}).branch;
+        stripped.push(name);
+      }
+    }
+  }
+  if (!stripped.length) return {text, stripped};
+  const indent = /^([ \t]+)"/m.exec(text)?.[1] ?? 2;
+  const eol = /\r?\n$/.exec(text)?.[0] ?? '';
+  const body = JSON.stringify(json, null, indent);
+  return {text: (eol === '\r\n' ? body.replace(/\n/g, '\r\n') : body) + eol, stripped};
+}
+
 function nameOf(json: unknown): string | undefined {
   const name =
     json && typeof json === 'object'

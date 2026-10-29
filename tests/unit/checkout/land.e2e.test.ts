@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import {branchFork, branchMerge, branchPush} from '../../../src/commands/branch-fork-merge.js';
 import {checkoutRemove, type CheckoutResult} from '../../../src/commands/checkout.js';
-import {assertNoToken, cleanup, commitOn, git, gitEnv, setup, TOKEN} from './helpers.js';
+import {appJsonWithKeys, assertNoToken, cleanup, commitOn, git, gitEnv, keyAppBranch, setup, TOKEN} from './helpers.js';
 
 afterEach(cleanup);
 
@@ -64,13 +64,15 @@ describe('linked branch fork / merge / worktree remove --branch', () => {
     console.log(JSON.stringify(merge, null, 2));
     assert.equal(merge.code, 0, merge.messages.join('\n'));
     assert.deepEqual(
-      merge.repos.map((x) => [x.name, x.result, x.landed]),
+      merge.repos.map((x) => [x.name, x.result, x.landed, x.via]),
       [
-        ['acme-ont', 'merged', true],
-        ['acme-assets', 'merged', true],
-        ['acme-app', 'merged', true],
+        ['acme-ont', 'merged', true, 'branch'],
+        ['acme-assets', 'merged', true, 'branch'],
+        ['acme-app', 'merged', true, 'branch'],
       ],
     );
+    // An app without branch keys: nothing stripped.
+    assert.deepEqual(merge.strippedKeys, []);
     for (const [remote, entry] of [
       [r.ont, merge.repos[0]],
       [r.assets, merge.repos[1]],
@@ -200,6 +202,98 @@ describe('linked branch fork / merge / worktree remove --branch', () => {
     assert.equal(git(r.assets, 'rev-parse', 'refs/heads/change-1'), update.repos[0].sha);
     assert.equal(git(r.assets, 'merge-base', '--is-ancestor', 'main', 'change-1'), '');
     assert.equal(git(assetsDir, 'log', '-1', '--format=%s'), "Merge branch 'main' into change-1");
+  });
+
+  test('push mode lands a keyed other-name branch first, then the app with its keys stripped in the merge commit', async () => {
+    const {r, run} = setup();
+    commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
+    keyAppBranch(r, 'change-1', {'acme-ont': 'rene/topic'});
+    const co = run('change-1');
+    assert.equal(co.code, 0, co.messages.join('\n'));
+    const appDir = co.app!.dir;
+    commitIn(dirOf(co, 'acme-assets'), 'asset.txt', 'an asset\n');
+
+    const merge = await branchMerge(appDir, 'change-1', 'main', {env});
+    console.log(JSON.stringify(merge, null, 2));
+    assert.equal(merge.code, 0, merge.messages.join('\n'));
+    assert.deepEqual(
+      merge.repos.map((x) => [x.name, x.result, x.landed, x.via]),
+      [
+        ['acme-ont', 'merged', true, 'key'],
+        ['acme-assets', 'merged', true, 'branch'],
+        ['acme-app', 'merged', true, 'branch'],
+      ],
+    );
+    assert.deepEqual(merge.strippedKeys, ['acme-ont']);
+    assert.equal(git(r.ont, 'log', '-1', '--format=%s', 'main'), "Merge branch 'rene/topic' into main");
+    assert.equal(git(r.ont, 'merge-base', '--is-ancestor', 'rene/topic', 'main'), '');
+    // The app's merge commit itself has no key; the rest of package.json is as it was.
+    assert.equal(git(r.app, 'log', '-1', '--format=%s', 'main'), "Merge branch 'change-1' into main");
+    assert.equal(git(r.app, 'rev-list', '--parents', '-n', '1', 'main').split(' ').length, 3);
+    assert.equal(git(r.app, 'rev-parse', 'refs/heads/main'), merge.repos[2].sha);
+    assert.equal(git(r.app, 'show', 'main:package.json') + '\n', appJsonWithKeys(r, {}));
+    // The branch keeps its key: only main is stripped.
+    assert.match(git(r.app, 'show', 'change-1:package.json'), /"branch": "rene\/topic"/);
+  });
+
+  test('push mode refuses a keyed package this checkout has no checkout of; nothing is merged', async () => {
+    const {r, root, run} = setup();
+    commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
+    keyAppBranch(r, 'change-1', {'acme-ont': 'rene/topic'});
+    const co = run('change-1');
+    const appDir = co.app!.dir;
+    git(path.join(root, '.repos', 'acme', 'acme-ont.git'), 'worktree', 'remove', '--force', dirOf(co, 'acme-ont'));
+    const appMain = git(r.app, 'rev-parse', 'refs/heads/main');
+    const merge = await branchMerge(appDir, 'change-1', 'main', {env});
+    assert.equal(merge.code, 6);
+    assert.deepEqual(merge.repos, []);
+    assert.match(merge.messages.join('\n'), /acme-ont: the app's list keys branch rene\/topic, but this app checkout has no checkout of acme-ont/);
+    assert.equal(git(r.app, 'rev-parse', 'refs/heads/main'), appMain);
+  });
+
+  test('update mode refuses a keyed branch main lacks; once it is in main, one commit strips the keys', async () => {
+    const {r, run} = setup();
+    commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
+    keyAppBranch(r, 'change-1', {'acme-ont': 'rene/topic'});
+    const co = run('change-1');
+    const appDir = co.app!.dir;
+    const appBranchTip = git(r.app, 'rev-parse', 'refs/heads/change-1');
+
+    const refused = await branchMerge(appDir, 'change-1', 'main', {mode: 'update', env});
+    assert.equal(refused.code, 6);
+    assert.deepEqual(refused.repos, []);
+    assert.match(
+      refused.messages.join('\n'),
+      /acme-ont: the app's list keys branch rene\/topic, which origin\/main does not contain yet/,
+    );
+    assert.equal(git(r.app, 'rev-parse', 'refs/heads/change-1'), appBranchTip);
+
+    // Its own PR lands rene/topic into main of acme-ont.
+    const work = path.join(r.base, 'scratch', 'acme-ont');
+    git(work, 'fetch', '-q', 'origin');
+    git(work, 'switch', '-q', 'main');
+    git(work, 'merge', '-q', '--no-ff', '-m', 'land rene/topic', 'origin/rene/topic');
+    git(work, 'push', '-q', 'origin', 'main');
+
+    const update = await branchMerge(appDir, 'change-1', 'main', {mode: 'update', env});
+    console.log(JSON.stringify(update, null, 2));
+    assert.equal(update.code, 0, update.messages.join('\n'));
+    assert.deepEqual(update.repos.map((x) => [x.name, x.result, x.landed, x.via]), [
+      ['acme-ont', 'up-to-date', true, 'key'],
+      ['acme-assets', 'up-to-date', false, 'branch'],
+      ['acme-app', 'merged', false, 'branch'],
+    ]);
+    assert.deepEqual(update.strippedKeys, ['acme-ont']);
+    assert.equal(git(r.app, 'log', '-1', '--format=%s', 'change-1'), 'Use main of acme-ont');
+    assert.equal(git(r.app, 'rev-parse', 'refs/heads/change-1'), update.repos[2].sha);
+    assert.equal(git(r.app, 'show', 'change-1:package.json') + '\n', appJsonWithKeys(r, {}));
+    assert.equal(git(appDir, 'status', '--porcelain'), '');
+
+    // Run again: nothing left to strip, nothing to push.
+    const again = await branchMerge(appDir, 'change-1', 'main', {mode: 'update', env});
+    assert.equal(again.code, 0, again.messages.join('\n'));
+    assert.deepEqual(again.strippedKeys, []);
+    assert.equal(again.repos[again.repos.length - 1].result, 'up-to-date');
   });
 
   test('fork refuses a dirty checkout, and a branch origin has while the checkout is elsewhere', async () => {

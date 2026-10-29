@@ -13,6 +13,8 @@ import {
   appBranch,
   branchDir,
   packageBranch,
+  pinsFromKeys,
+  stripBranchKeys,
   walkUnpublished,
   type ListedPackage,
 } from '../../../src/integration/unpublished.js';
@@ -116,6 +118,42 @@ describe('the branch key', () => {
       assert.equal(e.code, 6, String(bad));
       assert.match(e.message, /linked\.unpublishedPackages of app: "ont" has branch/);
     }
+  });
+});
+
+describe('pinsFromKeys and stripBranchKeys', () => {
+  test('pinsFromKeys: the keyed entries as npm name -> branch', () => {
+    assert.deepEqual(
+      pinsFromKeys([
+        {name: 'a', repo: 'https://x/a.git', branch: 'rene/topic'},
+        {name: 'b', repo: 'https://x/b.git'},
+      ]),
+      {a: 'rene/topic'},
+    );
+  });
+
+  test('stripBranchKeys removes only the keys, keeping key order, indent and the trailing newline', () => {
+    const pkg = {
+      name: 'app',
+      version: '1.0.0',
+      linked: {
+        unpublishedPackages: {
+          a: {repo: 'https://x/a.git', branch: 'rene/topic', note: 'kept'},
+          b: {repo: 'https://x/b.git'},
+        },
+        kind: 'app',
+      },
+      branch: 'top-level stays',
+    };
+    for (const [indent, eol] of [[2, '\n'], [4, ''], ['\t', '\n']] as const) {
+      const {text, stripped} = stripBranchKeys(JSON.stringify(pkg, null, indent) + eol);
+      assert.deepEqual(stripped, ['a']);
+      const want = JSON.parse(JSON.stringify(pkg));
+      delete want.linked.unpublishedPackages.a.branch;
+      assert.equal(text, JSON.stringify(want, null, indent) + eol);
+    }
+    const none = JSON.stringify({name: 'x', linked: {unpublishedPackages: {b: {repo: 'r'}}}}, null, 3);
+    assert.deepEqual(stripBranchKeys(none), {text: none, stripped: []});
   });
 });
 
