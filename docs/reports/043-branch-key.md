@@ -210,3 +210,30 @@ pre-check, so a refusal never leaves a half merge (M33).
 | B13 | merge | Strip commit fails | `result: "conflict"` with the message, exit 6 | A new result value | Keeps `MergeRepoResult` unchanged for CN |
 | B14 | merge | `origin/<branch>:package.json` unreadable / invalid list | No file: no keys; invalid JSON or list: refused with the parser's message, exit 6, nothing merged | Ignore the keys | A list the cli cannot read must not be landed |
 | B15 | strip | Formatting | Parse, delete, `JSON.stringify` with the detected indent, trailing newline and CRLF kept | Text-level edit | The plan's prescription; backlog 016 for one-line objects |
+
+## Addendum: review fixes (master M44)
+
+### PR
+
+- **Keys on the app's default branch are ignored** (`checkout.ts` `pinKeys`): when `<branch>` is
+  origin's HEAD, each key is dropped with the message `<pkg>: the app's list keys branch <k> on
+  the app's default branch <b>; ignored, its packages follow their default branches.`
+- **A same-name key with no checkout of the package on `<branch>`** is refused by `branch merge`
+  (exit 6, nothing merged), so a detached worktree's work is never left out
+  (`branch-fork-merge.ts`).
+- Docs: `docs/integration-branches-and-worktrees.md` (Branch keys, Pins).
+- Tests: `pins.e2e` (a key on the default branch), `land.e2e` (the same-name refusal).
+
+Verification: `npx linked build` clean; `pins.e2e` + `land.e2e` `Tests: 29 passed, 29 total`;
+`npm run test:unit` (1:09):
+
+```
+Tests:       1263 passed, 1263 total
+```
+
+### Autonomous decisions (addendum)
+
+| # | Where | Problem | Choice | Alternative | Rationale |
+|---|-------|---------|--------|-------------|-----------|
+| B16 | checkout | How to tell the app's default branch | `<branch>` equals origin's HEAD of the app's base clone | A `main` literal | The repo's own default |
+| B17 | merge | Same-name key, no checkout on `<branch>` | Refuse in both modes, exit 6, before anything is fetched or merged | Merge without it | Never drop a worktree's work silently |
