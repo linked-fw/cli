@@ -20,16 +20,69 @@ rules for every step, status table, numbers, starter prompt). Steps land on the 
 
 ## Contracts
 
-K7 and K8 are copied verbatim from plan 282; the rest are there. A step that changes one updates
+K7 is copied verbatim from plan 282; K8 is detailed here (282 still lists it as open until the
+master copies it back); the rest are there. A step that changes one updates
 it here and in 282 in the same landing.
 
 - **K7 `package.json` keys** (providers BK in `_linked-cli` and VD; consumers CN): an
   `unpublishedPackages` entry `{name, repo, branch?}` (D17, G8); `linked.defaultOntology: "<npm
   name>"` (D23).
-- **K8 Component index file** (provider CI in `_linked-cli`/`@_linked/react`; consumer CX): emitted
-  by `linked build` next to `shapes.ttl`; per component its name, start shape, query wire format
-  (`QueryBuilder.toJSON`) and query shape. File name and vocabulary: *open*, settled when wave 2 is
-  detailed.
+- **K8 Component index file** (provider CI: the generator in `@_linked/react`, the build step in
+  `_linked-cli`, the terms in `@_linked/core`'s ontology; consumer CX). Settled at wave 2 (was
+  *open*); copied verbatim into react plan 001 and, once the master accepts it, into 282.
+  - **Enumeration.** A package offers components through `src/components/index.ts`
+    (`lib/esm/components/index.js`): its named exports. Every export that is a linked component
+    (made by `linkedComponent`/`linkedSetComponent`: carries `.query` and `.shape`) is indexed;
+    other exports are ignored. No `components/index`, no file. A component exported under several
+    names is one entry, named by the code-point-smallest of them.
+  - **File.** `lib/esm/data/components.ttl`, written by the build step `Writing components.ttl`
+    (right after `Writing shapes.ttl`) in a child `node` that imports `lib/esm/package.js` (when
+    present), `lib/esm/shapes/index.js` (when present) and `lib/esm/components/index.js`, with
+    asset hooks, then calls `componentIndexTurtle(packageName, componentsModule)` from
+    `@_linked/react/utils/componentIndex` of the `@_linked/react` the package resolves.
+    `packageName` is the name in `linkedPackage('<name>')` (else `package.json`'s), as for
+    `shapes.ttl`. No linked component, no file; a file from an earlier build is removed whenever
+    none is written. A react without `utils/componentIndex`: skipped with a warning. A module that
+    throws on import fails the build. `--skip-shape-check` skips this step too.
+  - **Vocabulary** (`https://linked.cm/ont/core/`, prefix `core:`, added to core's ontology module
+    and `core.ttl`): classes `core:Component`, `core:SetComponent` (`rdfs:subClassOf
+    core:Component`), `core:ComponentsGraph` (the graph kind CX registers, next to
+    `core:ShapesGraph`); properties `core:definesComponent` (package → component),
+    `core:exportName` (`xsd:string`), `core:startShape` and `core:queryShape` (→ a `sh:NodeShape`
+    IRI), `core:query` (an `rdf:JSON` literal). `rdf:JSON` is added to core's `rdf` ontology module.
+  - **IRIs.** A component: `{package IRI}/component/{encodeURIComponent(exportName)}`, where the
+    package IRI is core's `getPackageUri(packageName)` (the root `shapes.ttl`'s shape IRIs hang
+    off). CX stores the file's triples unchanged in `{package record IRI}/graph/components/{enc(key)}`
+    (K1, D24); the component IRIs stay the package's.
+  - **Per component.** `<package> core:definesComponent <component>`; `<component> a
+    core:Component` (and `core:SetComponent` for a `linkedSetComponent`); `core:exportName`;
+    `core:startShape` = the NodeShape IRI of the component's `.shape`; `core:queryShape` = the
+    wire format's `shape`; `core:query` = `QueryBuilder.toJSON()` of the component's query (a set
+    component's one-key `{prop: query}` wrapper unwrapped) as canonical JSON (object keys sorted
+    recursively, arrays in order, no whitespace), typed `rdf:JSON`. Today start shape and query
+    shape are the same IRI (react derives `.shape` from the query); D5 keeps them apart. A
+    component whose query throws in `toJSON` is left out, with a build warning naming it.
+  - **Queries bound at definition time** are recorded as `toJSON` writes them in the clean child,
+    where no query context is set: `.for(getQueryContext('x'))` → `"subject":{"@ctx":"x"}`,
+    `.for('<iri>')` → `"subject":"<iri>"`, `.for(null)` → `"nullSubject":true`. A query with a
+    `subject` or `nullSubject` is bound: the builder gives it no `of`. `QueryBuilder.fromJSON`
+    reads all three back.
+  - **Determinism and hash.** One fixed prefix block (`core`, `rdf`, `xsd`), subjects sorted
+    (package first, then components by IRI), `a` first and the other predicates sorted, one
+    statement per line, no blank nodes; the same build gives the same bytes. The file carries no
+    hash: CX hashes its bytes (SHA-256 hex, `core:contentHash` on the graph's registry record) and
+    replaces the whole graph when the hash changes (D15).
+
+  Example (`my-app`, one component of each kind; JSON shortened):
+  ```turtle
+  @prefix core: <https://linked.cm/ont/core/> .
+  @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+  @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+  <https://linked.cm/pkg/my-app> core:definesComponent <https://linked.cm/pkg/my-app/component/PersonList> , <https://linked.cm/pkg/my-app/component/PersonPreview> .
+  <https://linked.cm/pkg/my-app/component/PersonList> a core:Component , core:SetComponent ; core:exportName "PersonList" ; core:query "{\"fields\":[…],\"shape\":\"https://linked.cm/shape/schema/Person\",\"v\":1}"^^rdf:JSON ; core:queryShape <https://linked.cm/shape/schema/Person> ; core:startShape <https://linked.cm/shape/schema/Person> .
+  <https://linked.cm/pkg/my-app/component/PersonPreview> a core:Component ; core:exportName "PersonPreview" ; core:query "{…}"^^rdf:JSON ; core:queryShape <https://linked.cm/shape/schema/Person> ; core:startShape <https://linked.cm/shape/schema/Person> .
+  ```
 
 Note on K7: on disk the list stays keyed by npm name, as `unpublishedPackages()` in
 `src/installed-packages.ts` reads it today: `"linked": {"unpublishedPackages": {"<npm name>":
@@ -233,12 +286,184 @@ One commit per phase; sequential (one agent).
 
 ### CI — Component index build (K8)
 
-*Detailed when wave 2 starts.* With `@_linked/react`: `linked build` emits the component index
-file next to `shapes.ttl` (built in a child node like `shapes.ttl`, `src/utils/shapesTurtle.ts`
-and `src/utils/shapesIndex.ts` are the precedents); per component its name, start shape, query
-wire format (`QueryBuilder.toJSON`) and query shape; a `components/index` entry convention (G5).
-File name and vocabulary settled then (K8). Plan doc cli `005-…`; reports cli `042-…`, react
-`004-…`.
+**Depends on:** nothing (wave 2). Repos: `@_linked/core` (vocabulary only), `@_linked/react`
+(the generator), `_linked-cli` (the build step). Order inside the step: core, then react, then
+cli; each built in its master worktree before the next uses it. The react half is
+[react plan 001](../../../_linked-react/docs/plans/001-hub-imports-react.md) §CI; this section is
+the whole step. Consumer: CN step CX (reads the file on import and publish).
+
+**Goal.** `linked build` of a package that has `src/components/index.ts` writes
+`lib/esm/data/components.ttl` (K8): per exported linked component its name, start shape, query
+wire format and query shape, as deterministic Turtle CN can store and hash-replace without
+reading any component code.
+
+**Scope.** Exactly K8:
+
+1. **Core vocabulary.** `src/ontologies/linked-core.ts`: `Component`, `SetComponent`,
+   `ComponentsGraph`, `definesComponent`, `exportName`, `startShape`, `queryShape`, `query` in
+   `coreOntology`; `src/data/core.ttl`: their definitions (labels, comments, domains/ranges,
+   `core:SetComponent rdfs:subClassOf core:Component`); `src/ontologies/rdf.ts`: `JSON`
+   (`rdf:JSON`). Changeset (minor).
+2. **React generator.** `src/utils/componentIndex.ts`: `componentIndexEntries(packageName,
+   moduleExports)` → `ComponentIndexEntry[]` (`{iri, exportName, set, startShape, queryShape,
+   query}`, sorted by IRI, one per component object) and `componentIndexTurtle(packageName,
+   moduleExports)` → `string | undefined` (K8's fixed form; `undefined` when there is no linked
+   component), plus the warnings for queries that do not serialize (`{turtle, warnings}` or a
+   `warnings` out-param; one shape, chosen by the step). `linkedSetComponent` marks its result
+   (`setComponent: true` on the wrapped component; the index reads the marker, not the shape of
+   `.query`). `LinkedSetComponent.query`'s type corrected to what it holds at runtime (the
+   QueryBuilder or the one-key wrapper). Peer `@_linked/core` range raised to the release with
+   the terms. Changeset (minor).
+3. **CLI build step.** `src/utils/componentsTurtle.ts` (mirrors `shapesTurtle.ts`):
+   `COMPONENTS_TURTLE_PATH`, `collectComponentsTurtleInputs`, `generateComponentsTurtle`,
+   `writeComponentsTurtleStep`; the step `Writing components.ttl` in `planBuildSteps`
+   (`src/cli-methods.ts`) right after `Writing shapes.ttl`, skipped by `--skip-shape-check`.
+   Warnings from the generator are printed as the step's warning. Changeset (minor).
+4. **Docs.** CLI: the build steps list in `README.md` and `docs/` where `shapes.ttl` is described
+   gains `components.ttl` and the `components/index` convention. React: `README.md` §components
+   (export your components from `src/components/index.ts` so the builder can index them).
+   Core: none beyond `core.ttl`'s comments.
+
+Out of scope: CN reading the file (CX); props schemas, capabilities and other metadata (G5:
+later); making `linkedPackage(name).linkedComponent` register under `name`; a check that every
+component module is in `components/index` (a later `Checking components/index`, backlog item in
+cli, homed by the step).
+
+**Verify** (in the step's worktrees; `npx linked build` from each package):
+
+- Core: `NODE_OPTIONS=--experimental-vm-modules npx jest --config jest.config.cjs
+  src/tests/core-ontology.test.ts` and `npm test` (full suite + typecheck); `npx linked build` clean.
+- React: `NODE_OPTIONS=--experimental-vm-modules npx jest --config jest.config.cjs
+  component-index` (new) and `npm test` (full suite); `npx linked build` clean.
+- CLI: `npx jest --config jest.config.cjs tests/unit/componentsTurtle.test.ts
+  tests/unit/shapesTurtle.test.ts`; `npx linked build`, then `npm run test:unit` (a built `lib/`
+  first, report 040).
+- End to end with the built CLI (`node <step cli worktree>/lib/esm/launch.js build`), in a sandbox
+  package under the scratchpad whose `node_modules` links the step's built core and react and
+  CN's `react`: `package.ts`, one shape, `src/components/index.ts` exporting a `linkedComponent`
+  (with a `.module.css` and an `.svg` import), a `linkedSetComponent` bound with
+  `.for(getQueryContext('user'))`, the same component under a second name and a plain function.
+  Quote `lib/esm/data/components.ttl`; build again and `cmp` the two files (identical); in a
+  `node` one-liner, `QueryBuilder.fromJSON(JSON.parse(<each core:query literal>)).toJSON()`
+  equals the literal's JSON; delete `components/index.ts`, build, the file is gone.
+- Not run: CN's tests (no CN change); `npm run test:e2e` of the cli (Docker).
+
+**Done when:** K8 holds as written; the tests below pass in all three repos; the sandbox run
+quoted; changesets in core, react and cli; report cli `docs/reports/042-component-index.md` (two
+parts, `## PR` and `## Details`, the whole step) and react `docs/reports/004-component-index.md`
+(the react half, linking 042); core's change named in 042 with its commit; plan doc cli
+`docs/plans/005-component-index.md` created at the start and deleted before landing; this
+section and react plan 001 ticked; landed ff-only into `hub-imports` in each master package
+worktree (core, react, cli in that order), each built there.
+
+**Files found in code:**
+
+- `src/cli-methods.ts` — `planBuildSteps` (3202); steps `Copying files to lib folder` (3236:
+  copies only `**/*.{json,d.ts,css,scss,ttl}`), `Writing shapes.ttl` (3384,
+  `writeShapesTurtleStep(packagePath, {skip: options.skipShapeCheck})`), `Checking sideEffects`
+  after it; `skipShapeCheck` option (3159).
+- `src/utils/shapesTurtle.ts` — the precedent: `collectShapesTurtleInputs` (core resolved with
+  `resolvePackageDir` from `shapeHierarchy.ts`, skip reasons), `runtimePackageName` (reads
+  `linkedPackage('<name>')` from `lib/esm/package.js`), the `GENERATE` child script (`-e`, marker
+  line `__LINKED_SHAPES_TURTLE__`, env-passed inputs), `writeShapesTurtleStep` (remove a stale
+  file whenever none is written).
+- `src/utils/shapeReferences.ts` — `ASSET_HOOK` (111): a `load` hook only, turning
+  `.css/.svg/.png/…` into a proxy module; `findShapeModules`.
+- `src/utils/shapesIndex.ts` — the `shapes/index` convention and its check (precedent for a
+  later `Checking components/index`).
+- `src/loaders/register.ts`, `css-loader.mts`, `ts-loader.mts` — the CLI's own hooks for running
+  an app from source (TS, CSS modules with real scoped names). Not needed here: the child loads
+  compiled `lib/esm`, and class names do not matter to the index.
+- `tests/unit/shapesTurtle.test.ts`, `tests/fixtureNodeModules.ts` — fixture packages written as
+  tsc emits them, `node_modules/@_linked/core` linked from the repo.
+- `@_linked/react` `src/utils/LinkedComponent.ts` — `createLinkedComponentFn` (253): `processQuery`
+  derives `shapeClass` from `query.toJSON().shape` (585-613); `.original`, `.query`, `.shape`
+  set at 403-405; `createLinkedSetComponentFn`: `.query` is the un-normalized input (the one-key
+  wrapper), 561-563; `options.name` names only the live-query template, not the component.
+- `@_linked/react` `src/package.ts` — registry `shapeToComponents` (shape → components, not keyed
+  by package); `linkedComponent` is built once with `@_linked/react`'s own
+  `registerPackageExport`, so `linkedPackage('<name>').linkedComponent` registers under
+  `@_linked/react`, and components that import `linkedComponent` from `@_linked/react` (CN's
+  `my-app` does) carry no package at all. Hence the `components/index` export convention.
+- `@_linked/core` `src/queries/QueryBuilder.ts` — `toJSON` (685; `subject` as `{"@ctx"}` for a
+  pending context, `nullSubject`, wire `v`), `fromJSON` (760); `src/queries/QueryContext.ts`
+  `getQueryContext` (107: a `PendingQueryContext` while unset); `src/shapes/SHACL.ts`
+  `getPackageUri` (98); `src/shapes/syncShapeGraphs.ts` `shapeGraphHash` (52, CX's precedent);
+  `src/shapes/shapesToTurtle.ts` (the fixed-form rules K8 copies); `src/ontologies/linked-core.ts`,
+  `src/ontologies/rdf.ts`, `src/data/core.ttl`.
+
+**Pitfalls:**
+
+- `ASSET_HOOK` is a `load` hook; a component importing an asset the build does not copy
+  (`.svg`, `.png`, fonts: not in the copy glob) fails at **resolve** before `load` runs. The
+  child needs a `resolve` hook for asset extensions too (short-circuit to a synthetic URL when the
+  file is missing). Keep `ASSET_HOOK` itself unchanged for the shape checks, or extend it and
+  rerun their tests.
+- Compiled `.tsx` imports `react/jsx-runtime`: `react` must resolve from the package (it does in
+  an app clone and a localized package; a fixture must link it). React's peer is not the CLI's
+  dependency: never add `react` to the CLI's `dependencies`.
+- Load order matters: `package.js` (sets the package's publish root, so `getPackageUri` and shape
+  IRIs are the package's), then `shapes/index.js`, then `components/index.js`. Calling
+  `getPackageUri` before `package.js` ran gives the default root.
+- Two copies of core or react in the child (the package's and the CLI's): import the generator
+  from the react **the package resolves** (as `shapesTurtle.ts` does for core); detect linked
+  components by duck type/brand (`isLinkedInstance`), never `instanceof`.
+- A query context set at module load (`setQueryContext` at top level of some imported module)
+  serializes as a resolved IRI, not `{"@ctx"}`. Nothing in the framework does this; note it in
+  the README, do not work around it.
+- `toJSON` runs callbacks (`select`, `where`, `sortBy`) through proxies; a query that throws
+  there must cost one component (warning), not the build.
+- Canonical JSON: `JSON.stringify` keeps insertion order, which depends on code paths; sort keys
+  recursively before writing. Escape the literal for Turtle (`\\`, `\"`, `\n`, `\r`, `\t`).
+- A package with an ontology already ships `lib/esm/data/*.ttl` (copied from `src/data/`); a
+  `src/data/components.ttl` would be overwritten. Same rule as `shapes.ttl`: the name is
+  reserved (say so in the README).
+- `--skip-shape-check` removes `components.ttl` too (its shapes are unchecked), so a package
+  never ships an index whose shapes may be wrong.
+- Land core first and build it in the master: react's generator imports the new terms, and the
+  CLI's fixtures load the built react.
+
+**Architecture.** Same split as `shapes.ttl`: the framework package that owns the concept
+generates (core → shapes, react → components), the CLI only loads the built package in a child
+and writes the file. The CLI never parses component code and never imports react itself. The
+index is opt-in per package by `components/index` (G5), so no existing build changes. CN (CX)
+treats the file as opaque bytes plus a hash: it copies the triples into its own graph and never
+runs the generator, so the format is fixed by K8 and versioned by the react release that writes
+it.
+
+**Tests:**
+
+- New, cli `tests/unit/componentsTurtle.test.ts` (fixtures as tsc emits them; a stub
+  `@_linked/react/utils/componentIndex` in the fixture's `node_modules` for the mechanics, so the
+  CLI needs no react dev dependency): no `components/index` → no file and a stale one removed;
+  modules imported in order (`package.js`, `shapes/index.js`, `components/index.js`), the
+  package name from `linkedPackage`; an `.svg`/`.css` import resolves; a throwing module fails the
+  step naming it; a react without the module → skip with a warning; generator warnings surface;
+  `--skip-shape-check` removes the file; `planBuildSteps` has `Writing components.ttl` right after
+  `Writing shapes.ttl`.
+- New, react `src/tests/component-index.test.tsx`: single and set components (types, IRIs,
+  `exportName`, start and query shape, canonical JSON); an alias exported twice → one entry; a
+  plain function and a non-component export ignored; `.for(getQueryContext('x'))`, `.for(iri)`,
+  `.for(null)` serialize as K8 says and `QueryBuilder.fromJSON` reads each back; a query whose
+  `toJSON` throws → left out with a warning; two calls give identical bytes, independent of export
+  order; no component → `undefined`; IRIs encode an export name with non-ASCII characters.
+- New, core: `core-ontology.test.ts` gains the new terms (module ↔ `core.ttl` agree).
+- Existing, must stay green: cli `tests/unit/shapesTurtle.test.ts`, `shapeReferences.test.ts`,
+  `shapesIndex.test.ts`, `shapeHierarchy.test.ts`, `cssLoaderMode.test.ts`; react
+  `react-component-behavior.test.tsx`, `classnames-and-query-context.test.tsx`,
+  `across-copies.test.tsx`, `native-barrel.test.tsx`, `reactivity.test.tsx`; core
+  `core-ontology.test.ts`, `shacl-serialization-ontology.test.ts`, the QueryBuilder serialization
+  tests.
+
+**Size and phases:** medium; plan doc cli `005-component-index.md`; reports cli 042, react 004.
+
+1. Core vocabulary + `rdf:JSON`, tests, changeset; land and build core in the master.
+2. React `setComponent` marker, type fix, `utils/componentIndex.ts`, tests, README, changeset;
+   land and build react.
+3. CLI `componentsTurtle.ts`, the build step, tests, docs, changeset.
+4. Sandbox end-to-end run, reports 042 and 004, plans ticked; land the CLI and build it.
+
+One commit per phase; sequential (one agent).
 
 ### BK — The `branch` key (K7, D17, G8)
 
@@ -267,5 +492,6 @@ Plan doc CN `290-…`; reports CN `291-…`, cli `043-…`.
 - [x] CL — machine-wide port lock and registry, `withRepoLockAsync`, `worktree relink --all`,
   `branch list`, `branch add-package` (report 041)
 - [ ] CL landed in `hub-imports` and built in the master's cli worktree; master on the built bin
-- [ ] CI — component index build (detailed at wave 2; report 042)
+- [ ] CI — component index build: core terms, react generator, `Writing components.ttl` (reports
+  cli 042, react 004)
 - [ ] BK — `branch` key, cli side (detailed at wave 3; report 043)
