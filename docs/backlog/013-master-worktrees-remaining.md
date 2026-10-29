@@ -32,6 +32,12 @@ relinks every worktree after an install. What still blocks running them side by 
 - **Refusing a second copy**: a step that overrides a package a master package depends on runs two
   copies of it. It is warned, not refused; `doctor resolve` could flag it too.
 
+- **Building the CLI in a fresh worktree**: in a master's or step's `packages-local/_linked-cli`
+  that has no `lib/` yet, `npx linked build` fails (`sh: linked: command not found`): the
+  worktree's farm links `.bin/linked` to that same unbuilt CLI. The first build there runs the main
+  checkout's bin (`<main>/node_modules/.bin/linked build`); `worktree add`/`branch start` could
+  print that, or fall back to it.
+
 ## Safety nets
 
 - **`branch start --worktree` refusing a dirty owner checkout**: today it starts at the last commit
