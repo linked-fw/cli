@@ -482,7 +482,7 @@ and pushed when the remote lacks it) and each package of `linked.unpublishedPack
 worktree in its `packages-local/` (on `<branch>` where its repo has it, else detached at
 `origin/<default>`), then installs once in the app worktree. `--add <repo>` checks out one more
 package no list names, without an install or a build. `--pin <npm>=<branch>` puts a package on a
-branch of its own choosing (detached when another worktree holds it) and `--pins-only` drops the
+branch of the caller's choosing (detached unless it is the run's own branch) and `--pins-only` drops the
 same-name rule for the rest. `--json` prints what it did. `linked branch fork <branch> <pkg>
 --worktree <dir>` makes a package branch in a worktree of its own, outside every app checkout, and
 `linked branch push <branch> --worktree <dir>` pushes it.

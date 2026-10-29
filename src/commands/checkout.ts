@@ -248,6 +248,8 @@ interface Target {
   pin?: string;
   /** Chosen by the same-name rule (no pins mode for it). */
   sameName?: true;
+  /** A pin to another branch than the run's: always detached at origin/<pin>, never attached here. */
+  readOnly?: true;
 }
 
 interface Head {
@@ -736,7 +738,9 @@ class Checkout {
   private targetOf(name: string, base: string, def: string): Target {
     const pin = this.options.pins?.[name];
     if (pin) {
-      if (this.hasRemoteBranch(base, pin)) return {branch: pin, pin, def};
+      // A pin to the run's own branch is written here (attached); any other pin is a branch written
+      // elsewhere (its own worktree), so the checkout only reads it: detached at origin/<pin>.
+      if (this.hasRemoteBranch(base, pin)) return {branch: pin, pin, def, ...(pin !== this.branch ? {readOnly: true as const} : {})};
       this.say(`${name}: its pin ${pin} is not on origin; it is checked out at origin/${def}.`);
       return {branch: null, pin, def};
     }
@@ -797,9 +801,9 @@ class Checkout {
     }
     fs.mkdirSync(path.dirname(dir), {recursive: true});
     let where: string;
-    if (target.branch && target.pin && this.holderOf(base, target.branch, dir)) {
+    if (target.branch && target.pin && (target.readOnly || this.holderOf(base, target.branch, dir))) {
       this.git(base, ['worktree', 'add', '-q', '--detach', dir, `origin/${target.branch}`]);
-      where = `detached at origin/${target.branch} (its pin; ${this.holderOf(base, target.branch, dir)?.path} holds the branch)`;
+      where = `detached at origin/${target.branch} (its pin)`;
     } else if (target.branch) {
       const branch = target.branch;
       this.refuseHeld(base, branch, dir);
@@ -869,7 +873,7 @@ class Checkout {
   ): {status: CheckoutStatus; reason?: string} {
     const {def} = target;
     const on = currentBranch(this.local, dir);
-    if (target.branch !== null && on === target.branch)
+    if (target.branch !== null && on === target.branch && !target.readOnly)
       return this.updateOnBranch(dir, base, target.branch);
     if (!this.pinsMode && on === this.branch)
       return this.updateOnBranch(dir, base, this.branch);
@@ -889,7 +893,7 @@ class Checkout {
     const head = this.head(dir);
     if (target.branch !== null) {
       const branch = target.branch;
-      if (target.pin && this.holderOf(base, branch, dir)) {
+      if (target.pin && (target.readOnly || this.holderOf(base, branch, dir))) {
         const tip = this.git(base, ['rev-parse', `refs/remotes/origin/${branch}`]);
         if (on === null && head === tip) return {status: 'unchanged'};
         if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip])) {

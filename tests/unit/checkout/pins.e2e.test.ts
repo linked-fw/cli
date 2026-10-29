@@ -30,26 +30,28 @@ const where = (p: CheckoutResult['packages'][number]) => ({
 });
 
 describe('linked checkout --pin / --pins-only', () => {
-  test('a pin is followed attached; --pins-only drops the same-name rule', () => {
+  test("a pin to another branch is followed detached; --pins-only drops the same-name rule", () => {
     const {r, root, run} = setup();
     const pinned = commitOn(r.base, r.ont, 'u1/edits', 'work.ttl', '# working\n');
     const res = run('change-1', {pins: {'acme-ont': 'u1/edits'}, pinsOnly: true});
     console.log(JSON.stringify(res.packages, null, 2));
     assert.equal(res.code, 0, res.messages.join('\n'));
     const ont = byName(res, 'acme-ont');
-    assert.deepEqual(where(ont), {branch: 'u1/edits', detached: false, fellBack: false, pin: 'u1/edits', status: 'created'});
+    // Written elsewhere (its own worktree): the checkout only reads it.
+    assert.deepEqual(where(ont), {branch: 'u1/edits', detached: true, fellBack: false, pin: 'u1/edits', status: 'created'});
     assert.equal(ont.head, pinned);
     // acme-assets has change-1 on origin, but --pins-only sits it at origin/main.
     assert.deepEqual(where(byName(res, 'acme-assets')), {branch: 'main', detached: true, fellBack: true, pin: undefined, status: 'created'});
     assertNoToken(root);
   });
 
-  test('a pin another worktree holds is detached, fast-forwards, and attaches once free', () => {
+  test('pinned checkouts stay detached, fast-forward, and move when the pin goes; a pin to the run branch attaches', () => {
     const {r, run} = setup();
     commitOn(r.base, r.ont, 'u1/edits', 'work.ttl', '# working\n');
     const pins = {'acme-ont': 'u1/edits'};
     const a = run('change-1', {pins, pinsOnly: true});
     assert.equal(a.code, 0, a.messages.join('\n'));
+    assert.equal(byName(a, 'acme-ont').detached, true);
     const b = run('change-2', {pins, pinsOnly: true});
     assert.equal(b.code, 0, b.messages.join('\n'));
     assert.deepEqual(where(byName(b, 'acme-ont')), {branch: 'u1/edits', detached: true, fellBack: false, pin: 'u1/edits', status: 'created'});
@@ -58,18 +60,19 @@ describe('linked checkout --pin / --pins-only', () => {
     const b2 = byName(run('change-2', {pins, pinsOnly: true}), 'acme-ont');
     assert.deepEqual({status: b2.status, detached: b2.detached, head: b2.head}, {status: 'updated', detached: true, head: next});
     const a2 = byName(run('change-1', {pins, pinsOnly: true}), 'acme-ont');
-    assert.deepEqual({status: a2.status, detached: a2.detached, head: a2.head}, {status: 'updated', detached: false, head: next});
+    assert.deepEqual({status: a2.status, detached: a2.detached, head: a2.head}, {status: 'updated', detached: true, head: next});
 
-    // change-1 loses its pin: its clean worktree moves to origin/main and frees u1/edits.
+    // change-1 loses its pin: its clean worktree moves to origin/main.
     const unpinned = byName(run('change-1', {pinsOnly: true}), 'acme-ont');
-    assert.deepEqual(where(unpinned), {branch: 'main', detached: true, fellBack: true, pin: undefined, status: 'switched'});
+    assert.deepEqual(where(unpinned), {branch: 'main', detached: true, fellBack: true, pin: undefined, status: 'updated'});
     assert.equal(unpinned.head, git(r.ont, 'rev-parse', 'refs/heads/main'));
-    // change-2 still pinned: it attaches now that nothing else holds the branch.
-    const attached = byName(run('change-2', {pins, pinsOnly: true}), 'acme-ont');
-    assert.deepEqual(where(attached), {branch: 'u1/edits', detached: false, fellBack: false, pin: 'u1/edits', status: 'switched'});
+    // A pin to the run's own branch (a fork of its name) is written here: attached.
+    commitOn(r.base, r.ont, 'change-2', 'fork.ttl', '# fork\n');
+    const own = byName(run('change-2', {pins: {'acme-ont': 'change-2'}, pinsOnly: true}), 'acme-ont');
+    assert.deepEqual(where(own), {branch: 'change-2', detached: false, fellBack: false, pin: 'change-2', status: 'switched'});
   });
 
-  test('a worktree with unpushed commits is kept when its pin changes', () => {
+  test('a worktree with commits origin lacks is kept when its pin changes', () => {
     const {r, run} = setup();
     commitOn(r.base, r.ont, 'u1/edits', 'work.ttl', '# working\n');
     const res = run('change-1', {pins: {'acme-ont': 'u1/edits'}, pinsOnly: true});
@@ -79,8 +82,8 @@ describe('linked checkout --pin / --pins-only', () => {
     git(dir, 'commit', '-q', '-m', 'local');
     const kept = byName(run('change-1', {pinsOnly: true}), 'acme-ont');
     assert.equal(kept.status, 'kept');
-    assert.match(kept.reason ?? '', /origin lacks/);
-    assert.equal(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD'), 'u1/edits');
+    assert.match(kept.reason ?? '', /lacks/);
+    assert.equal(git(dir, 'log', '-1', '--format=%s'), 'local');
   });
 
   test('a pin whose branch origin lacks falls back to the default branch, with a message', () => {
@@ -148,18 +151,17 @@ describe('linked branch fork --worktree / push --worktree', () => {
     assertNoToken(root);
   });
 
-  test("an app checkout holding the branch lets go of it; a deleted worktree is pruned and made again", async () => {
+  test('a pinned checkout never holds the branch; a deleted working worktree is pruned and made again', async () => {
     const {r, root, run} = setup();
     commitOn(r.base, r.ont, 'u1/edits', 'work.ttl', '# working\n');
     const co = run('change-1', {pins: {'acme-ont': 'u1/edits'}, pinsOnly: true});
     const appOnt = byName(co, 'acme-ont');
-    assert.equal(appOnt.detached, false);
+    assert.equal(appOnt.detached, true);
     const dir = path.join(root, 'work', 'u1', 'packages-local', 'acme-ont');
     const fork = await branchFork(co.app!.dir, 'u1/edits', 'acme-ont', {env, worktree: dir});
     assert.equal(fork.code, 0, fork.messages.join('\n'));
     assert.equal(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD'), 'u1/edits');
-    assert.throws(() => git(appOnt.dir, 'symbolic-ref', '-q', 'HEAD'));
-    // The checkout's re-run stays detached (the working worktree holds the branch).
+    // The checkout's re-run stays detached.
     assert.equal(byName(run('change-1', {pins: {'acme-ont': 'u1/edits'}, pinsOnly: true}), 'acme-ont').detached, true);
 
     // Its directory deleted behind git's back, and origin moved on: made again, fast-forwarded.
@@ -168,6 +170,9 @@ describe('linked branch fork --worktree / push --worktree', () => {
     const again = await branchFork(co.app!.dir, 'u1/edits', 'acme-ont', {env, worktree: dir});
     assert.equal(again.code, 0, again.messages.join('\n'));
     assert.equal(git(dir, 'rev-parse', 'HEAD'), tip);
+    // An option-like --from is refused.
+    const bad = await branchFork(co.app!.dir, 'u7/edits', 'acme-ont', {env, worktree: path.join(root, 'w7'), from: '--upload-pack=x'});
+    assert.equal(bad.code, 2);
   });
 
   test('a branch origin has already is checked out tracking it', async () => {

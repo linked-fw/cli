@@ -254,6 +254,7 @@ function forkWorktree(
   const {local, remote} = git;
   const target = realish(path.resolve(options.worktree ?? ''));
   result.dir = target;
+  if (options.from?.startsWith('-')) return refuse(EXIT_USAGE, `--from ${options.from}: not a branch or commit.`);
   const common = local('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {cwd: repo.dir});
   if (common.status !== 0) return refuse(EXIT_REFUSED, `${repo.dir} is not a git checkout: ${out(common)}`);
   const base = realish(common.stdout.trim());
@@ -302,26 +303,15 @@ function forkWorktree(
     if (fs.existsSync(target))
       return refuse(EXIT_REFUSED, `${target} exists and is not a worktree of ${result.package}'s base clone. Move it out of the way.`);
     const holder = all.find((wt) => wt.branch === branch);
-    if (holder) {
-      // A pinned app checkout's package worktree took the branch while it had no worktree of its
-      // own: the branch's own worktree comes first, so that checkout lets go (detached at the same commit) when nothing
-      // in it would be lost; its next `linked checkout` keeps it detached at origin/<branch>.
-      const hold = (args: string[]) => local('git', args, {cwd: holder.path});
-      const inAppCheckout =
-        path.basename(path.dirname(holder.path)) === 'packages-local' && fs.existsSync(path.join(path.dirname(path.dirname(holder.path)), '.git'));
-      const clean = inAppCheckout && fs.existsSync(holder.path) && hold(['status', '--porcelain']).stdout.trim() === '';
-      const pushed = clean && hold(['for-each-ref', '--contains', 'HEAD', '--format=%(refname)', 'refs/remotes/origin']).stdout.trim() !== '';
-      if (!pushed || hold(['checkout', '-q', '--detach']).status !== 0)
-        return refuse(EXIT_REFUSED, `${branch} is checked out in ${holder.path} already (a branch can be in one worktree only).`);
-      result.messages.push(`${result.package}: ${holder.path} let go of ${branch} (detached at the same commit)`);
-    }
+    if (holder)
+      return refuse(EXIT_REFUSED, `${branch} is checked out in ${holder.path} already (a branch can be in one worktree only).`);
     fs.mkdirSync(path.dirname(target), {recursive: true});
     let args: string[];
     if (refExists(local, base, `refs/heads/${branch}`)) args = ['worktree', 'add', '-q', target, branch];
     else if (onRemote) args = ['worktree', 'add', '-q', '--track', '-b', branch, target, `origin/${branch}`];
     else {
       const from = options.from ?? 'origin/HEAD';
-      const sha = local('git', ['rev-parse', '--verify', '--quiet', `${from}^{commit}`], {cwd: base});
+      const sha = local('git', ['rev-parse', '--verify', '--quiet', '--end-of-options', `${from}^{commit}`], {cwd: base});
       if (sha.status !== 0) return refuse(EXIT_USAGE, `--from ${from}: no such branch or commit in ${base}.`);
       args = ['worktree', 'add', '-q', '--no-track', '-b', branch, target, sha.stdout.trim()];
     }

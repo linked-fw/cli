@@ -159,11 +159,9 @@ in the app (the checkout only says where that base clone is; it is not touched),
 clone's lock. A worktree already at `<dir>` on `<branch>` is reused and pushes what origin lacks;
 otherwise the worktree is added on a local `<branch>`, else on origin's `<branch>` (tracked), else
 on a new `<branch>` from `--from` (default `origin/HEAD`), pushed `-u`; a worktree behind
-`origin/<branch>` is fast-forwarded first, and a worktree whose directory was deleted is pruned. A
-package worktree of an app checkout that holds `<branch>` (a pinned checkout made while the branch
-had no worktree of its own) lets go of it, detached at the same commit, when it is clean and origin
-has its head. Refused (exit 6): `<dir>` is something else, a worktree there is on another branch or
-has diverged, or another worktree holds `<branch>` and cannot let go.
+`origin/<branch>` is fast-forwarded first, and a worktree whose directory was deleted is pruned.
+Refused: `--from` that starts with `-` (exit 2); `<dir>` is something else, a worktree there is on
+another branch or has diverged, or another worktree holds `<branch>` (exit 6).
 `dir` in the result is `<dir>`. A server uses it for work on a package that belongs to no app
 branch (a person's working branch of an ontology), which app checkouts then follow by
 [`--pin`](#linked-checkout-branch).
@@ -373,15 +371,15 @@ worktree only and two checkouts that both fall back would both need the default 
 [`linked branch fork`](#linked-branch-fork-branch-package---dir-app---json) turns a fallback into
 the branch. A branch another worktree of the base clone has checked out is refused.
 
-**Pins.** `--pin <npm>=<branch>` replaces the branch rule for that package: it is on `<branch>`
-(`pin` in the result), or **detached at `origin/<branch>`** when another worktree of its base clone
-holds the branch (two app checkouts pinned to one branch; the first one, or the branch's own
-worktree from [`branch fork --worktree`](#linked-branch-fork-branch-package---worktree-dir---from-ref---dir-app---json),
-holds it). `--pins-only` turns the same-name rule off: every package without a pin is detached at
+**Pins.** `--pin <npm>=<branch>` replaces the branch rule for that package (`pin` in the result).
+A pin to the run's own `<branch>` (a fork of its name, written in this checkout) is attached, as the
+rule would; a pin to any other branch is **detached at `origin/<branch>`**: that branch is written
+elsewhere (its own worktree from [`branch fork --worktree`](#linked-branch-fork-branch-package---worktree-dir---from-ref---dir-app---json)),
+so no app checkout ever holds it. `--pins-only` turns the same-name rule off: every package without a pin is detached at
 `origin/<default>` (`fellBack: true` then means "no pin"), whatever branches its repo has. A pin
 whose branch origin lacks (deleted after a merge) falls back to `origin/<default>` with a message.
-Re-runs in either pins mode: a detached pinned worktree fast-forwards to `origin/<pin>` (`updated`)
-and attaches once the branch is free (`switched`); a clean worktree whose head origin has moves to
+Re-runs in either pins mode: a detached pinned worktree fast-forwards to `origin/<pin>` (`updated`);
+a clean worktree whose head origin has moves to
 its new target when the pins change (`switched`: to another pin, or back to `origin/<default>`); one
 with uncommitted changes or commits origin lacks is `kept`. In pins mode `--add` reads a package's
 name on its default branch. Without `--pin` and `--pins-only` nothing of this applies. Create Now

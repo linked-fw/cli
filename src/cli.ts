@@ -830,7 +830,7 @@ program
   )
   .option(
     '--pin <npm=branch>',
-    "Check the package with this npm name out on this branch instead of by the same-name rule (repeatable): attached, or detached at origin/<branch> when another worktree holds that branch; a re-run fast-forwards it and attaches it once the branch is free. A pin whose branch origin lacks falls back to origin/<default branch>.",
+    "Check the package with this npm name out on this branch instead of by the same-name rule (repeatable): attached when it is <branch> itself, else detached at origin/<pin> (that branch is written in its own worktree); a re-run fast-forwards it. A pin whose branch origin lacks falls back to origin/<default branch>.",
     (value: string, previous: string[] = []) => [...previous, value],
   )
   .option('--pins-only', 'No same-name rule: a package without a --pin sits detached at origin/<default branch>. With --pin or --pins-only, a clean package worktree whose head origin has moves to its new target.')
