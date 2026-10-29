@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {branchLand, branchStartWorktree} from '../../../src/commands/master.js';
+import {branchLand, branchList, branchStartWorktree, formatBranchList} from '../../../src/commands/master.js';
 import {worktreeAdd, worktreeList, worktreeRelink, worktreeRemove} from '../../../src/commands/worktree.js';
 import {makeRun, type Run} from '../../../src/localize/run.js';
 
@@ -260,6 +260,63 @@ describe('the machine-wide preview port registry', () => {
     assert.deepEqual(Object.keys(registry()), ['4520']);
     const again = await branchStartWorktree(b.root, 'mc', {});
     assert.equal(again.port, 4510, again.messages.join('\n'));
+  });
+});
+
+describe('linked branch list', () => {
+  test('a master and a plain integration branch, text and JSON, with the other apps\' masters', async () => {
+    const app = makeApp();
+    const other = makeApp();
+    await startMaster(app, 'm1', ['server', 'core']);
+    assert.equal((await worktreeAdd(app.root, 'a1', {from: 'm1', with: ['server']})).code, 0);
+    git(app.core, 'config', 'branch.feature.linked-target', 'dev');
+    const otherMaster = await startMaster(other, 'om', []);
+    const masterDir = path.join(app.container, 'wt', 'm1');
+
+    // Run in a step's worktree: it lists from the main checkout.
+    const list = await branchList(path.join(app.container, 'wt', 'm1--a1'));
+    assert.deepEqual(list, {
+      branches: [
+        {
+          name: 'm1',
+          kind: 'master',
+          target: 'dev',
+          repos: [
+            {rel: '.', target: 'dev', worktree: masterDir},
+            {rel: 'packages-local/_linked-core', target: 'dev', worktree: path.join(masterDir, 'packages-local', '_linked-core')},
+            {rel: 'packages-local/_linked-server', target: 'dev', worktree: path.join(masterDir, 'packages-local', '_linked-server')},
+          ],
+          dir: masterDir,
+          port: 4510,
+          dataset: null,
+          steps: ['a1'],
+        },
+        {name: 'dev', kind: 'integration', target: 'main', repos: [
+          {rel: '.', target: 'main', worktree: null},
+          {rel: 'packages-local/_linked-core', target: 'main', worktree: null},
+          {rel: 'packages-local/_linked-server', target: 'main', worktree: null},
+        ], dir: null, port: null, dataset: null, steps: []},
+        {name: 'feature', kind: 'integration', target: 'dev', repos: [{rel: 'packages-local/_linked-core', target: 'dev', worktree: null}], dir: null, port: null, dataset: null, steps: []},
+      ],
+      otherPorts: [{port: 4520, app: other.root, master: 'om', dir: otherMaster.dir}],
+    });
+
+    const text = formatBranchList(list).split('\n');
+    assert.match(text[0], /^BRANCH +KIND +TARGET +REPOS +WORKTREE +PORT +DATASET +STEPS$/);
+    assert.match(text[1], new RegExp(`^m1 +master +dev +app, _linked-core, _linked-server +${masterDir} +4510 +- +1$`));
+    assert.match(text[2], /^dev +integration +main +app, _linked-core, _linked-server +\(checkouts\) +- +- +-$/);
+    assert.match(text[3], /^feature +integration +dev +_linked-core +\(checkouts\) +- +- +-$/);
+    assert.equal(text[4], `Other masters on this machine: 4520 om (${other.root})`);
+    // The JSON is the same data.
+    assert.deepEqual(JSON.parse(JSON.stringify(list)), list);
+  });
+
+  test('an app with no records lists nothing', async () => {
+    const app = makeApp();
+    for (const repo of [app.root, app.server, app.core]) git(repo, 'config', '--unset', 'branch.dev.linked-target');
+    const list = await branchList(app.root);
+    assert.deepEqual(list, {branches: [], otherPorts: []});
+    assert.equal(formatBranchList(list), 'No integration branches or masters.');
   });
 });
 

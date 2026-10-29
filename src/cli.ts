@@ -688,6 +688,17 @@ branch
   });
 
 branch
+  .command('list')
+  .description(
+    "Run anywhere in an app. Its integration branches and masters in one view, from the branch.<b>.linked-target and -worktree records of the app repo and every packages-local/ checkout: BRANCH, KIND (master or integration), TARGET, REPOS, WORKTREE (a master's, else (checkouts)), PORT, DATASET and STEPS (a master's step count). Then the masters of other apps holding a preview port on this machine (<LINKED_HOME>/master-ports.json). Exit 0, an empty list too.",
+  )
+  .option('--json', 'Print {branches: [{name, kind, target, repos: [{rel, target, worktree}], dir, port, dataset, steps: [<agent>]}], otherPorts: [{port, app, master, dir}]}.')
+  .action(async (options) => {
+    const {runBranchList} = await import('./commands/master.js');
+    return runBranchList(options);
+  });
+
+branch
   .command('start <name> [packages...]')
   .description(
     'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when: any of them has uncommitted or untracked changes; --target is missing in a repo where <name> has to be created; <name> equals the target; <name> contains "--" (it separates agent branches); or another worktree has <name> checked out. If a switch fails partway, the repos already switched go back: each to its previous branch, a branch the run created is deleted (kept, with its sha printed, when it moved or another branch forked from it), and the target entry is restored. With --worktree: start a master instead, switching nothing -- <name> in a new app worktree (default <parent of the app root>/wt/<name>) with a nested worktree on <name> of each named package (positional or --with), each created from the branch that repo\'s checkout is on (or --target), node_modules a link farm into the main checkout\'s install; records branch.<name>.linked-target, -worktree, -port (first free of 4510, 4520, ... 4590, or --port) and -dataset in each repo, and prints the preview start command (PORT, SITE_ROOT and CN_PROJECTS_ROOT when the .env sets them, FUSEKI_DATASET). Run in the main checkout; refuses, making nothing, when <name> exists in a repo, the directory exists, or the port is another master\'s.',
@@ -845,6 +856,8 @@ worktree
   )
   .option('--dir <path>', 'The app worktree directory, instead of the agent name or the current directory.')
   .option('--from <master>', 'The agent is a step of this master (same as naming it <master>--<agent>).')
+  .option('--all', "Relink every worktree of the app, run anywhere in it: each master's worktree, then its steps, then the other worktrees (the main checkout aside). Per worktree its lines under a <dir>: heading, then Relinked <n> worktrees (or Relinked <n> of <t>; failed: <dirs>). Exit 1 when one failed; the others still run. Refused with an agent name, --dir or --from.")
+  .option('--json', 'With --all: print {code, worktrees: [{dir, kind: master|step|agent, master, code, messages}]}.')
   .action(async (agent: string | undefined, options) => {
     const {runWorktreeRelink} = await import('./commands/worktree.js');
     return runWorktreeRelink(agent, options);

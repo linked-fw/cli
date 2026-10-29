@@ -31,6 +31,7 @@ import {
   readPortRegistry,
   recordPort,
   stepPorts,
+  type PortEntry,
 } from '../integration/masters.js';
 import {withMachineLockAsync} from '../integration/repo-lock.js';
 import {LocalizeError} from '../localize/errors.js';
@@ -42,6 +43,7 @@ import {dependencyOrder} from './release.js';
 import {
   createWorktreeSet,
   defaultWorktreeDir,
+  mainCheckoutOf,
   realish,
   shellQuote,
   startCommandFor,
@@ -540,4 +542,125 @@ export async function runBranchLand(
     for (const m of result.messages) write(m);
   }
   process.exitCode = result.code;
+}
+
+export interface BranchListRepo {
+  /** `.` for the app, `packages-local/<dir>` for a package checkout. */
+  rel: string;
+  target: string | null;
+  /** That repo's worktree of the branch, when it records one (a master's). */
+  worktree: string | null;
+}
+
+export interface BranchListEntry {
+  name: string;
+  kind: 'master' | 'integration';
+  /** The app's target, else the first repo's. */
+  target: string | null;
+  repos: BranchListRepo[];
+  /** A master's app worktree. */
+  dir: string | null;
+  port: number | null;
+  dataset: string | null;
+  /** A master's step agents. */
+  steps: string[];
+}
+
+export interface BranchList {
+  branches: BranchListEntry[];
+  /** Masters of other apps holding a preview port on this machine (the port registry). */
+  otherPorts: PortEntry[];
+}
+
+/** `branch.<b>.linked-target` and `-worktree` of the repo at `dir`, by branch. */
+function branchRecords(run: Run, dir: string): Map<string, {target: string | null; worktree: string | null}> {
+  const out = new Map<string, {target: string | null; worktree: string | null}>();
+  const r = run('git', ['config', '--get-regexp', '^branch\\..*\\.linked-(target|worktree)$'], {cwd: dir});
+  if (r.status !== 0) return out;
+  for (const line of r.stdout.split('\n')) {
+    const space = line.indexOf(' ');
+    if (space < 0) continue;
+    const key = line.slice(0, space);
+    const value = line.slice(space + 1).trim();
+    const m = /^branch\.(.+)\.linked-(target|worktree)$/.exec(key);
+    if (!m || !value) continue;
+    const rec = out.get(m[1]) ?? {target: null, worktree: null};
+    if (m[2] === 'target') rec.target = value;
+    else rec.worktree = value;
+    out.set(m[1], rec);
+  }
+  return out;
+}
+
+/**
+ * `linked branch list`: the app's integration branches and masters in one view, from the
+ * `branch.<b>.linked-target` and `-worktree` records of the app repo and every `packages-local/`
+ * checkout, the masters' ports, datasets and steps, and the other apps' masters on this machine.
+ * Run anywhere in the app: it lists from the main checkout.
+ */
+export async function branchList(appRoot: string, run: Run = makeRun(appRoot)): Promise<BranchList> {
+  const here = realish(appRoot);
+  const root = mainCheckoutOf(run, here) ?? here;
+  const repos = await listRepos(root, run);
+  const masters = new Map((await listMasters(run, root)).map((m) => [m.name, m]));
+  const listed = await worktreeList(root, {all: true}, run);
+  const stepsOf = new Map(listed.masters.map((m) => [m.name, m.steps.map((s) => s.agent)]));
+
+  const byName = new Map<string, BranchListRepo[]>();
+  for (const repo of repos) {
+    for (const [name, rec] of branchRecords(run, repo.dir)) {
+      const list = byName.get(name) ?? [];
+      list.push({rel: repo.rel, target: rec.target, worktree: rec.worktree});
+      byName.set(name, list);
+    }
+  }
+  const branches: BranchListEntry[] = [...byName].map(([name, list]) => {
+    const master = masters.get(name);
+    return {
+      name,
+      kind: master ? 'master' : 'integration',
+      target: list.find((r) => r.rel === '.')?.target ?? list.find((r) => r.target)?.target ?? null,
+      repos: list,
+      dir: master?.dir ?? null,
+      port: master?.port ?? null,
+      dataset: master?.dataset ?? null,
+      steps: master ? stepsOf.get(name) ?? [] : [],
+    };
+  });
+  branches.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'master' ? -1 : 1));
+  const otherPorts = readPortRegistry().filter((e) => realish(e.app) !== root);
+  return {branches, otherPorts};
+}
+
+/** The table of `branch list`. */
+export function formatBranchList(list: BranchList): string {
+  const header = ['BRANCH', 'KIND', 'TARGET', 'REPOS', 'WORKTREE', 'PORT', 'DATASET', 'STEPS'];
+  const rows = list.branches.map((b) => [
+    b.name,
+    b.kind,
+    b.target ?? '-',
+    b.repos.map((r) => (r.rel === '.' ? 'app' : path.basename(r.rel))).join(', '),
+    b.dir ?? '(checkouts)',
+    b.port === null ? '-' : String(b.port),
+    b.dataset ?? '-',
+    b.kind === 'master' ? String(b.steps.length) : '-',
+  ]);
+  const lines: string[] = [];
+  if (rows.length) {
+    const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+    for (const r of [header, ...rows]) lines.push(r.map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i]))).join('  ').trimEnd());
+  } else {
+    lines.push('No integration branches or masters.');
+  }
+  if (list.otherPorts.length) {
+    lines.push(`Other masters on this machine: ${list.otherPorts.map((e) => `${e.port} ${e.master} (${e.app})`).join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+/** The commander action for `branch list`. */
+export async function runBranchList(options: {json?: boolean}): Promise<void> {
+  const list = await branchList(process.cwd());
+  process.stdout.write((options.json ? JSON.stringify(list, null, 2) : formatBranchList(list)) + '\n');
+  process.exitCode = 0;
 }

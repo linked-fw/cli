@@ -1040,7 +1040,7 @@ function removeItems(
 }
 
 /** The main checkout of the repo `dir` is in: git lists it first. */
-function mainCheckoutOf(run: Run, dir: string): string | null {
+export function mainCheckoutOf(run: Run, dir: string): string | null {
   const all = worktreesOf(run, dir);
   return all.length ? realish(all[0].path) : null;
 }
@@ -1224,6 +1224,69 @@ export async function worktreeRelink(
   return {code: 0, messages};
 }
 
+export interface RelinkAllEntry {
+  dir: string;
+  kind: 'master' | 'step' | 'agent';
+  /** The master a step belongs to. */
+  master?: string;
+  code: number;
+  messages: string[];
+}
+
+export interface RelinkAllResult {
+  code: number;
+  worktrees: RelinkAllEntry[];
+}
+
+/**
+ * `worktree relink --all`: relink every worktree of the app the directory is in: each master's
+ * worktree, then that master's steps, then every other worktree of the app (the main checkout
+ * aside). A worktree with an install of its own is left as it is. One that fails does not stop
+ * the others; the code is 1 when any failed.
+ */
+export async function worktreeRelinkAll(appRoot: string, run: Run = makeRun(appRoot)): Promise<RelinkAllResult> {
+  const here = realish(appRoot);
+  const root = mainCheckoutOf(run, here);
+  if (!root) return {code: 1, worktrees: [{dir: here, kind: 'agent', code: 1, messages: [`${here} is not in a git repository.`]}]};
+  const list = await worktreeList(root, {all: true}, run);
+  const todo: Omit<RelinkAllEntry, 'code' | 'messages'>[] = [];
+  for (const m of list.masters) {
+    if (m.worktree) todo.push({dir: m.worktree.dir, kind: 'master'});
+    for (const s of m.steps) todo.push({dir: s.dir, kind: 'step', master: m.name});
+  }
+  for (const w of list.worktrees) todo.push({dir: w.dir, kind: 'agent'});
+  const worktrees: RelinkAllEntry[] = [];
+  for (const t of todo) {
+    let r: WorktreeRemoveResult;
+    const nm = path.join(t.dir, 'node_modules');
+    if (fs.existsSync(nm) && !isLink(nm) && !sharedInstall(t.dir)) {
+      // An install of its own (not a farm): relink would refuse it, and it needs none.
+      worktrees.push({...t, code: 0, messages: [`${nm} is an install of the worktree's own: left as it is.`]});
+      continue;
+    }
+    try {
+      r = await worktreeRelink(root, undefined, {dir: t.dir}, run);
+    } catch (error) {
+      r = {code: 1, messages: [`relinking ${t.dir} failed: ${(error as Error).message}`]};
+    }
+    worktrees.push({...t, code: r.code, messages: r.messages});
+  }
+  return {code: worktrees.some((w) => w.code !== 0) ? 1 : 0, worktrees};
+}
+
+/** The text of `worktree relink --all`: each worktree's lines under its directory, then a total. */
+export function formatRelinkAll(result: RelinkAllResult): string {
+  const lines: string[] = [];
+  for (const w of result.worktrees) lines.push(`${w.dir}:`, ...w.messages.map((m) => `  ${m}`));
+  const failedDirs = result.worktrees.filter((w) => w.code !== 0).map((w) => w.dir);
+  lines.push(
+    failedDirs.length
+      ? `Relinked ${result.worktrees.length - failedDirs.length} of ${result.worktrees.length}; failed: ${failedDirs.join(', ')}`
+      : `Relinked ${result.worktrees.length} worktrees`,
+  );
+  return lines.join('\n');
+}
+
 function isLink(p: string): boolean {
   try {
     return fs.lstatSync(p).isSymbolicLink();
@@ -1233,7 +1296,21 @@ function isLink(p: string): boolean {
 }
 
 /** The commander action for `worktree relink`. */
-export async function runWorktreeRelink(agent: string | undefined, options: {dir?: string; from?: string}): Promise<void> {
+export async function runWorktreeRelink(
+  agent: string | undefined,
+  options: {dir?: string; from?: string; all?: boolean; json?: boolean},
+): Promise<void> {
+  if (options.all) {
+    if (agent || options.dir || options.from) {
+      console.error('--all relinks every worktree of the app: it takes no agent name, --dir or --from.');
+      process.exitCode = 1;
+      return;
+    }
+    const all = await worktreeRelinkAll(process.cwd());
+    process.stdout.write((options.json ? JSON.stringify(all, null, 2) : formatRelinkAll(all)) + '\n');
+    process.exitCode = all.code;
+    return;
+  }
   const result = await worktreeRelink(process.cwd(), agent, {dir: resolveDir(options.dir), from: options.from});
   const write = result.code === 0 ? console.log : console.error;
   for (const m of result.messages) write(m);
