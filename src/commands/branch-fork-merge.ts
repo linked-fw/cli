@@ -5,8 +5,13 @@
  *
  * - `fork <branch> <package>`: the package checkout (usually a fallback detached at
  *   `origin/<default>`) gets `<branch>` from its current head, pushed. Idempotent.
+ * - `fork <branch> <package> --worktree <dir> [--from <ref>]`: `<branch>` in a worktree of its own
+ *   at `<dir>`, from the package's base clone (found through the package's checkout in the app),
+ *   created from `<ref>` (default `origin/HEAD`) and pushed, or on origin's `<branch>` when it has
+ *   one; the app checkout is not touched. Idempotent.
  * - `push <branch>`: every repo of the checkout on `<branch>` (the app and each package checkout on
  *   it) pushes what origin lacks, so a later `merge` (which refuses unpushed commits) finds them.
+ *   With `--worktree <dir>`: that one worktree, on `<branch>`, only.
  * - `merge <branch> --into <default>`: the repos on `<branch>` (the app and each package
  *   checkout on it; fallbacks are skipped), packages in dependency order (with the
  *   `linked.unpublishedPackages` edges), the app last. `--mode push` (the default) merges
@@ -37,12 +42,20 @@ import {
   LocalizeError,
 } from '../localize/errors.js';
 import {makeRun, type Run} from '../localize/run.js';
-import {refExists, selectCheckouts} from './branch.js';
+import {refExists, selectCheckouts, worktreesOf} from './branch.js';
+import {realish} from './worktree.js';
 import {dependencyOrder} from './release.js';
 
 export interface ForkOptions {
   /** The app checkout; default the app root `cwd` is in. */
   dir?: string;
+  /**
+   * Make `<branch>` in a worktree of its own at this directory (from the package's base clone)
+   * instead of in the app checkout's package checkout, which is left as it is.
+   */
+  worktree?: string;
+  /** With `worktree`: what a new branch starts from; default `origin/HEAD`. */
+  from?: string;
   env?: NodeJS.ProcessEnv;
   /** How long to wait for another run's lock on a shared base clone. */
   lock?: RepoLockOptions;
@@ -131,6 +144,10 @@ export async function branchFork(
   if ('error' in chosen) return refuse(EXIT_USAGE, chosen.error);
   const repo = chosen.repos[0];
   result.package = repo.packageName ?? pkg;
+  if (options.worktree !== undefined)
+    return forkWorktree(repo, branch, options, {local, remote}, result, refuse);
+  if (options.from !== undefined)
+    return refuse(EXIT_USAGE, '--from goes with --worktree: without it the branch starts at the checkout\'s head.');
   result.dir = repo.dir;
   result.from = repo.head;
   if (repo.dirty)
@@ -218,9 +235,98 @@ export async function branchFork(
   );
 }
 
+/**
+ * `branch fork --worktree`: `branch` in a worktree of its own at `options.worktree`, of the base
+ * clone of the package checkout `repo` (shared with every app checkout of the package, so under its
+ * lock). A worktree already there on `branch` is reused (unpushed commits pushed); otherwise the
+ * worktree is added on the local `branch`, else on origin's (tracked), else on a new `branch` from
+ * `options.from` (default `origin/HEAD`), pushed `-u`. Refuses (6) a directory that is something
+ * else, a worktree there on another branch, and a `branch` another worktree holds.
+ */
+function forkWorktree(
+  repo: RepoInfo,
+  branch: string,
+  options: ForkOptions,
+  git: {local: Run; remote: (cwd: string, args: string[]) => {status: number; stdout: string; stderr: string}},
+  result: ForkResult,
+  refuse: (code: number, m: string) => ForkResult,
+): ForkResult {
+  const {local, remote} = git;
+  const target = realish(path.resolve(options.worktree ?? ''));
+  result.dir = target;
+  if (options.from?.startsWith('-')) return refuse(EXIT_USAGE, `--from ${options.from}: not a branch or commit.`);
+  const common = local('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {cwd: repo.dir});
+  if (common.status !== 0) return refuse(EXIT_REFUSED, `${repo.dir} is not a git checkout: ${out(common)}`);
+  const base = realish(common.stdout.trim());
+  return locked(local, repo.dir, `linked branch fork ${branch} --worktree`, options, refuse, () => {
+    const fetch = remote(base, ['fetch', '--prune', '-q', 'origin']);
+    if (fetch.status !== 0) return refuse(EXIT_NOT_FOUND, `git fetch failed in ${base}: ${out(fetch)}`);
+    const onRemote = refExists(local, base, `refs/remotes/origin/${branch}`);
+    // A worktree whose directory is gone (deleted without git) still holds its branch until pruned.
+    local('git', ['worktree', 'prune'], {cwd: base});
+    const all = worktreesOf(local, base);
+    const here = all.find((wt) => realish(wt.path) === target);
+    const head = () => local('git', ['rev-parse', 'HEAD'], {cwd: target}).stdout.trim();
+    const push = (): ForkResult => {
+      const r = remote(target, ['push', '-q', '--no-verify', '-u', 'origin', branch]);
+      if (r.status !== 0) return refuse(EXIT_REFUSED, `git push origin ${branch} failed in ${target}: ${out(r)}`);
+      result.pushed = true;
+      result.messages.push(`${result.package}: pushed ${branch}`);
+      return result;
+    };
+    /** Behind origin's branch and clean: fast-forward (a local branch can be older than origin's). */
+    const catchUp = (): ForkResult | null => {
+      if (!refExists(local, base, `refs/remotes/origin/${branch}`)) return null;
+      const behind = local('git', ['rev-list', '--count', `HEAD..refs/remotes/origin/${branch}`], {cwd: target}).stdout.trim();
+      if (behind === '0') return null;
+      if (local('git', ['status', '--porcelain'], {cwd: target}).stdout.trim() !== '')
+        return refuse(EXIT_REFUSED, `${target} is behind origin/${branch} and has uncommitted changes.`);
+      const ff = local('git', ['merge', '--ff-only', '-q', `refs/remotes/origin/${branch}`], {cwd: target});
+      if (ff.status !== 0) return refuse(EXIT_REFUSED, `${target} has diverged from origin/${branch}: ${out(ff)}`);
+      result.messages.push(`${result.package}: ${target} fast-forwarded to origin/${branch}`);
+      return null;
+    };
+    const pushIfAhead = (): ForkResult => {
+      const stop = catchUp();
+      if (stop) return stop;
+      result.from = head();
+      if (!refExists(local, base, `refs/remotes/origin/${branch}`)) return push();
+      const ahead = local('git', ['rev-list', '--count', `refs/remotes/origin/${branch}..HEAD`], {cwd: target}).stdout.trim();
+      return ahead === '0' ? result : push();
+    };
+    if (here) {
+      if (here.branch !== branch)
+        return refuse(EXIT_REFUSED, `${target} is a worktree of ${result.package} on ${here.branch ?? 'a detached HEAD'}, not ${branch}.`);
+      result.messages.push(`${result.package}: ${target} is on ${branch} already`);
+      return pushIfAhead();
+    }
+    if (fs.existsSync(target))
+      return refuse(EXIT_REFUSED, `${target} exists and is not a worktree of ${result.package}'s base clone. Move it out of the way.`);
+    const holder = all.find((wt) => wt.branch === branch);
+    if (holder)
+      return refuse(EXIT_REFUSED, `${branch} is checked out in ${holder.path} already (a branch can be in one worktree only).`);
+    fs.mkdirSync(path.dirname(target), {recursive: true});
+    let args: string[];
+    if (refExists(local, base, `refs/heads/${branch}`)) args = ['worktree', 'add', '-q', target, branch];
+    else if (onRemote) args = ['worktree', 'add', '-q', '--track', '-b', branch, target, `origin/${branch}`];
+    else {
+      const from = options.from ?? 'origin/HEAD';
+      const sha = local('git', ['rev-parse', '--verify', '--quiet', '--end-of-options', `${from}^{commit}`], {cwd: base});
+      if (sha.status !== 0) return refuse(EXIT_USAGE, `--from ${from}: no such branch or commit in ${base}.`);
+      args = ['worktree', 'add', '-q', '--no-track', '-b', branch, target, sha.stdout.trim()];
+    }
+    const add = local('git', args, {cwd: base});
+    if (add.status !== 0) return refuse(EXIT_REFUSED, `git ${args.join(' ')} failed in ${base}: ${out(add)}`);
+    result.messages.push(`${result.package}: ${target} on ${branch}${onRemote ? ` (origin's)` : ''}`);
+    return pushIfAhead();
+  });
+}
+
 export interface PushOptions {
   /** The app checkout; default the app root `cwd` is in. */
   dir?: string;
+  /** Push only this worktree (on `<branch>`), not the repos of an app checkout. */
+  worktree?: string;
   env?: NodeJS.ProcessEnv;
   /** How long to wait for another run's lock on a shared base clone. */
   lock?: RepoLockOptions;
@@ -274,15 +380,34 @@ export async function branchPush(
   ) {
     return refuse(EXIT_USAGE, `"${branch}" is not a valid branch name.`);
   }
-  const all = await listRepos(appDir, local);
-  const [app] = all;
-  if (app.branch !== branch) {
-    return refuse(
-      EXIT_REFUSED,
-      `${appDir} is on ${app.branch ?? 'a detached HEAD'}, not ${branch}.`,
-    );
+  let repos: Pick<RepoInfo, 'dir' | 'packageName' | 'head'>[];
+  if (options.worktree !== undefined) {
+    const dir = realish(path.resolve(options.worktree));
+    const on = local('git', ['symbolic-ref', '--short', '-q', 'HEAD'], {cwd: dir});
+    if (on.status !== 0 || on.stdout.trim() !== branch) {
+      return refuse(EXIT_REFUSED, `${dir} is not a worktree on ${branch}.`);
+    }
+    let packageName: string | undefined;
+    try {
+      const name = (JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as {name?: unknown}).name;
+      packageName = typeof name === 'string' ? name : undefined;
+    } catch {
+      packageName = undefined;
+    }
+    const head = local('git', ['rev-parse', 'HEAD'], {cwd: dir}).stdout.trim();
+    repos = [{dir, head, ...(packageName ? {packageName} : {})}];
+  } else {
+    const all = await listRepos(appDir, local);
+    const [app] = all;
+    if (app.branch !== branch) {
+      return refuse(
+        EXIT_REFUSED,
+        `${appDir} is on ${app.branch ?? 'a detached HEAD'}, not ${branch}.`,
+      );
+    }
+    repos = all.filter((x) => x.branch === branch);
   }
-  for (const r of all.filter((x) => x.branch === branch)) {
+  for (const r of repos) {
     // Each repo under its git dir's lock: a package's base clone is shared between app checkouts.
     const stop = locked(
       local,
@@ -671,18 +796,25 @@ function print(
 export async function runBranchFork(
   branch: string,
   pkg: string,
-  options: {dir?: string; json?: boolean},
+  options: {dir?: string; worktree?: string; from?: string; json?: boolean},
 ): Promise<void> {
-  const result = await branchFork(resolveDir(options.dir), branch, pkg);
+  const result = await branchFork(resolveDir(options.dir), branch, pkg, {
+    ...(options.worktree !== undefined ? {worktree: path.resolve(options.worktree)} : {}),
+    ...(options.from !== undefined ? {from: options.from} : {}),
+  });
   print(options.json, result, () => result.messages);
 }
 
 /** The commander action for `branch push`. */
 export async function runBranchPush(
   branch: string,
-  options: {dir?: string; json?: boolean},
+  options: {dir?: string; worktree?: string; json?: boolean},
 ): Promise<void> {
-  const result = await branchPush(resolveDir(options.dir), branch);
+  // One worktree needs no app checkout around it.
+  const result =
+    options.worktree !== undefined
+      ? await branchPush(path.resolve(options.worktree), branch, {worktree: path.resolve(options.worktree)})
+      : await branchPush(resolveDir(options.dir), branch);
   print(options.json, result, () => [
     ...result.repos.map((r) => `${r.name}  ${r.result} ${r.sha.slice(0, 12)}`),
     ...result.messages,
