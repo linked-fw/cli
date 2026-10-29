@@ -37,6 +37,24 @@ relinks every worktree after an install. What still blocks running them side by 
   worktree's farm links `.bin/linked` to that same unbuilt CLI. The first build there runs the main
   checkout's bin (`<main>/node_modules/.bin/linked build`); `worktree add`/`branch start` could
   print that, or fall back to it.
+- **`worktree remove <agent>` does not find a master's step by its agent name** (step SY of CN
+  plan 282). Run from the app's main checkout:
+  `npx linked worktree remove sy` →
+  ``No worktree of /Users/rene/web/create_now for sy: none on dev--sy, nor at /Users/rene/web/wt/sy.
+  Pass its directory with --dir; `linked worktree list` shows the worktrees.``
+  while `linked worktree list` showed `step sy  /Users/rene/web/wt/hub-imports--sy`. It worked with
+  `npx linked worktree remove sy --dir /Users/rene/web/wt/hub-imports--sy` (and then kept the landed
+  `hub-imports--sy` branches: `@_linked/core: kept hub-imports--sy (not dev--sy).`). `remove` should
+  look up `<m>--<agent>` steps as `list` does.
+- **A step with its own framework package loads two copies of it.** The link farm points CN's
+  `@_linked/core` at the step's checkout, while the main install's other `@_linked/*` packages
+  (`@_linked/fuseki`, `@_linked/access`, …) resolve core from the main checkout. CN's
+  `npm run typecheck:gate` in step SY's worktree reported 117 errors, every one between
+  `…/hub-imports--sy/packages-local/_linked-core/…` and `…/create_now/packages-local/_linked-core/…`
+  types (e.g. `FusekiStore` not assignable to `IDataset`); with `paths` mapping `@_linked/core` to
+  the step's build, `tsc` gave 0 errors. The farm could link every package that depends on a
+  `--with` package so it resolves the step's copy, or `worktree add` could print the `paths`
+  override for typechecks.
 
 ## Safety nets
 
