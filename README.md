@@ -470,6 +470,9 @@ linked worktree remove agent1                     # refuses while a branch has n
 linked branch start m1 --worktree --with core     # a master: m1 in ../wt/m1 with its own core worktree; nothing switched
 linked worktree add step1 --from m1 --with core   # a step of m1: ../wt/m1--step1, lands into ../wt/m1
 linked branch land m1                             # owner approved: merge dev into m1, ff dev in each checkout, build, push
+linked branch list                                # integration branches and masters (port, steps), and other apps' masters on this machine
+linked branch add-package m1 react                # a framework package joins running master m1 (and its steps, by relink)
+linked worktree relink --all                      # every worktree of the app, masters first (after npm install in the main checkout)
 linked branch fork change-1 acme-ont              # in an app checkout: create and push change-1 in that package checkout
 linked branch push change-1                       # in an app checkout: push change-1 in the app and every package checkout on it
 linked branch merge change-1 --into main          # packages in dependency order, then the app: --no-ff merge, push main

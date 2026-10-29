@@ -62,7 +62,8 @@ Note on K7: on disk the list stays keyed by npm name, as `unpublishedPackages()`
 - **`linked worktree relink --all [--json]`.** Relinks every worktree of the app: each master's
   worktree, then that master's steps, then the other agent worktrees (`worktree list --all`
   minus the main checkout). Run anywhere in the app. Refused together with an agent name,
-  `--dir` or `--from`. Text output: per worktree its `relink` lines under a heading
+  `--dir` or `--from`. A worktree whose `node_modules` is an install of its own is left as it is
+  (code 0, one line saying so). Text output: per worktree its `relink` lines under a heading
   `<dir>:`; last line `Relinked <n> worktrees` or `Relinked <n> of <t>; failed: <dir>, …`. Exit
   0 when every one relinked, 1 otherwise (the rest still run). JSON:
   `{code, worktrees: [{dir, kind: 'master'|'step'|'agent', master?, code, messages}]}`.
@@ -75,6 +76,8 @@ Note on K7: on disk the list stays keyed by npm name, as `unpublishedPackages()`
   some-branch   integration  dev     app, _linked-core     (checkouts)                     -     -        -
   Other masters on this machine: 4510 plan-x (/Users/rene/web/other-app)
   ```
+  A text row names at most five repos (`app, _linked-a, _linked-b, _linked-c, … (+n)`); an app
+  with no records prints `No integration branches or masters.`
   JSON: `{branches: [{name, kind, target, repos: [{rel, target, worktree}], dir, port, dataset,
   steps: [<agent>]}], otherPorts: [{port, app, master, dir}]}`. Exit 0 (an empty list too).
 - **`linked branch add-package <m> <packages...> [--target <branch>] [--json]`.** Adds
@@ -85,8 +88,9 @@ Note on K7: on disk the list stays keyed by npm name, as `unpublishedPackages()`
   `branch.<m>.linked-worktree` recorded in that repo; then `worktree relink` of the master and of
   each of its steps. Checks everything before making anything; refused (exit 1, nothing made)
   when `<m>` is not a master, a package is unknown or already in `<m>`, a checkout is detached
-  without `--target`, the target does not exist, or the repo already has a branch `<m>`. A
-  failure halfway undoes what this run made. Output: one line per worktree made and per relink,
+  without `--target`, the target does not exist, the repo already has a branch `<m>`, or a step
+  has a worktree of it (a branch `<m>--*`). A failure halfway undoes what this run made; a relink
+  that fails afterwards keeps the worktrees and exits 1 (rerun `worktree relink --all`). Output: one line per worktree made and per relink,
   then `Master <m> now has: <dirs>` and `Build each added package there: npx linked build`. JSON:
   `{code, added: [{rel, dir, target}], relinked: [<dir>], messages}`.
 
@@ -260,7 +264,7 @@ Plan doc CN `290-…`; reports CN `291-…`, cli `043-…`.
 
 ## Progress
 
-- [ ] CL — machine-wide port lock and registry, `withRepoLockAsync`, `worktree relink --all`,
+- [x] CL — machine-wide port lock and registry, `withRepoLockAsync`, `worktree relink --all`,
   `branch list`, `branch add-package` (report 041)
 - [ ] CL landed in `hub-imports` and built in the master's cli worktree; master on the built bin
 - [ ] CI — component index build (detailed at wave 2; report 042)

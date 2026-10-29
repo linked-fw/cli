@@ -275,7 +275,7 @@ and a base branch it created only while nothing has moved or forked from it).
 then `linked worktree relink <agent>` (or `linked worktree relink` in the worktree): it links the
 package worktree's `node_modules` to its checkout's and the package into the farm.
 
-### `linked worktree relink [agent] [--dir <path>]`
+### `linked worktree relink [agent] [--dir <path>] [--all [--json]]`
 
 Rebuilds an app worktree's `node_modules` farm from the main checkout's `node_modules` and the
 packages now in the worktree's `packages-local/`: the agent's worktree, the one at `--dir`, or,
@@ -283,6 +283,14 @@ without either, the worktree it runs in. It also gives each package worktree wit
 `node_modules` the link to its checkout's. A symlinked `node_modules` (an earlier layout) is
 replaced; a `node_modules` of the worktree's own is refused and left alone. The new farm is
 built next to the old one and swapped in by rename; restart the worktree's dev server after it.
+
+`--all` (run anywhere in the app; not with an agent name, `--dir` or `--from`) relinks every
+worktree of the app after an `npm install` in the main checkout: each master's worktree, then that
+master's steps, then every other worktree (the main checkout aside), each one's lines under a
+`<dir>:` heading, then `Relinked <n> worktrees` or `Relinked <n> of <t>; failed: <dir>, …`. One
+with an install of its own is left as it is. A failure does not stop the others; the exit code is
+1 when one failed. `--json` prints `{code, worktrees: [{dir, kind: 'master'|'step'|'agent',
+master?, code, messages}]}`.
 
 ### `linked worktree list [--all] [--json]`
 
@@ -350,6 +358,9 @@ npx linked worktree remove m1--step1                         # (or: remove step1
 npx linked branch land m1 --dry-run                          # from the main checkout, after approval
 npx linked branch land m1                                    # merge, fast-forward, build, push
 npx linked worktree remove m1
+npx linked branch list                                       # every integration branch and master, anywhere in the app
+npx linked branch add-package m1 react                       # a framework package joins running m1
+npx linked worktree relink --all                             # after an npm install in the main checkout
 ```
 
 ### `linked branch start <m> --worktree [packages...] [--with <pkgs>] [--target <branch>] [--port <n>] [--dataset <name>] [--dir <path>]`
@@ -363,9 +374,20 @@ and `branch.<m>.linked-worktree` (that repo's worktree), and in the app repo
 `branch.<m>.linked-port` and `branch.<m>.linked-dataset`. Git config is shared by every worktree
 of a repo, so the records are read from anywhere in the app.
 
-The preview port is the first of 4510, 4520, … 4590 no other master holds (outside a CN's
-live-app band 4000-4399, inside the 4000-4999 a local webid.email signs clients in from; `port + 1` is for the master's test runs, `port + 2` to `port + 9` for
-its steps), or `--port`. It prints the preview command:
+The preview port is the first of 4510, 4520, … 4590 no master on this machine holds (outside a
+CN's live-app band 4000-4399, inside the 4000-4999 a local webid.email signs clients in from;
+`port + 1` is for the master's test runs, `port + 2` to `port + 9` for its steps), or `--port`.
+"On this machine" means this app's masters (its git config) and the **port registry**
+`~/.linked/master-ports.json` (`$LINKED_HOME` overrides `~/.linked`), which maps each port to
+`{app, master, dir}` for the masters of every app. Choosing the port, making the worktrees and
+recording the master (git config and registry) all happen holding one machine-wide lock,
+`~/.linked/locks/master-ports/linked.lock` (the same holder format, 120 s wait, stale take-over and
+exit 6 refusal as the base-clone lock), so two masters started at once, in one app or two, never
+take one port. A registry entry whose `dir` is gone does not count and is dropped at the next
+write; `linked worktree remove <m>` releases the master's entry. A `--port` the registry or this
+app's masters hold is refused, naming the holder (`Port 4520 is master hub-imports's
+(/Users/rene/web/wt/hub-imports). Pick another, or leave --port out.`). It prints the preview
+command:
 
 ```
 cd ../wt/m1 && PORT=4510 SITE_ROOT=http://localhost:4510 CN_PROJECTS_ROOT=../wt/m1/apps npm run start:local
@@ -424,6 +446,39 @@ Then restart the owner's dev server, and `linked worktree remove <m>`: it refuse
 has steps or a branch has not landed in its target, removes its worktrees, deletes `<m>` and
 forgets its records. Release (PRs to `main`) is unchanged: it runs from the main checkout on the
 owner's branch.
+
+### `linked branch list [--json]`
+
+Run anywhere in the app (it lists from the main checkout). The app's integration branches and
+masters in one view, from the `branch.<b>.linked-target` and `-worktree` records of the app repo
+and every `packages-local/` checkout:
+
+```
+BRANCH       KIND         TARGET  REPOS                                   WORKTREE                        PORT  DATASET  STEPS
+hub-imports  master       dev     app, _linked-cli, _linked-core, …       /Users/rene/web/wt/hub-imports  4520  -        2
+dev          integration  main    app, _linked-cli, …                     (checkouts)                     -     -        -
+Other masters on this machine: 4510 plan-x (/Users/rene/web/other-app)
+```
+
+`REPOS` names each repo with a record for the branch; `STEPS` counts a master's step worktrees.
+The last line lists the registry's masters of other apps. `--json` prints `{branches: [{name, kind,
+target, repos: [{rel, target, worktree}], dir, port, dataset, steps: [<agent>]}], otherPorts:
+[{port, app, master, dir}]}`. Exit 0, an empty list too.
+
+### `linked branch add-package <m> <packages...> [--target <branch>] [--json]`
+
+Run anywhere in the app. Adds `packages-local/` checkouts (`@_linked/core`, `core` or
+`_linked-core`) to running master `<m>`: per package a worktree
+`<m's dir>/packages-local/<dir>` on a new branch `<m>` from `--target` (default the branch that
+checkout is on), its nested `node_modules` linked as `branch start --worktree` links it, and
+`branch.<m>.linked-target` and `-worktree` recorded in that repo; then `worktree relink` of the
+master and of each of its steps (a step sees the master's packages through its farm's `parent`).
+It checks everything before making anything, and refuses (exit 1, nothing made) when `<m>` is not
+a master, a package is unknown or already in `<m>`, a checkout is detached without `--target`, the
+target does not exist, the repo has a branch `<m>` already, or a step has a worktree of the
+package. A failure halfway undoes what the run made. It ends with `Master <m> now has: <dirs>` and
+`Build each added package there: npx linked build`. `--json` prints `{code, added: [{rel, dir,
+target}], relinked: [<dir>], messages}`.
 
 ## `linked checkout <branch>`
 

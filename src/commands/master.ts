@@ -635,6 +635,14 @@ export async function branchList(appRoot: string, run: Run = makeRun(appRoot)): 
   return {branches, otherPorts};
 }
 
+/** At most this many repos are named in a `branch list` row; `--json` has them all. */
+const REPOS_SHOWN = 5;
+
+const repoNames = (repos: BranchListRepo[]): string => {
+  const names = repos.map((r) => (r.rel === '.' ? 'app' : path.basename(r.rel)));
+  return names.length > REPOS_SHOWN ? `${names.slice(0, REPOS_SHOWN - 1).join(', ')}, … (+${names.length - REPOS_SHOWN + 1})` : names.join(', ');
+};
+
 /** The table of `branch list`. */
 export function formatBranchList(list: BranchList): string {
   const header = ['BRANCH', 'KIND', 'TARGET', 'REPOS', 'WORKTREE', 'PORT', 'DATASET', 'STEPS'];
@@ -642,7 +650,7 @@ export function formatBranchList(list: BranchList): string {
     b.name,
     b.kind,
     b.target ?? '-',
-    b.repos.map((r) => (r.rel === '.' ? 'app' : path.basename(r.rel))).join(', '),
+    repoNames(b.repos),
     b.dir ?? '(checkouts)',
     b.port === null ? '-' : String(b.port),
     b.dataset ?? '-',

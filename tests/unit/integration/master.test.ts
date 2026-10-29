@@ -311,6 +311,12 @@ describe('linked branch list', () => {
     assert.deepEqual(JSON.parse(JSON.stringify(list)), list);
   });
 
+  test('a row names at most five repos; --json has them all', async () => {
+    const repos = ['.', 'a', 'b', 'c', 'd', 'e'].map((n) => ({rel: n === '.' ? n : `packages-local/_linked-${n}`, target: 'main', worktree: null}));
+    const list = {branches: [{name: 'dev', kind: 'integration' as const, target: 'main', repos, dir: null, port: null, dataset: null, steps: []}], otherPorts: []};
+    assert.match(formatBranchList(list).split('\n')[1], /^dev +integration +main +app, _linked-a, _linked-b, _linked-c, … \(\+2\) +\(checkouts\)/);
+  });
+
   test('an app with no records lists nothing', async () => {
     const app = makeApp();
     for (const repo of [app.root, app.server, app.core]) git(repo, 'config', '--unset', 'branch.dev.linked-target');
