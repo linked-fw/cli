@@ -83,7 +83,27 @@ describe('linked checkout --pin / --pins-only', () => {
     const kept = byName(run('change-1', {pinsOnly: true}), 'acme-ont');
     assert.equal(kept.status, 'kept');
     assert.match(kept.reason ?? '', /lacks/);
+    assert.ok(kept.reason?.startsWith(dir), kept.reason);
     assert.equal(git(dir, 'log', '-1', '--format=%s'), 'local');
+  });
+
+  test('a worktree with uncommitted changes is refused, named, when its pin changes; once clean it moves', () => {
+    const {r, run} = setup();
+    commitOn(r.base, r.ont, 'u1/edits', 'work.ttl', '# working\n');
+    const dir = byName(run('change-1', {pins: {'acme-ont': 'u1/edits'}, pinsOnly: true}), 'acme-ont').dir;
+    const before = git(dir, 'rev-parse', 'HEAD');
+    fs.writeFileSync(path.join(dir, 'pending.ttl'), '# pending\n');
+    const res = run('change-1', {pinsOnly: true});
+    const kept = byName(res, 'acme-ont');
+    assert.equal(kept.status, 'kept');
+    assert.match(kept.reason ?? '', /uncommitted changes/);
+    assert.ok(kept.reason?.startsWith(dir), kept.reason);
+    assert.ok(res.messages.some((m) => m.includes(dir) && m.includes('not moved')), res.messages.join('\n'));
+    assert.equal(git(dir, 'rev-parse', 'HEAD'), before);
+    fs.rmSync(path.join(dir, 'pending.ttl'));
+    const moved = byName(run('change-1', {pinsOnly: true}), 'acme-ont');
+    assert.equal(moved.status, 'updated');
+    assert.equal(moved.head, git(r.ont, 'rev-parse', 'refs/heads/main'));
   });
 
   test('a pin whose branch origin lacks falls back to the default branch, with a message', () => {

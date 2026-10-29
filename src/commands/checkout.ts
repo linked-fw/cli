@@ -921,6 +921,13 @@ class Checkout {
       return this.updateOnBranch(dir, base, target.branch);
     if (!this.pinsMode && on === this.branch)
       return this.updateOnBranch(dir, base, this.branch);
+    // In pins mode a worktree moves to where its pin (or key) says only when nothing would be lost:
+    // no uncommitted changes, no commits origin lacks. Else it is refused, naming the worktree.
+    const refuse = (why: string): {status: CheckoutStatus; reason: string} => {
+      const reason = `${dir} ${why}`;
+      this.say(`${path.basename(dir)}: not moved: ${reason}.`);
+      return {status: 'kept', reason};
+    };
     if (on !== null) {
       if (!this.pinsMode)
         return {
@@ -928,10 +935,11 @@ class Checkout {
           reason: `it is on ${on}, not ${this.branch} or detached`,
         };
       if (this.dirty(dir))
-        return {status: 'kept', reason: 'it has uncommitted changes'};
+        return refuse('has uncommitted changes: commit or discard them so it follows its pin');
       if (!this.headOnOrigin(dir))
-        return {status: 'kept', reason: `it is on ${on}, whose commits origin lacks: push them`};
+        return refuse(`is on ${on}, whose commits origin lacks: push them so it follows its pin`);
     } else if (this.dirty(dir)) {
+      if (this.pinsMode) return refuse('has uncommitted changes: commit or discard them so it follows its pin');
       return {status: 'kept', reason: 'it has uncommitted changes'};
     }
     const head = this.head(dir);
@@ -942,10 +950,7 @@ class Checkout {
         if (on === null && head === tip) return {status: 'unchanged'};
         // Not a fast-forward: still moved when origin has the head (the pin changed), as below.
         if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip]) && !this.headOnOrigin(dir)) {
-          return {
-            status: 'kept',
-            reason: `its detached HEAD has commits origin/${branch} lacks`,
-          };
+          return refuse(`has a detached HEAD with commits origin/${branch} lacks: push them so it follows its pin`);
         }
         this.git(dir, ['checkout', '-q', '--detach', `origin/${branch}`]);
         this.moved.push({dir, before: head});
@@ -971,6 +976,7 @@ class Checkout {
     const tip = this.git(base, ['rev-parse', `refs/remotes/origin/${def}`]);
     if (on === null && head === tip) return {status: 'unchanged'};
     if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip]) && !(this.pinsMode && this.headOnOrigin(dir))) {
+      if (this.pinsMode) return refuse(`has a detached HEAD with commits origin lacks: push them so it follows its pin`);
       return {
         status: 'kept',
         reason: `its detached HEAD has commits origin/${def} lacks`,
