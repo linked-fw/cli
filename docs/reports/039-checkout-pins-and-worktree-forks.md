@@ -77,3 +77,15 @@ None in this repo. Deleting merged working branches: CN backlog 268.
 The pins mode moves a worktree only when `git for-each-ref --contains HEAD refs/remotes/origin`
 names a branch, so no commit becomes unreachable. A held pin is detached at `origin/<pin>`, never
 `git worktree add --force`. The skills in `semantu-agents` do not describe these flags.
+
+## Addendum — after CN's independent review (patch)
+
+- **A pin to another branch than the run's is always detached** at `origin/<pin>`: that branch (an
+  ontology working branch) is written only in its own worktree, so no app checkout holds it. A pin
+  to the run's own branch (a code-sync fork) stays attached. This removes the case where a pinned
+  checkout took the branch while its worktree was absent.
+- **`branch fork --worktree` detaches no other checkout any more** (that raced CN's lock of that
+  app); a branch another worktree holds is refused, as before the first review round.
+- **`--from` starting with `-` is refused** (exit 2), and `rev-parse` gets `--end-of-options`.
+- Changeset `pinned-checkouts-read-only` (patch). Verification: `tests/unit/checkout` 59 passed;
+  the whole unit suite `Tests: 1166 passed, 1166 total` after a build.
