@@ -27,6 +27,14 @@ it here and in 282 in the same landing.
 - **K7 `package.json` keys** (providers BK in `_linked-cli` and VD; consumers CN): an
   `unpublishedPackages` entry `{name, repo, branch?}` (D17, G8); `linked.defaultOntology: "<npm
   name>"` (D23).
+  **Added by BK (detail; verbatim in CN 283 §Contracts K7):** `branch` is a valid git branch name
+  other than `main` (the parser refuses anything else, exit 6 naming the entry); only the app's
+  own list counts, a key in a package's (transitive) list is ignored with a warning; `linked
+  checkout` reads the keys as pins (CN passes `--pins-only` and no `--pin`; an explicit `--pin`
+  wins; `CheckoutPackage.pinFrom: 'key' | 'flag'`); `linked branch merge` lands the keyed package
+  branches first (update mode refuses one not yet in `<into>`) and strips every key from the
+  app's `package.json` (push mode: in the merge commit; update mode: one commit on the branch),
+  so `main` lists no key (`MergeResult.strippedKeys`).
 - **K8 Component index file** (provider CI: the generator in `@_linked/react`, the build step in
   `_linked-cli`, the terms in `@_linked/core`'s ontology; consumer CX). Settled at wave 2 (was
   *open*); copied verbatim into react plan 001 and, once the master accepts it, into 282.
@@ -467,25 +475,141 @@ One commit per phase; sequential (one agent).
 
 ### BK — The `branch` key (K7, D17, G8)
 
-*Detailed when wave 3 starts.* Sensitive (CN commits `branch` keys into app repos; checkout pins).
-Cli side:
+Sensitive (CN commits `branch` keys into app repos; checkout pins). One step, two repos, one
+agent: this cli half lands first and is built in the master's cli worktree; the CN half is
+[CN 283 §BK](../../../../docs/plans/283-shapes-and-packages-per-hub-cn.md). Detail found in the
+code on cli `hub-imports` after CI.
 
-- `UnpublishedPackage` gains `branch?: string` and `unpublishedPackages()` in
-  `src/installed-packages.ts` parses and validates it (a valid branch name, else exit 6 naming
-  the entry).
-- `walkUnpublished` (`src/integration/unpublished.ts`): only the app's own list's `branch` keys
-  count; a `branch` key in a package's (transitive) list is ignored with a warning, and a name
-  listed by the app with one branch and reached again elsewhere is not a conflict on `branch`
-  (only on `repo`, as today).
-- `linked checkout`: the app's `branch` keys feed `targetOf` (`src/commands/checkout.ts` 738) as
-  pins, with `--pins-only` kept (G8); an explicit `--pin` wins over a key.
-- `linked localize --listed` (`src/localize/localize.ts` 246-268): clones each listed package on
-  its `branch` when it has one.
-- `linked branch merge` (`src/commands/branch-fork-merge.ts`, `branchMerge` 530): merges the named
-  package branches first, then strips their `branch` keys from the app's `package.json` in the
-  merge commit.
+**Depends on:** CL (landed). CN's half depends on CN step IX.
 
-Plan doc CN `290-…`; reports CN `291-…`, cli `043-…`.
+**Goal.** An app branch names the package branch it uses in its own `package.json`; checkout,
+localize and merge follow it; merging leaves no key on the target.
+
+**Scope.**
+
+1. **Parser** (`src/installed-packages.ts`): `UnpublishedPackage` (:153-158) gains `branch?:
+   string`. `unpublishedPackages(json, warn)` (:171-216) reads an entry's `branch`: absent → none;
+   a non-empty string that is a valid branch name → kept; anything else (not a string, empty,
+   `main`/`HEAD`, a name `git check-ref-format --branch` would refuse) → `LocalizeError(…,
+   EXIT_REFUSED)` naming `linked.unpublishedPackages of <name>` and the entry. The parser stays
+   pure: a new `isBranchName(name)` in `src/integration/branchName.ts` implements
+   check-ref-format's rules (no `..`, `@{`, control chars, space, `~^:?*[\`, no leading `-`, no
+   `/`-component starting with `.` or ending `.lock`, no trailing `/` or `.`); a unit test compares
+   it with `git check-ref-format --branch` over a table. `src/commands/release.ts:170-175` reads
+   the list raw and is unchanged.
+2. **Walk** (`src/integration/unpublished.ts`, `walkUnpublished` :31-67): `ListedPackage` keeps
+   `branch` only from the root list; an entry reached through a package's list drops its key with
+   one warning (`<pkg>'s list names branch <b> for <name>; ignored, the app's list decides`); a
+   name reached twice is a conflict on `repo` only (:46-51), never on `branch`.
+3. **Checkout** (`src/commands/checkout.ts`): after the walk, the root list's keys become pins
+   (`pinsFromKeys(listed)`), merged under the explicit ones: `{...keys, ...options.pins}` (an
+   explicit `--pin` wins; the run says `pin <name>=<b> from --pin overrides the app's branch key
+   <k>`). A key makes `pinsMode` (:730) true as a pin does today, so the rest of `targetOf`
+   (:738-750) is unchanged: pin on origin → that branch (`readOnly` when it is not the run branch);
+   pin missing on origin → today's message and `{branch: null}` (detached on the default). A key
+   equal to the run branch is a pin on the run branch (writable). Validation of pins (:318-334)
+   covers the keys. `CheckoutPackage.pin` (:126) is set for a key too, plus `pinFrom: 'key' |
+   'flag'` (new, optional) in the JSON.
+4. **Localize** (`src/localize/localize.ts`, `localizeListed` :243-293): an entry with `branch`
+   clones on it (`prepareClone(…, {branch: entry.branch})`, the rest as today); without one, the
+   app's current branch rule (:266, `checkOutBranch` :481-510) as today. A key naming a branch the
+   repo lacks: the clone stays on its default branch with today's log line.
+5. **Merge** (`src/commands/branch-fork-merge.ts`, `branchMerge` :530): reads the app's
+   `package.json` at `origin/<branch>` (after the fetch, :584-613) for keys.
+   - A key equal to `<branch>`: that package is merged in this run as today (its checkout is on
+     `<branch>`).
+   - A key naming another branch `<k>`: **push mode** merges `origin/<k>` into `<into>` of that
+     package first (`mergePush` on the package's checkout dir, found by name through
+     `listRepos`; it may be detached), in dependency order before the same-name packages; a
+     package with no checkout here → refused (exit 6, nothing merged). **Update mode** (CN's) does
+     not merge `<k>`: it refuses (exit 6, naming the package and `<k>`) unless `origin/<into>`
+     already contains `origin/<k>` (`git merge-base --is-ancestor`); CN lands such branches first
+     with its own PRs (CN 283 §BK item 6).
+   - **Strip.** The app's merge removes every `branch` key from `package.json`: push mode amends
+     the app's merge commit in its temporary worktree (`git commit --amend --no-edit` after the
+     edit, before the push); update mode adds one commit `Use main of <pkgs>` on the branch after
+     merging `origin/<into>` in and before the push. An app with no keys: nothing changes.
+     `MergeResult` gains `strippedKeys: string[]` and `MergeRepo.via: 'key' | 'branch'`.
+6. **Docs:** README :441-446, :492-493, :501-506; `docs/localize.md` :197, :237-266 (the on-disk
+   example with `branch`, the branch sentence :256), :567; `docs/integration-branches-and-worktrees.md`
+   :200-221 (merge lands keyed branches, strips keys), :483-545 (branch rule :519-525: key first;
+   Pins :529-541: keys are pins, `--pin` wins; :540 Create Now passes `--pins-only` only), :565-572;
+   `src/cli.ts` help :597, :789, :881, :896, :899; header comments `checkout.ts:1-26`,
+   `localize.ts:234-240, :478`. Changeset (minor).
+
+Out of scope: any CN change (CN 283 §BK); a command that sets a key (CN edits `package.json`
+itself; a `linked use <pkg> --branch` is a later backlog item if wanted).
+
+**Verify** (in the step's cli worktree; `npx linked build` first, report 040):
+
+- `npx jest --config jest.config.cjs tests/unit/checkout/unpublished.test.ts
+  tests/unit/localize/listed.test.ts tests/unit/checkout/pins.e2e.test.ts
+  tests/unit/checkout/land.e2e.test.ts tests/unit/checkout/checkout.e2e.test.ts
+  tests/unit/integration/branch.test.ts tests/unit/integration/branchName.test.ts`.
+- `npm run test:unit` — the full unit suite, after the build.
+- `npx linked build` — clean.
+- End to end with the built CLI in a sandbox under the scratchpad (`makeRemotes()`-style `file://`
+  remotes): an app branch `change-1` whose entry for `ont` has `"branch": "rene/topic"`;
+  `linked checkout change-1 --pins-only --json` puts `ont` on `rene/topic` (`pin`, `pinFrom:
+  "key"`); `--pin ont=main` overrides it; `localize --listed` clones `ont` on `rene/topic`;
+  `branch merge change-1 --into main --mode push` lands `ont`'s `rene/topic` first, then the app,
+  and `git show origin/main:package.json` has no `branch`. Output quoted in report 043.
+- Not run: `npm run test:e2e` (Docker); CN's tests (CN half).
+
+**Done when:** K7's `branch?` holds as in CN 283 §Contracts K7 (Added by BK); the tests below
+pass; the sandbox run quoted; docs and changeset in the landing; report
+`docs/reports/043-branch-key.md` (two parts); this section ticked; landed ff-only into
+`hub-imports` in `/Users/rene/web/wt/hub-imports/packages-local/_linked-cli` and built there
+before the CN half's tests.
+
+**Files found in code:** `src/installed-packages.ts` (:153-216); `src/integration/unpublished.ts`
+(:13, :31-67, :88-105); `src/commands/checkout.ts` (:104-106, :113-157, :244-254, :316-382,
+:730-787, :869-990, :1141-1196); `src/localize/localize.ts` (:111-115, :243-293, :448, :481-510);
+`src/commands/branch-fork-merge.ts` (:100, :504-530, :558-625, :665, :725, :825);
+`src/localize/errors.ts` (:11-25); `src/cli.ts` (:597, :789, :881, :895-899);
+`tests/unit/checkout/helpers.ts` (`makeRemote` :41, `commitOn` :60, `makeRemotes` :86, `setup`
+:156).
+
+**Pitfalls:**
+
+- `unpublishedPackages()` is pure and called by `checkout`, `localize` and the walk: no git call
+  inside it (hence `isBranchName`).
+- A key is a pin: an app branch keyed to a colleague's branch gets that package read-only
+  (detached at `origin/<k>`), as a `--pin` does today. CN's code-sync fork keys the same-name
+  branch, which stays writable.
+- Merge order: keyed other-name branches before the same-name packages, packages before the app
+  (`dependencyOrder`), and stop at the first conflict as today: the strip runs only when every
+  package merged.
+- Update mode must never merge a keyed other-name branch itself (CN lands it through a PR with a
+  release commit); refuse instead.
+- The strip edits only the `branch` keys (keep key order and formatting: parse, delete, write
+  with the file's indent and trailing newline).
+- Never add `branch` keys to transitive lists in fixtures except to test that they are ignored.
+
+**Tests:**
+
+- `tests/unit/checkout/unpublished.test.ts`: parser keeps a valid `branch`; refuses `main`, `""`,
+  `a..b`, `-x`, a number (exit 6, message names the entry); walk keeps the root's key, drops a
+  transitive one with a warning, no conflict on differing transitive keys.
+- New `tests/unit/integration/branchName.test.ts`: `isBranchName` agrees with `git
+  check-ref-format --branch` over a table.
+- `tests/unit/checkout/pins.e2e.test.ts`: a key places the package (pin, `pinFrom: 'key'`, read-only
+  when not the run branch); `--pin` overrides a key; a key to a missing branch → message, detached
+  on the default; a same-name key is writable.
+- `tests/unit/localize/listed.test.ts`: `--listed` clones on the key's branch.
+- `tests/unit/checkout/land.e2e.test.ts`: push mode lands a keyed other-name branch first and the
+  merge commit has no key; update mode refuses an unmerged keyed branch and strips the keys once it
+  is merged (`strippedKeys`); an app without keys unchanged.
+- Existing, must stay green: `checkout.e2e.test.ts`, `repo-lock.test.ts`, `branch.test.ts`,
+  `release` tests (`dependencyOrder`).
+
+**Size and phases:** medium (with CN's half); CN plan doc 290 covers both; reports cli 043, CN
+291.
+
+1. Parser, `isBranchName`, walk, with tests.
+2. Checkout keys as pins, localize, with tests.
+3. Merge (push and update), strip, with tests.
+4. Docs, changeset, build, full suite, sandbox run, report 043; land and build in the master.
 
 ## Progress
 
