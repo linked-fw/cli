@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.60.0
+
+### Minor Changes
+
+- [#334](https://github.com/linked-fw/cli/pull/334) [`26b4123`](https://github.com/linked-fw/cli/commit/26b4123539b0f9c314a2550f441c840ef523a8e4) Thanks [@flyon](https://github.com/flyon)! - Masters: `linked branch start <m> --worktree [--with <pkgs>] [--port] [--dataset] [--dir]` makes an integration branch in a link-farm worktree of its own (each repo from the branch its checkout is on; no checkout is switched), records `branch.<m>.linked-worktree`, `-port` (first free of 4510…4590) and `-dataset`, and prints a preview command with `SITE_ROOT` and `CN_PROJECTS_ROOT` for it. `linked worktree add <agent> --from <m>` makes a step on `<m>--<agent>` whose farm links straight into the install with the master's packages under its own (the marker's `parent`, which `relink` honours). `linked branch land <m>` merges each moved target into `<m>` (stopping for a re-test, or at a conflict left in the master's worktree), fast-forwards the owner's checkouts in dependency order with the app last, builds the landed packages and pushes. `worktree list` groups masters and steps; `worktree remove` takes `<m>--<agent>` (or `--from <m>`) and `<m>`. Built `packages/*` workspace members of a worktree now link to the worktree's copy for tsc and Node, and every worktree start command sets `SITE_ROOT` when the `.env` does. `branch start` without `--worktree` is unchanged (`--target` still required).
+
 ## 1.59.0
 
 ### Minor Changes
