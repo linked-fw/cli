@@ -261,6 +261,8 @@ function forkWorktree(
     const fetch = remote(base, ['fetch', '--prune', '-q', 'origin']);
     if (fetch.status !== 0) return refuse(EXIT_NOT_FOUND, `git fetch failed in ${base}: ${out(fetch)}`);
     const onRemote = refExists(local, base, `refs/remotes/origin/${branch}`);
+    // A worktree whose directory is gone (deleted without git) still holds its branch until pruned.
+    local('git', ['worktree', 'prune'], {cwd: base});
     const all = worktreesOf(local, base);
     const here = all.find((wt) => realish(wt.path) === target);
     const head = () => local('git', ['rev-parse', 'HEAD'], {cwd: target}).stdout.trim();
@@ -271,7 +273,21 @@ function forkWorktree(
       result.messages.push(`${result.package}: pushed ${branch}`);
       return result;
     };
+    /** Behind origin's branch and clean: fast-forward (a local branch can be older than origin's). */
+    const catchUp = (): ForkResult | null => {
+      if (!refExists(local, base, `refs/remotes/origin/${branch}`)) return null;
+      const behind = local('git', ['rev-list', '--count', `HEAD..refs/remotes/origin/${branch}`], {cwd: target}).stdout.trim();
+      if (behind === '0') return null;
+      if (local('git', ['status', '--porcelain'], {cwd: target}).stdout.trim() !== '')
+        return refuse(EXIT_REFUSED, `${target} is behind origin/${branch} and has uncommitted changes.`);
+      const ff = local('git', ['merge', '--ff-only', '-q', `refs/remotes/origin/${branch}`], {cwd: target});
+      if (ff.status !== 0) return refuse(EXIT_REFUSED, `${target} has diverged from origin/${branch}: ${out(ff)}`);
+      result.messages.push(`${result.package}: ${target} fast-forwarded to origin/${branch}`);
+      return null;
+    };
     const pushIfAhead = (): ForkResult => {
+      const stop = catchUp();
+      if (stop) return stop;
       result.from = head();
       if (!refExists(local, base, `refs/remotes/origin/${branch}`)) return push();
       const ahead = local('git', ['rev-list', '--count', `refs/remotes/origin/${branch}..HEAD`], {cwd: target}).stdout.trim();
@@ -286,8 +302,19 @@ function forkWorktree(
     if (fs.existsSync(target))
       return refuse(EXIT_REFUSED, `${target} exists and is not a worktree of ${result.package}'s base clone. Move it out of the way.`);
     const holder = all.find((wt) => wt.branch === branch);
-    if (holder)
-      return refuse(EXIT_REFUSED, `${branch} is checked out in ${holder.path} already (a branch can be in one worktree only).`);
+    if (holder) {
+      // A pinned app checkout's package worktree took the branch while it had no worktree of its
+      // own: the branch's own worktree comes first, so that checkout lets go (detached at the same commit) when nothing
+      // in it would be lost; its next `linked checkout` keeps it detached at origin/<branch>.
+      const hold = (args: string[]) => local('git', args, {cwd: holder.path});
+      const inAppCheckout =
+        path.basename(path.dirname(holder.path)) === 'packages-local' && fs.existsSync(path.join(path.dirname(path.dirname(holder.path)), '.git'));
+      const clean = inAppCheckout && fs.existsSync(holder.path) && hold(['status', '--porcelain']).stdout.trim() === '';
+      const pushed = clean && hold(['for-each-ref', '--contains', 'HEAD', '--format=%(refname)', 'refs/remotes/origin']).stdout.trim() !== '';
+      if (!pushed || hold(['checkout', '-q', '--detach']).status !== 0)
+        return refuse(EXIT_REFUSED, `${branch} is checked out in ${holder.path} already (a branch can be in one worktree only).`);
+      result.messages.push(`${result.package}: ${holder.path} let go of ${branch} (detached at the same commit)`);
+    }
     fs.mkdirSync(path.dirname(target), {recursive: true});
     let args: string[];
     if (refExists(local, base, `refs/heads/${branch}`)) args = ['worktree', 'add', '-q', target, branch];

@@ -158,8 +158,12 @@ Makes `<branch>` in a worktree of its own at `<dir>`, from the base clone of the
 in the app (the checkout only says where that base clone is; it is not touched), under the base
 clone's lock. A worktree already at `<dir>` on `<branch>` is reused and pushes what origin lacks;
 otherwise the worktree is added on a local `<branch>`, else on origin's `<branch>` (tracked), else
-on a new `<branch>` from `--from` (default `origin/HEAD`), pushed `-u`. Refused (exit 6): `<dir>`
-is something else, a worktree there is on another branch, or another worktree holds `<branch>`.
+on a new `<branch>` from `--from` (default `origin/HEAD`), pushed `-u`; a worktree behind
+`origin/<branch>` is fast-forwarded first, and a worktree whose directory was deleted is pruned. A
+package worktree of an app checkout that holds `<branch>` (a pinned checkout made while the branch
+had no worktree of its own) lets go of it, detached at the same commit, when it is clean and origin
+has its head. Refused (exit 6): `<dir>` is something else, a worktree there is on another branch or
+has diverged, or another worktree holds `<branch>` and cannot let go.
 `dir` in the result is `<dir>`. A server uses it for work on a package that belongs to no app
 branch (a person's working branch of an ontology), which app checkouts then follow by
 [`--pin`](#linked-checkout-branch).

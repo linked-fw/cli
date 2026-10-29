@@ -148,6 +148,28 @@ describe('linked branch fork --worktree / push --worktree', () => {
     assertNoToken(root);
   });
 
+  test("an app checkout holding the branch lets go of it; a deleted worktree is pruned and made again", async () => {
+    const {r, root, run} = setup();
+    commitOn(r.base, r.ont, 'u1/edits', 'work.ttl', '# working\n');
+    const co = run('change-1', {pins: {'acme-ont': 'u1/edits'}, pinsOnly: true});
+    const appOnt = byName(co, 'acme-ont');
+    assert.equal(appOnt.detached, false);
+    const dir = path.join(root, 'work', 'u1', 'packages-local', 'acme-ont');
+    const fork = await branchFork(co.app!.dir, 'u1/edits', 'acme-ont', {env, worktree: dir});
+    assert.equal(fork.code, 0, fork.messages.join('\n'));
+    assert.equal(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD'), 'u1/edits');
+    assert.throws(() => git(appOnt.dir, 'symbolic-ref', '-q', 'HEAD'));
+    // The checkout's re-run stays detached (the working worktree holds the branch).
+    assert.equal(byName(run('change-1', {pins: {'acme-ont': 'u1/edits'}, pinsOnly: true}), 'acme-ont').detached, true);
+
+    // Its directory deleted behind git's back, and origin moved on: made again, fast-forwarded.
+    fs.rmSync(path.join(root, 'work'), {recursive: true, force: true});
+    const tip = commitOn(r.base, r.ont, 'u1/edits', 'more.ttl', '# more\n');
+    const again = await branchFork(co.app!.dir, 'u1/edits', 'acme-ont', {env, worktree: dir});
+    assert.equal(again.code, 0, again.messages.join('\n'));
+    assert.equal(git(dir, 'rev-parse', 'HEAD'), tip);
+  });
+
   test('a branch origin has already is checked out tracking it', async () => {
     const {r, root, run} = setup();
     const tip = commitOn(r.base, r.ont, 'u1/edits', 'work.ttl', '# working\n');
