@@ -147,6 +147,18 @@ describe("the app list's branch keys", () => {
     );
   });
 
+  test('a clean pinned worktree moves when the pin changes, even backwards (its head is on origin)', () => {
+    const {r, run} = setup();
+    commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
+    keyAppBranch(r, 'change-1', {'acme-ont': 'rene/topic'});
+    assert.equal(byName(run('change-1', {pinsOnly: true}), 'acme-ont').branch, 'rene/topic');
+    const flag = byName(run('change-1', {pins: {'acme-ont': 'main'}, pinsOnly: true}), 'acme-ont');
+    assert.deepEqual(where(flag), {branch: 'main', detached: true, fellBack: false, pin: 'main', status: 'updated'});
+    assert.equal(flag.head, git(r.ont, 'rev-parse', 'refs/heads/main'));
+    const back = byName(run('change-1', {pinsOnly: true}), 'acme-ont');
+    assert.deepEqual(where(back), {branch: 'rene/topic', detached: true, fellBack: false, pin: 'rene/topic', status: 'updated'});
+  });
+
   test('a key to a branch origin lacks: a message, detached on the default', () => {
     const {r, run} = setup();
     keyAppBranch(r, 'change-1', {'acme-ont': 'u9/gone'});

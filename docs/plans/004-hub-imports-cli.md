@@ -618,4 +618,6 @@ before the CN half's tests.
 - [ ] CL landed in `hub-imports` and built in the master's cli worktree; master on the built bin
 - [x] CI — component index build: core terms, react generator, `Writing components.ttl` (reports
   cli 042, react 004, core 085; follow-ups cli backlog 014, 015, react plan 001 §Release)
-- [ ] BK — `branch` key, cli side (detailed at wave 3; report 043)
+- [x] BK — `branch` key, cli side: parser and `isBranchName`, walk, checkout keys as pins
+  (`pinFrom`), `localize --listed`, merge lands keyed branches and strips the keys (report 043;
+  follow-ups cli backlog 016)

@@ -194,7 +194,7 @@ npx linked localize --parked        # take the checkouts back
 | `linked localize <pkg…>` | set-up if needed, then per package: take back a parked checkout, else clone it; write the git hooks; one `npm install` at the app root; build each new checkout |
 | `linked localize <pkg…> --adopt` | the same for a checkout already in `packages-local/`: no registry lookup, no clone |
 | `linked localize --parked` | take back every parked checkout, then one `npm install`. No builds |
-| `linked localize --listed` | clone every package the app's committed `package.json` lists in `linked.unpublishedPackages`, and those their lists name, that is not in `packages-local/` yet; one `npm install`; build the new clones ([below](#unpublished-packages)) |
+| `linked localize --listed` | clone every package the app's committed `package.json` lists in `linked.unpublishedPackages`, and those their lists name, that is not in `packages-local/` yet, each on its `branch` key or the app's branch; one `npm install`; build the new clones ([below](#unpublished-packages)) |
 | `linked localize`, `linked localize --list` | each checkout (name, directory, branch, version), the parked ones, and the drift. Never writes, exits 0 |
 | `linked localize --list --check` | print only the drift (on stderr) and exit 1 when there is any (for CI) |
 | `linked delocalize [pkg…]` | park: move the checkout to `.packages-local.parked/`, then reinstall the registry copies. No names: every checkout |
@@ -244,7 +244,7 @@ repo — has no registry `repository` to clone from, so the app lists it in its 
 "linked": {
   "kind": "app",
   "unpublishedPackages": {
-    "acme-ont": {"repo": "https://github.com/org/acme-ont.git"},
+    "acme-ont": {"repo": "https://github.com/org/acme-ont.git", "branch": "rene/topic"},
     "acme-assets": {"repo": "https://github.com/org/acme-assets.git"}
   }
 }
@@ -252,12 +252,23 @@ repo — has no registry `repository` to clone from, so the app lists it in its 
 
 A package lists the unpublished packages it uses the same way (an asset package lists its
 ontology package). `linked localize --listed` walks the lists breadth first: each listed package
-not in `packages-local/` is cloned from its `repo` and checked out on the app's current branch
-when the package repo has it, else left on its default branch; a listed package already in
+not in `packages-local/` is cloned from its `repo` and checked out on the branch its `branch` key
+names, else on the app's current branch, when the package repo has that branch, else left on its
+default branch; a listed package already in
 `packages-local/` (or parked) is used as it is. Its own list is then followed. The same name
 listed with two repos refuses (exit 6) before anything is installed; a repo whose `package.json`
 declares another name is removed and refused. Then one install and the builds, as for named
 packages.
+
+**The `branch` key** names the package branch an app branch uses (here `acme-ont` on
+`rene/topic`). It is optional, and must be a valid git branch name other than `main` (what `git
+check-ref-format --branch` accepts; `HEAD` is refused too); anything else is an error (exit 6)
+naming the entry. Only the app's own list counts: a key in a package's list is ignored with a
+warning, so two packages never disagree about a branch. [`linked
+checkout`](integration-branches-and-worktrees.md#linked-checkout-branch) reads the keys as pins, and [`linked branch
+merge`](integration-branches-and-worktrees.md#linked-branch-merge-branch---into-default---mode-pushupdate---dir-app---json) lands the keyed branches
+and removes every key, so the list on `main` names none. Nothing in the cli writes a key; the
+caller edits `package.json`.
 
 A `repo` must be an `https://` URL (`file://` for local repos); anything else, or an entry without
 one, is an error, not skipped. Credentials in the URL are ignored with a warning: a token comes
@@ -564,7 +575,7 @@ administrator rights; a CRLF `package.json` or `.gitignore` stays CRLF. Known li
 | 2 | bad command line (`--dir` other than `packages-local`, `--adopt` with `--repo`/`--subdir`, `--parked` with names, `--listed` with names or `--repo`) |
 | 4 | no repository could be resolved. Pass `--repo` |
 | 5 | something was warned about and skipped; the rest worked (a failed build, a name that is not localized, a park blocked by an existing directory, a failed `npm rebuild`) |
-| 6 | a guard refused: a worktree whose `node_modules` is a symlink, an existing directory, a parked checkout whose name is already a member, a conflicting override, a clone that is not the package, a failed `git clone`, an unusable `package.json`, a malformed `linked.unpublishedPackages`, one name listed with two repos, a refused `--purge` (it was 5 before this version) |
+| 6 | a guard refused: a worktree whose `node_modules` is a symlink, an existing directory, a parked checkout whose name is already a member, a conflicting override, a clone that is not the package, a failed `git clone`, an unusable `package.json`, a malformed `linked.unpublishedPackages` (a `branch` key that is `main` or not a branch name included), one name listed with two repos, a refused `--purge` (it was 5 before this version) |
 | 7 | `npm install` (or `npm ci`) at the app root failed |
 
 Each package is processed independently, and the exit code is the highest of the per-package codes

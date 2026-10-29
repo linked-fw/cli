@@ -25,6 +25,11 @@
  * uncommitted work is `kept`. A pin whose branch origin lacks falls back to the default branch,
  * with a message. Without `--pin` and `--pins-only` nothing changes.
  *
+ * The app list's `branch` keys (`linked.unpublishedPackages`, read from the app worktree once it
+ * is up to date) are pins too: the run's pins are `{...keys, ...--pin}`, so a `--pin` wins (and
+ * says so), and a key alone puts the run in pins mode. `pinFrom` in the result says which one a
+ * package's pin is.
+ *
  * `--add <repo>` places one more package worktree that no list names (`added`): checked out by
  * the same rules from its base clone, its npm name read from its `package.json` there, never a
  * reason to install and never built, so the app's install and lock stay as committed. A later run
@@ -935,7 +940,8 @@ class Checkout {
       if (target.pin && (target.readOnly || this.holderOf(base, branch, dir))) {
         const tip = this.git(base, ['rev-parse', `refs/remotes/origin/${branch}`]);
         if (on === null && head === tip) return {status: 'unchanged'};
-        if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip])) {
+        // Not a fast-forward: still moved when origin has the head (the pin changed), as below.
+        if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip]) && !this.headOnOrigin(dir)) {
           return {
             status: 'kept',
             reason: `its detached HEAD has commits origin/${branch} lacks`,

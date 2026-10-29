@@ -206,14 +206,33 @@ are not part of it. It fetches each repo first and refuses, merging nothing, whi
 changes, lacks `origin/<branch>` or `origin/<into>`, or has commits origin lacks (it merges
 `origin/<branch>`, so push first: `linked branch push`).
 
+**Branch keys.** After the fetch it reads the app's `package.json` at `origin/<branch>`. An entry
+whose `branch` key ([localize](localize.md#unpublished-packages)) is `<branch>` is the same-name
+case: that package's checkout is on `<branch>` and is merged as above. A key naming another branch
+`<k>` lands `origin/<k>` instead (`via: "key"`), before the packages on `<branch>` (keyed packages
+in dependency order first, then the rest, the app last); the key decides even when the package's
+checkout is on `<branch>`. Its checkout is found by npm name among the app's `packages-local/`
+checkouts (it is usually detached at `origin/<k>`); with none, or without `origin/<k>`, the run
+refuses (exit 6) and merges nothing. Then the app's merge removes every `branch` key from
+`package.json` (key order, indent and trailing newline kept), so `<into>` lists none:
+`strippedKeys` names the packages whose key went. An app without keys is merged as before.
+
 - `--mode push` (default): per repo, `git merge --no-ff origin/<branch>` with the message
   `Merge branch '<branch>' into <into>` in a temporary worktree detached at `origin/<into>`
   (removed afterwards; the checkout stays on `<branch>`), then `git push origin HEAD:<into>`. One
-  merge commit per repo is the record that the branch landed, and reverts as one commit.
+  merge commit per repo is the record that the branch landed, and reverts as one commit. A keyed
+  package gets `origin/<k>` merged the same way (`Merge branch '<k>' into <into>`). The app's keys
+  are stripped inside its merge commit (amended before the push), so no commit on `<into>` ever
+  lists a key.
 - `--mode update`: per repo, merge `origin/<into>` into `<branch>` in the checkout and push
   `<branch>`. For a protected `<into>` (required reviews, `enforce_admins`), which refuses the
   push: the caller then lands each repo by a PR, in the order printed, for the repos whose
-  `landed` is false.
+  `landed` is false. It never merges a keyed other-name branch: unless `origin/<into>` already
+  contains `origin/<k>` (`git merge-base --is-ancestor`; such a package is then `up-to-date`,
+  `via: "key"`), it refuses (exit 6, `<pkg>: the app's list keys branch <k>, which origin/<into>
+  does not contain yet. …`) before merging anything; the caller lands `<k>` first, by its own PR.
+  The app's keys go in one commit `Use <into> of <pkgs>` on `<branch>`, after `<into>` is merged
+  in and before the push, so the app's PR carries no key.
 
 Both stop at the first conflict (the merge is aborted, the files named, `result: "conflict"`) or
 refused push (`push-refused`); later repos are `skipped` and exit is 6. Repos merged before stay
@@ -223,14 +242,15 @@ package's default branch.
 ```json
 {"code": 0, "branch": "change-1", "into": "main", "mode": "push", "messages": [],
  "repos": [
-   {"name": "acme-ont", "dir": "…/packages-local/acme-ont", "repo": "https://github.com/org/acme-ont.git", "result": "merged", "sha": "9c1e…", "landed": true},
-   {"name": "acme-assets", "dir": "…/packages-local/acme-assets", "repo": "https://github.com/org/acme-assets.git", "result": "merged", "sha": "51aa…", "landed": true},
-   {"name": "acme-app", "dir": "…", "repo": "https://github.com/org/acme-app.git", "result": "merged", "sha": "e07b…", "landed": true}]}
+   {"name": "acme-ont", "dir": "…/packages-local/acme-ont", "repo": "https://github.com/org/acme-ont.git", "result": "merged", "sha": "9c1e…", "landed": true, "via": "key"},
+   {"name": "acme-assets", "dir": "…/packages-local/acme-assets", "repo": "https://github.com/org/acme-assets.git", "result": "merged", "sha": "51aa…", "landed": true, "via": "branch"},
+   {"name": "acme-app", "dir": "…", "repo": "https://github.com/org/acme-app.git", "result": "merged", "sha": "e07b…", "landed": true, "via": "branch"}],
+ "strippedKeys": ["acme-ont"]}
 ```
 
 `result` is `merged`, `up-to-date` (nothing to merge), `conflict` (with `files`),
-`push-refused` or `skipped`; `landed` says whether `origin/<into>` contains `origin/<branch>`
-after the run.
+`push-refused` or `skipped`; `landed` says whether `origin/<into>` contains the merged branch
+(`origin/<branch>`, or `origin/<k>` for `via: "key"`) after the run.
 
 ## `linked worktree`
 
@@ -520,13 +540,19 @@ sets `origin/HEAD` again, so a renamed default branch is followed. Two orgs' rep
 not collide (`<owner>/<name>`).
 
 **Branch rule.** The app: on `<branch>` when origin has it; else created from `--from` and pushed
-(`created: true`). A package: on `<branch>` when its repo has it; else **detached at
+(`created: true`). A package: on its `branch` key when the app's list has one (a pin: see
+**Pins**); else on `<branch>` when its repo has it; else **detached at
 `origin/<default>`** (`fellBack: true`) — detached, because a branch can be checked out in one
 worktree only and two checkouts that both fall back would both need the default branch.
 [`linked branch fork`](#linked-branch-fork-branch-package---dir-app---json) turns a fallback into
 the branch. A branch another worktree of the base clone has checked out is refused.
 
-**Pins.** `--pin <npm>=<branch>` replaces the branch rule for that package (`pin` in the result).
+**Pins.** `--pin <npm>=<branch>` replaces the branch rule for that package (`pin` in the result,
+`pinFrom: "flag"`). The `branch` keys of the app's own list ([localize](localize.md#unpublished-packages))
+are pins too (`pinFrom: "key"`), read from the app worktree's `package.json` after it is updated:
+the run's pins are `{...keys, ...--pin}`, so an explicit `--pin` wins, with the message `pin
+<npm>=<b> from --pin overrides the app's branch key <k>.` A key alone puts the run in pins mode,
+as a `--pin` does.
 A pin to the run's own `<branch>` (a fork of its name, written in this checkout) is attached, as the
 rule would; a pin to any other branch is **detached at `origin/<branch>`**: that branch is written
 elsewhere (its own worktree from [`branch fork --worktree`](#linked-branch-fork-branch-package---worktree-dir---from-ref---dir-app---json)),
@@ -537,8 +563,8 @@ Re-runs in either pins mode: a detached pinned worktree fast-forwards to `origin
 a clean worktree whose head origin has moves to
 its new target when the pins change (`switched`: to another pin, or back to `origin/<default>`); one
 with uncommitted changes or commits origin lacks is `kept`. In pins mode `--add` reads a package's
-name on its default branch. Without `--pin` and `--pins-only` nothing of this applies. Create Now
-always passes `--pins-only` with the pins it records for the app branch.
+name on its default branch. Without a pin (flag or key) and `--pins-only` nothing of this applies. Create Now
+passes `--pins-only` and no `--pin`: the app branch's keys are its pins.
 
 **The list, transitively.** From the app worktree's committed `package.json`, breadth first:
 each listed package's worktree is made, then its own `package.json` (on its branch, or its
@@ -590,7 +616,11 @@ package a list names with the same repo is that listed package; with another rep
     {"name": "acme-assets", "repo": "https://github.com/org/acme-assets.git",
      "dir": "/srv/projects/acme-app/change-1/packages-local/acme-assets", "branch": "change-1",
      "detached": false, "fellBack": false, "head": "0e82…", "requiredBy": ["acme-app"],
-     "status": "created"}
+     "status": "created"},
+    {"name": "acme-maps", "repo": "https://github.com/org/acme-maps.git",
+     "dir": "/srv/projects/acme-app/change-1/packages-local/acme-maps", "branch": "rene/topic",
+     "detached": true, "fellBack": false, "pin": "rene/topic", "pinFrom": "key", "head": "77d0…",
+     "requiredBy": ["acme-app"], "status": "created"}
   ],
   "install": {"ran": true, "ok": true},
   "builds": [{"name": "acme-ont", "result": "ok"}, {"name": "acme-assets", "result": "skipped"}],

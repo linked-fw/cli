@@ -477,8 +477,9 @@ function prepareClone(
 }
 
 /**
- * Put a fresh clone on `branch` when its repo has it (`packageBranch`); otherwise it stays on
- * the default branch the clone checked out, and the log says so.
+ * Put a fresh clone on `branch` (an entry's `branch` key, or the app's branch) when its repo has
+ * it (`packageBranch`); otherwise it stays on the default branch the clone checked out, and the
+ * log says so.
  */
 function checkOutBranch(
   name: string,

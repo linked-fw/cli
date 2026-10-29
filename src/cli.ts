@@ -594,7 +594,7 @@ program
   )
   .option(
     '--listed',
-    "Clone every package the app's committed package.json lists in linked.unpublishedPackages (and those their own lists name) that is not in packages-local/ yet, from the repo the list gives, on the app's current branch where that repo has it (else its default branch); then one npm install and the builds. A token for private repos comes only from LINKED_GIT_TOKEN.",
+    "Clone every package the app's committed package.json lists in linked.unpublishedPackages (and those their own lists name) that is not in packages-local/ yet, from the repo the list gives, on the branch the entry's \"branch\" key names, else on the app's current branch, where that repo has it (else its default branch); then one npm install and the builds. A token for private repos comes only from LINKED_GIT_TOKEN.",
   )
   .option(
     '--repo <git-url>',
@@ -786,7 +786,7 @@ branch
 branch
   .command('merge <branch>')
   .description(
-    "Run in an app checkout. Land <branch> in --into across the repos on it -- each packages-local/ checkout on <branch>, in dependency order (dependencies and linked.unpublishedPackages), then the app; checkouts on another branch or detached are skipped. Fetches each first, and refuses, merging nothing, while one has changes or commits origin lacks. --mode push (default): merge origin/<branch> into origin/<into> with --no-ff (\"Merge branch '<branch>' into <into>\") in a temporary worktree and push <into>. --mode update: merge origin/<into> into <branch> and push <branch>, for a protected <into> that lands by PRs in the order printed. Stops at the first conflict (aborted, files named) or refused push; later repos are skipped, earlier ones stay merged. A token comes only from LINKED_GIT_TOKEN.",
+    "Run in an app checkout. Land <branch> in --into across the repos on it -- each packages-local/ checkout on <branch>, in dependency order (dependencies and linked.unpublishedPackages), then the app; checkouts on another branch or detached are skipped. Fetches each first, and refuses, merging nothing, while one has changes or commits origin lacks. A package the app's package.json (at origin/<branch>) keys to another branch <k> (\"branch\" in linked.unpublishedPackages) lands origin/<k> first, from its checkout here (none: refused). --mode push (default): merge origin/<branch> (or <k>) into origin/<into> with --no-ff (\"Merge branch '<branch>' into <into>\") in a temporary worktree and push <into>; the app's branch keys are removed inside its merge commit. --mode update: merge origin/<into> into <branch>, remove the app's branch keys in one commit (\"Use <into> of <pkgs>\"), and push <branch>, for a protected <into> that lands by PRs in the order printed; it refuses a keyed <k> that origin/<into> does not contain yet. Stops at the first conflict (aborted, files named) or refused push; later repos are skipped, earlier ones stay merged. A token comes only from LINKED_GIT_TOKEN.",
   )
   .requiredOption('--into <branch>', 'The default branch it lands in, e.g. main.')
   .option('--mode <mode>', 'push (merge and push --into) or update (merge --into into the branch and push the branch).', 'push')
@@ -878,7 +878,7 @@ worktree
 program
   .command('checkout <branch>')
   .description(
-    "A branch checkout of an app and the packages its committed package.json lists in linked.unpublishedPackages (transitively), in a projects root: one bare base clone per repo in <root>/.repos/<owner>/<name>.git, the app as a git worktree on <branch> (created from --from and pushed when the remote lacks it) in <root>/<name>/<branch-dir>, each package as a worktree in its packages-local/ on <branch> when its repo has it, else detached at origin/<default branch>. Then one npm install in the app worktree and the builds of the package worktrees that moved. Re-running it fetches and fast-forwards clean worktrees; anything else is left as it is and reported. A token for private repos comes only from LINKED_GIT_TOKEN (never the URL): remote git calls use it through GIT_ASKPASS, the install and builds run without it, and it is never written to disk.",
+    "A branch checkout of an app and the packages its committed package.json lists in linked.unpublishedPackages (transitively), in a projects root: one bare base clone per repo in <root>/.repos/<owner>/<name>.git, the app as a git worktree on <branch> (created from --from and pushed when the remote lacks it) in <root>/<name>/<branch-dir>, each package as a worktree in its packages-local/ on <branch> when its repo has it, else detached at origin/<default branch>; a \"branch\" key on the app list's entry is a pin (see --pin). Then one npm install in the app worktree and the builds of the package worktrees that moved. Re-running it fetches and fast-forwards clean worktrees; anything else is left as it is and reported. A token for private repos comes only from LINKED_GIT_TOKEN (never the URL): remote git calls use it through GIT_ASKPASS, the install and builds run without it, and it is never written to disk.",
   )
   .option('--repo <url>', "The app's https git URL. Default: the origin of the app checkout this runs in.")
   .option('--root <dir>', 'The projects root. Default: the current directory.')
@@ -893,10 +893,10 @@ program
   )
   .option(
     '--pin <npm=branch>',
-    "Check the package with this npm name out on this branch instead of by the same-name rule (repeatable): attached when it is <branch> itself, else detached at origin/<pin> (that branch is written in its own worktree); a re-run fast-forwards it. A pin whose branch origin lacks falls back to origin/<default branch>.",
+    "Check the package with this npm name out on this branch instead of by the same-name rule (repeatable): attached when it is <branch> itself, else detached at origin/<pin> (that branch is written in its own worktree); a re-run fast-forwards it. A pin whose branch origin lacks falls back to origin/<default branch>. The app list's \"branch\" keys are pins too; a --pin for the same package wins.",
     (value: string, previous: string[] = []) => [...previous, value],
   )
-  .option('--pins-only', 'No same-name rule: a package without a --pin sits detached at origin/<default branch>. With --pin or --pins-only, a clean package worktree whose head origin has moves to its new target.')
+  .option('--pins-only', 'No same-name rule: a package without a pin (--pin or the app list\'s "branch" key) sits detached at origin/<default branch>. With a pin or --pins-only, a clean package worktree whose head origin has moves to its new target.')
   .option('--json', 'Print the result as JSON (also on a refusal): code, branch, root, app, packages, install, builds, messages.')
   .action(async (branch: string, options) => {
     const {runCheckout} = await import('./commands/checkout.js');

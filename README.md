@@ -444,10 +444,13 @@ linked localize --listed               # clone what package.json lists in linked
 **Unpublished packages.** A package an app uses that is not on npm (a project's ontology or asset
 package in a private repo) is listed in the app's committed `package.json`:
 `"linked": {"unpublishedPackages": {"acme-ont": {"repo": "https://github.com/org/acme-ont.git"}}}`.
-A package lists its own the same way (an asset package lists its ontology package).
+A package lists its own the same way (an asset package lists its ontology package). An app
+branch can name the package branch it uses with a `branch` key on the entry
+(`{"repo": "…", "branch": "rene/topic"}`; any valid branch name but `main`); only the app's own
+list counts, and `linked branch merge` strips the keys so `main` lists none.
 `linked localize --listed` clones every listed package, transitively, that is not in
-`packages-local/` yet, on the app's branch where the package repo has it (else its default
-branch), then installs once. Once a package is published it moves into `dependencies` with a
+`packages-local/` yet, on its `branch` key, else on the app's branch, where the package repo has
+it (else its default branch), then installs once. Once a package is published it moves into `dependencies` with a
 range. For private repos the token comes only from `LINKED_GIT_TOKEN` (see below); it is never
 put in a URL or written to disk.
 
@@ -489,8 +492,8 @@ linked branch add-package m1 react                # a framework package joins ru
 linked worktree relink --all                      # every worktree of the app, masters first (after npm install in the main checkout)
 linked branch fork change-1 acme-ont              # in an app checkout: create and push change-1 in that package checkout
 linked branch push change-1                       # in an app checkout: push change-1 in the app and every package checkout on it
-linked branch merge change-1 --into main          # packages in dependency order, then the app: --no-ff merge, push main
-linked branch merge change-1 --into main --mode update  # protected main: merge main into change-1, push it, land by PRs
+linked branch merge change-1 --into main          # keyed package branches, packages in dependency order, then the app (branch keys stripped): --no-ff merge, push main
+linked branch merge change-1 --into main --mode update  # protected main: merge main into change-1, strip the branch keys, push it, land by PRs
 linked release plan                               # per repo: commits, reports, changesets, release PRs, next action
 linked doctor resolve                             # where Vite and Node load each @_linked package; exit 1 on two copies
 ```
@@ -503,7 +506,8 @@ worktree in its `packages-local/` (on `<branch>` where its repo has it, else det
 `origin/<default>`), then installs once in the app worktree. `--add <repo>` checks out one more
 package no list names, without an install or a build. `--pin <npm>=<branch>` puts a package on a
 branch of the caller's choosing (detached unless it is the run's own branch) and `--pins-only` drops the
-same-name rule for the rest. `--json` prints what it did. `linked branch fork <branch> <pkg>
+same-name rule for the rest. The `branch` keys of the app's list are pins too (`pinFrom: "key"`
+in `--json`); a `--pin` for the same package wins. `--json` prints what it did. `linked branch fork <branch> <pkg>
 --worktree <dir>` makes a package branch in a worktree of its own, outside every app checkout, and
 `linked branch push <branch> --worktree <dir>` pushes it.
 Credentials come only from `LINKED_GIT_TOKEN`: remote git calls get it through `GIT_ASKPASS`

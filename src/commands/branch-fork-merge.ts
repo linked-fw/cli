@@ -19,6 +19,12 @@
  *   pushes `<default>`; `--mode update` merges `origin/<default>` into `<branch>` and pushes the
  *   branch, for a caller that may not push to a protected default branch and lands each repo by
  *   a PR in the order returned. Both stop at the first conflict or refused push.
+ *   The app's `package.json` at `origin/<branch>` may key a package to a branch (`branch` in
+ *   `linked.unpublishedPackages`): a key naming `<branch>` is the same-name case; a key naming
+ *   another branch `<k>` lands `origin/<k>` of that package first (push mode; update mode refuses
+ *   unless `origin/<default>` contains it already). The app's merge strips every key, so the
+ *   default branch lists none: inside the merge commit (push), or one commit on the branch
+ *   (update).
  *
  * Credentials as in `linked checkout`: only `LINKED_GIT_TOKEN`, through the askpass environment
  * on fetch and push (integration/credentials.ts).
