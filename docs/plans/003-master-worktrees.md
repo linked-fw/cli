@@ -6,7 +6,7 @@ summary: >
   CN's own `packages/*` become overlays, `worktree list/remove` know masters, and `linked branch
   land <m>` merges the owner's branch into `<m>`, fast-forwards the owner's checkouts, builds and
   pushes. For Create Now's master-run workflow (proposal of 2026-10-29). Lands on `dev`.
-status: Implementation
+status: Done (report 040)
 ---
 
 # 003 — Master worktrees
@@ -122,9 +122,51 @@ Dependencies: 1 → 2 → 3 → 4, sequential (one agent).
   --worktree`, so splitting them would have left intermediate commits with half an API.
   Validation: `tests/unit/integration/master.test.ts` (9 tests) and the existing worktree,
   branch, repos, release-plan, farm and doctor-resolve suites (85 tests) pass. The full unit
-  suite: 1170 passed, 5 failed (`shapeHierarchy`, `ontologyDataReachable`), failing identically
-  on the untouched code in this worktree (checked with the changes stashed): not this change.
+  suite before the first build: 1170 passed, 5 failed (`shapeHierarchy`, `ontologyDataReachable`),
+  failing identically on the untouched code (checked with the changes stashed); they need the
+  cli's `lib/`, and pass once it is built (1179 of 1179 after the review fixes).
 - Phase 4: `npx linked build`, then the built CLI end to end in a sandbox (start a master, a
   step, land the step into the master, relink, remove the step, owner commits, `land
   --dry-run`, `land` → 3, `land` → 0 with push to a bare origin, remove the master, and the
   in-place `branch start --target` and `worktree add` unchanged).
+
+## Review
+
+An independent review of the first commit found no regression for plain worktrees and these
+gaps (severity as reviewed):
+
+1. high — a step that overrides a package a master package depends on runs two copies of it.
+2. medium — `land` did not compare the target with origin before fast-forwarding and pushing.
+3. medium — a landed package was pushed even when its build failed.
+4. medium — a framework target that is origin's protected default branch cannot be pushed.
+5. medium — a fast-forward failing halfway left no record of where the landed repos were.
+6. low — a repo whose nested master worktree was removed by hand was skipped silently.
+7. low — `worktree relink <m>` from the main checkout did not find the master.
+8. low — `memberUsable` ignored `require` and array exports.
+9. low — two concurrent `branch start --worktree` can pick the same port.
+
+## Iteration 1 — Ideation
+
+- Gap 1 of 6 (1): refuse or warn? A step may change a package without caring how a master
+  package sees it; refusing would force extra worktrees. Chosen: warn at `add --from`, naming the
+  package to add with `--with` (no new rule, the fix is one flag).
+- Gap 2 of 6 (2): fetch `origin <target>` during the checks and refuse while the local target is
+  behind (offline: say so and go on). Chosen: refuse, with the `pull --ff-only` to run.
+- Gap 3 of 6 (3): skip the push of a repo whose build failed, saying how to push later.
+- Gap 4 of 6 (4): protection is not visible to git. Chosen: `branch start --worktree` warns when a
+  target is origin's default branch.
+- Gap 5 of 6 (5): recheck that every target is in `<m>` right before the fast-forwards, and print
+  the previous SHAs of the repos already landed when one fails.
+- Gap 6 of 6 (6, 7, 8): refuse a repo recording a missing nested worktree; relink falls back to a
+  master's name; `memberUsable` checks every runtime leaf of `exports['.']`.
+- Gap 9 (port race) stays low: masters are started one at a time by hand.
+
+## Iteration 1 — Plan and phases
+
+### Phase 5: review fixes
+- `master.ts`: origin check, missing-worktree check, ancestry recheck, SHAs on a refused
+  fast-forward, no push after a failed build, default-branch warning. `worktree.ts`:
+  `twoCopyWarnings`, relink by master name. `worktree-node-modules.ts`: `dotExports`/`leaves`.
+- Validation: four new tests in `master.test.ts` (origin ahead refused, failed build not pushed,
+  two-copy warning and relink by name, `memberUsable` leaves); integration suites green; sandbox
+  re-run with the rebuilt CLI.

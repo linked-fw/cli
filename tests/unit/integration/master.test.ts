@@ -395,3 +395,63 @@ describe('linked branch land', () => {
     assert.match(notMaster.messages.join('\n'), /not a master/);
   });
 });
+
+describe('review fixes', () => {
+  test('land refuses while origin has commits the local target lacks', async () => {
+    const app = makeApp();
+    await startMaster(app);
+    commit(path.join(app.container, 'wt', 'm1'), 'src.txt', 'master\n');
+    // Someone else pushed to origin/dev.
+    const other = path.join(app.container, 'other');
+    git(app.container, 'clone', '-q', '-b', 'dev', app.origin, other);
+    git(other, 'config', 'user.email', 't@e');
+    git(other, 'config', 'user.name', 'T');
+    commit(other, 'remote.txt', 'r\n');
+    git(other, 'push', '-q', 'origin', 'dev');
+
+    const r = await branchLand(app.root, 'm1', {build: false});
+    assert.equal(r.code, 1);
+    assert.match(r.messages.join('\n'), /origin\/dev has commits the local dev lacks/);
+  });
+
+  test('a landed package whose build fails is not pushed', async () => {
+    const app = makeApp();
+    await startMaster(app);
+    const serverOrigin = path.join(app.container, 'server.git');
+    git(app.container, 'init', '-q', '--bare', serverOrigin);
+    git(app.server, 'remote', 'add', 'origin', serverOrigin);
+    git(app.server, 'push', '-q', 'origin', 'dev');
+    commit(path.join(app.container, 'wt', 'm1', 'packages-local', '_linked-server'), 'server.txt', 'm\n');
+    const realRun = makeRun(process.cwd());
+    const run: Run = (cmd, args, opts) => (cmd === 'npx' ? {status: 1, stdout: '', stderr: 'boom'} : realRun(cmd, args, opts));
+    const r = await branchLand(app.root, 'm1', {}, run);
+    assert.equal(r.code, 5, r.messages.join('\n'));
+    assert.match(r.messages.join('\n'), /not pushed, because its build failed/);
+    assert.notEqual(git(serverOrigin, 'rev-parse', 'dev'), git(app.server, 'rev-parse', 'dev'));
+  });
+
+  test('a step that overrides a dependency of a master package is warned; relink finds the master by name', async () => {
+    const app = makeApp();
+    await startMaster(app, 'm1', ['server', 'core']);
+    const step = await worktreeAdd(app.root, 'a1', {from: 'm1', with: ['core']});
+    assert.equal(step.code, 0, step.messages.join('\n'));
+    assert.match(step.messages.join('\n'), /master's @_linked\/server depends on @_linked\/core/);
+    const relinked = await worktreeRelink(app.root, 'm1');
+    assert.equal(relinked.code, 0, relinked.messages.join('\n'));
+  });
+
+  test('a packages/ member with an unbuilt require entry stays the install\'s', async () => {
+    const {memberUsable} = await import('../../../src/commands/worktree-node-modules.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'member-'));
+    tmpDirs.push(dir);
+    fs.mkdirSync(path.join(dir, 'lib', 'esm'), {recursive: true});
+    fs.writeFileSync(path.join(dir, 'lib', 'esm', 'index.js'), '');
+    const pkg = {main: 'lib/esm/index.js', exports: {'.': {types: './lib/esm/index.d.ts', import: './lib/esm/index.js', require: './lib/cjs/index.js'}}};
+    assert.equal(memberUsable(dir, pkg), false);
+    fs.mkdirSync(path.join(dir, 'lib', 'cjs'));
+    fs.writeFileSync(path.join(dir, 'lib', 'cjs', 'index.js'), '');
+    assert.equal(memberUsable(dir, pkg), true);
+    assert.equal(memberUsable(dir, {exports: {'./x.css': './src/x.css'}}), true);
+    assert.equal(memberUsable(dir, {exports: {'.': {development: './src/index.ts', default: './lib/esm/index.js'}}}), true);
+  });
+});

@@ -301,6 +301,31 @@ function memberNodeModuleLinks(dir: string): string[] {
   }
 }
 
+/**
+ * Warnings for a step at `dir` of the master at `masterDir`: a master package
+ * the step does not have that depends on one the step overrides loads the
+ * master's copy of that dependency (Node resolves it from the master's
+ * worktree), so the step would run two copies of it.
+ */
+function twoCopyWarnings(masterDir: string, dir: string): string[] {
+  const isLocal = (d: string): boolean => path.basename(path.dirname(d)) === 'packages-local';
+  const own = overlaysOf(dir);
+  const ownLocal = new Set(Object.keys(own).filter((n) => isLocal(own[n])));
+  const out: string[] = [];
+  for (const [name, pkgDir] of Object.entries(overlaysOf(masterDir))) {
+    if (name in own || !isLocal(pkgDir)) continue;
+    const pkg = readJson(path.join(pkgDir, 'package.json')) ?? {};
+    const deps = Object.keys({...((pkg.dependencies as object) ?? {}), ...((pkg.peerDependencies as object) ?? {})});
+    const hit = deps.filter((d) => ownLocal.has(d));
+    if (hit.length) {
+      out.push(
+        `Warning: the master's ${name} depends on ${hit.join(', ')}, which this step has its own worktree of; it loads the master's copy, so the step runs two. Give the step ${name} too (--with) if it must see the step's ${hit.join(', ')}.`,
+      );
+    }
+  }
+  return out;
+}
+
 /** The value of `key` in the env file `file`, or null when it does not set it. */
 function envValue(file: string, key: string): string | null {
   let text: string;
@@ -541,6 +566,7 @@ export async function worktreeAdd(
     run,
   );
   if (!undoSet) return rollback();
+  if (masterDir) result.messages.push(...twoCopyWarnings(masterDir, dir));
 
   const keys = fs
     .readdirSync(root)
@@ -1147,8 +1173,9 @@ export async function worktreeRelink(
     dir = realish(options.dir);
   } else if (name) {
     const found = findAppWorktree(root, list, name);
-    if ('error' in found) return {code: 1, messages: found.error};
-    dir = found.app.dir;
+    const master = list.masters.find((m) => m.name === name)?.worktree;
+    if ('error' in found && !master) return {code: 1, messages: found.error};
+    dir = 'error' in found ? master!.dir : found.app.dir;
   } else if (here !== root) {
     dir = here;
   } else {

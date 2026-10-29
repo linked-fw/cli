@@ -161,6 +161,12 @@ export async function branchStartWorktree(
         recorded.push({repo, key});
       }
       messages.push(`${repo.rel}: ${name} from ${target} (target ${target})${repo.dirty ? '; it has uncommitted changes, which the master does not get' : ''}`);
+      const remoteDefault = run('git', ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'], {cwd: repo.dir}).stdout.trim();
+      if (remoteDefault === `origin/${target}`) {
+        messages.push(
+          `  Warning: ${target} is origin's default branch, and land pushes the target; a protected ${target} refuses that. Put that checkout on its integration branch first (or pass --target).`,
+        );
+      }
     }
   } catch (error) {
     messages.push(`failed: ${(error as Error).message}`);
@@ -287,6 +293,27 @@ export async function branchLand(
       problems.push(`${r.rel}: the owner's checkout ${checkout} has uncommitted or untracked changes; commit or stash them first.`);
     }
   }
+  // A repo that records a worktree of <m> the master's worktree no longer has would be left out.
+  const covered = new Set(ordered.map((r) => (r.rel === '.' ? root : path.join(root, r.rel))));
+  for (const r of (await listRepos(root, run)).slice(1)) {
+    const recorded = run('git', ['config', '--get', `branch.${name}.linked-worktree`], {cwd: r.dir}).stdout.trim();
+    if (recorded && !covered.has(r.dir)) {
+      problems.push(`${r.rel}: records a worktree of ${name} at ${recorded}, which is not in ${path.join(masterDir, 'packages-local')}; put it back, or land that repo by hand.`);
+    }
+  }
+  // The owner's targets must have what origin has, or the push after landing is refused.
+  for (const entry of repos) {
+    if (!entry.target || !fs.existsSync(path.join(entry.checkout, '.git'))) continue;
+    if (run('git', ['remote', 'get-url', 'origin'], {cwd: entry.checkout}).status !== 0) continue;
+    const fetched = run('git', ['fetch', '-q', 'origin', entry.target], {cwd: entry.checkout});
+    if (fetched.status !== 0) {
+      result.messages.push(`${entry.rel}: could not fetch origin ${entry.target} (${failed(fetched)}); going on with the local ${entry.target}.`);
+      continue;
+    }
+    if (run('git', ['merge-base', '--is-ancestor', 'FETCH_HEAD', entry.target], {cwd: entry.checkout}).status !== 0) {
+      problems.push(`${entry.rel}: origin/${entry.target} has commits the local ${entry.target} lacks: git -C ${entry.checkout} pull --ff-only first.`);
+    }
+  }
   const steps = (await worktreeList(masterDir, {}, run)).worktrees;
   for (const s of steps) {
     const unlanded = [...(s.landed === false ? ['app'] : []), ...s.packages.filter((p) => p.landed === false).map((p) => p.packageName ?? p.rel)];
@@ -339,7 +366,15 @@ export async function branchLand(
     return result;
   }
 
+  // Every target must be in <m> now, or a fast-forward fails halfway through.
+  if (!options.dryRun) {
+    const behind = repos.filter((e) => e.target && !isAncestor(e.worktree, e.target, name));
+    if (behind.length) {
+      return refuse(`${behind.map((e) => `${e.rel}: ${e.target}`).join(', ')} moved since the merge: run land again.`);
+    }
+  }
   // Fast-forward the owner's checkouts.
+  const before = new Map(repos.map((e) => [e, run('git', ['rev-parse', 'HEAD'], {cwd: e.checkout}).stdout.trim()]));
   const landed: LandRepo[] = [];
   for (const entry of repos) {
     if (entry.result === 'would-merge-target') continue;
@@ -364,7 +399,9 @@ export async function branchLand(
       result.messages.push(
         `${entry.rel}: git merge --ff-only ${name} failed in ${entry.checkout}: ${failed(r)}`,
         `${entry.target} moved meanwhile: run land again, which merges it into ${name} first.`,
-        ...(landed.length ? [`Already landed: ${landed.map((l) => l.rel).join(', ')}.`] : []),
+        ...(landed.length
+          ? [`Already landed: ${landed.map((l) => `${l.rel} (${l.target} was ${before.get(l)?.slice(0, 12)})`).join(', ')}.`]
+          : []),
       );
       return result;
     }
@@ -391,6 +428,10 @@ export async function branchLand(
   for (const entry of landed) {
     if (!push) continue;
     if (run('git', ['remote', 'get-url', 'origin'], {cwd: entry.checkout}).status !== 0) continue;
+    if (entry.built === false) {
+      result.messages.push(`${entry.rel}: not pushed, because its build failed: fix it, then git -C ${entry.checkout} push origin ${entry.target}.`);
+      continue;
+    }
     const r = run('git', ['push', 'origin', entry.target], {cwd: entry.checkout});
     entry.pushed = r.status === 0;
     if (!entry.pushed) {

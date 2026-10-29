@@ -364,7 +364,7 @@ and `branch.<m>.linked-worktree` (that repo's worktree), and in the app repo
 of a repo, so the records are read from anywhere in the app.
 
 The preview port is the first of 4510, 4520, … 4590 no other master holds (outside a CN's
-live-app band 4000-4399; `port + 1` is for the master's test runs, `port + 2` to `port + 9` for
+live-app band 4000-4399, inside the 4000-4999 a local webid.email signs clients in from; `port + 1` is for the master's test runs, `port + 2` to `port + 9` for
 its steps), or `--port`. It prints the preview command:
 
 ```
@@ -385,7 +385,9 @@ on `<m>--<agent>` from `<m>`, default directory `../wt/<m>--<agent>`, and with `
 of each named package branched from the master's nested worktree. Only the master's packages can
 be named; nothing joins anything. The farm links straight into the master's install (the main
 checkout's), with the master's packages under the step's own, so a package the master changes
-and the step does not resolves to the master's copy. Steps land in the master's worktree (rebase
+and the step does not resolves to the master's copy. A master package that depends on one the
+step overrides still loads the master's copy of it (Node resolves from the master's worktree), so
+`add` warns and names the package to give the step too. Steps land in the master's worktree (rebase
 onto `<m>`, then `git -C ../wt/<m>[/packages-local/<pkg>] merge --ff-only <m>--<agent>`).
 
 `linked worktree list` shows each master with its target, preview port and dataset, its worktree
@@ -399,8 +401,9 @@ Run in the main checkout, once the owner approves. Per repo of the master's work
 packages first in dependency order and the app last:
 
 1. **Checks** every repo before changing any: the master's worktrees on `<m>`, clean and not
-   mid-merge; no step worktree with a branch not landed in `<m>`; each owner checkout clean and
-   on its target. A refusal (exit 1) changes nothing.
+   mid-merge; no step worktree with a branch not landed in `<m>`; no repo that records a worktree
+   of `<m>` the master's worktree lacks; each owner checkout clean, on its target, and not behind
+   `origin/<target>` (fetched; pull first). A refusal (exit 1) changes nothing.
 2. **Brings the target in**: where the target moved since (another master landed, the owner
    committed), `git merge <target>` in the master's worktree ("Merge dev into m1"). A merge, not a
    rebase, so the step commits the reports cite keep their SHAs. A conflict stops it (exit 4) and
@@ -413,8 +416,9 @@ packages first in dependency order and the app last:
    manifests changed. A refused fast-forward (the owner committed meanwhile) stops it; run it
    again.
 4. **Builds** each landed framework checkout (`npx linked build`) and **pushes** each landed
-   target (`git push origin <target>`, where the repo has an `origin`). A failure is reported
-   (exit 5); the landing stands.
+   target (`git push origin <target>`, where the repo has an `origin`; never one whose build
+   failed). A failure is reported (exit 5); the landing stands. A refused fast-forward names the
+   SHAs the repos already landed were at.
 
 Then restart the owner's dev server, and `linked worktree remove <m>`: it refuses while the master
 has steps or a branch has not landed in its target, removes its worktrees, deletes `<m>` and

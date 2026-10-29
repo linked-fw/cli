@@ -179,27 +179,39 @@ function readManifest(dir: string): {name: string; pkg: Record<string, unknown>}
   }
 }
 
-/** The file `exports['.']` resolves to for an import (its `import` or `default` leaf), if any. */
-function dotExport(exportsField: unknown): string | null {
+/**
+ * The files `exports['.']` resolves to at run time: every string leaf of it
+ * except the `types` and `development` conditions (those name sources and
+ * declarations, which exist unbuilt). Empty when it has no `.` entry.
+ */
+function dotExports(exportsField: unknown): string[] {
   let e: unknown = exportsField;
-  if (e && typeof e === 'object' && !Array.isArray(e) && '.' in e) e = (e as Record<string, unknown>)['.'];
-  else if (e && typeof e === 'object' && Object.keys(e).some((k) => k.startsWith('.'))) return null;
-  for (let depth = 0; depth < 5 && e && typeof e === 'object'; depth++) {
-    const o = e as Record<string, unknown>;
-    e = o.import ?? o.default ?? o.require ?? null;
+  if (typeof e === 'string' || Array.isArray(e)) return leaves(e);
+  if (!e || typeof e !== 'object') return [];
+  const keys = Object.keys(e);
+  if (keys.some((k) => k.startsWith('.'))) {
+    if (!('.' in e)) return [];
+    e = (e as Record<string, unknown>)['.'];
   }
-  return typeof e === 'string' ? e : null;
+  return leaves(e);
+}
+
+function leaves(e: unknown, depth = 0): string[] {
+  if (typeof e === 'string') return [e];
+  if (depth > 5 || !e || typeof e !== 'object') return [];
+  if (Array.isArray(e)) return e.flatMap((x) => leaves(x, depth + 1));
+  return Object.entries(e as Record<string, unknown>)
+    .filter(([k]) => k !== 'types' && k !== 'development')
+    .flatMap(([, v]) => leaves(v, depth + 1));
 }
 
 /**
- * Whether a workspace member can be loaded as it is: its entry point (`main`,
- * or what `exports['.']` imports) exists, or it declares none. A member whose
- * entry is a build output (`lib/`) that has not been built yet is not.
+ * Whether a workspace member can be loaded as it is: its `main` and every
+ * file its `.` export resolves to exist, or it declares none. A member whose
+ * entry is a build output (`lib/`) that has not been built (in full) is not.
  */
 export function memberUsable(dir: string, pkg: Record<string, unknown>): boolean {
-  const entries = [typeof pkg.main === 'string' ? pkg.main : null, dotExport(pkg.exports)].filter(
-    (e): e is string => !!e,
-  );
+  const entries = [...(typeof pkg.main === 'string' ? [pkg.main] : []), ...dotExports(pkg.exports)];
   return entries.every((e) => fs.existsSync(path.join(dir, e)));
 }
 
