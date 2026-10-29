@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {branchLand, branchList, branchStartWorktree, formatBranchList} from '../../../src/commands/master.js';
+import {branchAddPackage, branchLand, branchList, branchStartWorktree, formatBranchList} from '../../../src/commands/master.js';
 import {worktreeAdd, worktreeList, worktreeRelink, worktreeRemove} from '../../../src/commands/worktree.js';
 import {makeRun, type Run} from '../../../src/localize/run.js';
 
@@ -317,6 +317,102 @@ describe('linked branch list', () => {
     const list = await branchList(app.root);
     assert.deepEqual(list, {branches: [], otherPorts: []});
     assert.equal(formatBranchList(list), 'No integration branches or masters.');
+  });
+});
+
+describe('linked branch add-package', () => {
+  test('adds a package worktree on <m> with its records; the master\'s and the step\'s farms gain it', async () => {
+    const app = makeApp();
+    await startMaster(app, 'm1', ['server']);
+    const masterDir = path.join(app.container, 'wt', 'm1');
+    assert.equal((await worktreeAdd(app.root, 'a1', {from: 'm1', with: ['server']})).code, 0);
+    const stepDir = path.join(app.container, 'wt', 'm1--a1');
+    assert.equal(real(path.join(stepDir, 'node_modules', '@_linked', 'core')), real(app.core));
+
+    // Run in the step's worktree: it works from the main checkout.
+    const result = await branchAddPackage(stepDir, 'm1', ['@_linked/core']);
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    const coreDir = path.join(masterDir, 'packages-local', '_linked-core');
+    assert.deepEqual(result.added, [{rel: 'packages-local/_linked-core', dir: coreDir, target: 'dev'}]);
+    assert.deepEqual(result.relinked, [masterDir, stepDir]);
+    assert.equal(branchOf(coreDir), 'm1');
+    assert.equal(branchOf(app.core), 'dev');
+    assert.equal(git(app.core, 'config', 'branch.m1.linked-target'), 'dev');
+    assert.equal(git(app.core, 'config', 'branch.m1.linked-worktree'), coreDir);
+    assert.equal(real(path.join(masterDir, 'node_modules', '@_linked', 'core')), real(coreDir));
+    assert.equal(real(path.join(stepDir, 'node_modules', '@_linked', 'core')), real(coreDir));
+    assert.equal(marker(stepDir).parent, masterDir);
+    const text = result.messages.join('\n');
+    assert.match(text, new RegExp(`${coreDir}: @_linked/core on m1`));
+    assert.match(text, /Master m1 now has: _linked-core, _linked-server\nBuild each added package there: npx linked build$/);
+    // The master's worktree stays clean, and branch list sees the package.
+    assert.equal(git(masterDir, 'status', '--porcelain'), '');
+    const listed = (await branchList(app.root)).branches.find((b) => b.name === 'm1');
+    assert.deepEqual(listed?.repos.map((r) => r.rel), ['.', 'packages-local/_linked-core', 'packages-local/_linked-server']);
+  });
+
+  test('refusals change nothing', async () => {
+    const app = makeApp();
+    await startMaster(app, 'm1', ['server']);
+    const masterDir = path.join(app.container, 'wt', 'm1');
+    const snapshot = () => [
+      git(app.core, 'worktree', 'list', '--porcelain'),
+      git(app.server, 'worktree', 'list', '--porcelain'),
+      makeRun(app.core)('git', ['config', '--get-regexp', '^branch\\.m1\\.'], {cwd: app.core}).stdout,
+      fs.readdirSync(path.join(masterDir, 'packages-local')).join(','),
+    ];
+    const before = snapshot();
+    const cases: [string, string[], RegExp][] = [
+      ['nope', ['core'], /nope is not a master/],
+      ['m1', ['server'], /already in master m1/],
+      ['m1', ['core', 'unknown'], /unknown/],
+    ];
+    for (const [name, pkgs, why] of cases) {
+      const r = await branchAddPackage(app.root, name, pkgs);
+      assert.equal(r.code, 1, `${name} ${pkgs}`);
+      assert.match(r.messages.join('\n'), why);
+      assert.deepEqual(snapshot(), before);
+    }
+    const stray = path.join(app.container, 'stray-core');
+    git(app.core, 'worktree', 'add', '-q', '-b', 'm1--x', stray, 'dev');
+    const stepCopy = await branchAddPackage(app.root, 'm1', ['core']);
+    assert.equal(stepCopy.code, 1);
+    assert.match(stepCopy.messages.join('\n'), /a step of m1 has a worktree of it already .*on m1--x/);
+    git(app.core, 'worktree', 'remove', '--force', stray);
+    git(app.core, 'branch', '-D', 'm1--x');
+    git(app.core, 'branch', 'm1');
+    const exists = await branchAddPackage(app.root, 'm1', ['core']);
+    assert.equal(exists.code, 1);
+    assert.match(exists.messages.join('\n'), /packages-local\/_linked-core: branch m1 already exists\.\nNothing was made\./);
+    git(app.core, 'branch', '-D', 'm1');
+    git(app.core, 'switch', '-q', '--detach');
+    const detached = await branchAddPackage(app.root, 'm1', ['core']);
+    assert.match(detached.messages.join('\n'), /detached HEAD/);
+    const missing = await branchAddPackage(app.root, 'm1', ['core'], {target: 'nowhere'});
+    assert.match(missing.messages.join('\n'), /"nowhere" does not exist/);
+    assert.deepEqual(snapshot().slice(2), before.slice(2));
+  });
+
+  test('a failing git worktree add undoes the packages added before it', async () => {
+    const app = makeApp();
+    await startMaster(app, 'm1', []);
+    const masterDir = path.join(app.container, 'wt', 'm1');
+    const realRun = makeRun(app.root);
+    // Packages are made in packages-local/ order: _linked-core first, then _linked-server, which fails.
+    const run: Run = (cmd, args, opts) =>
+      cmd === 'git' && args[0] === 'worktree' && args[1] === 'add' && opts?.cwd === app.server
+        ? {status: 128, stdout: '', stderr: 'fatal: boom'}
+        : realRun(cmd, args, opts);
+    const r = await branchAddPackage(app.root, 'm1', ['server', 'core'], {}, run);
+    assert.equal(r.code, 1);
+    const text = r.messages.join('\n');
+    assert.match(text, /git worktree add -b m1 .* failed: fatal: boom/);
+    assert.match(text, /Undid what this run had made\./);
+    assert.deepEqual(r.added, []);
+    assert.equal(fs.existsSync(path.join(masterDir, 'packages-local', '_linked-core')), false);
+    assert.equal(gitOk(app.core, 'rev-parse', '--verify', '-q', 'refs/heads/m1'), false);
+    assert.equal(gitOk(app.core, 'config', 'branch.m1.linked-target'), false);
+    assert.equal(gitOk(app.core, 'config', 'branch.m1.linked-worktree'), false);
   });
 });
 

@@ -227,28 +227,10 @@ export function createWorktreeSet(spec: WorktreeSetSpec, messages: string[], run
       return fail();
     }
 
-    for (const {repo, branch, start} of spec.packages) {
-      const pkgDir = path.join(dir, 'packages-local', dirName(repo));
-      if (!step(['worktree', 'add', '-b', branch, pkgDir, start], repo.dir)) return fail();
-      undo.push(() => {
-        run('git', ['worktree', 'remove', '--force', pkgDir], {cwd: repo.dir});
-        run('git', ['branch', '-D', branch], {cwd: repo.dir});
-      });
-      // npm nests version-conflicting dependencies in the checkout's own
-      // node_modules; without them the worktree's imports fall through to the
-      // root's versions. The install's own directory, never a link to a link.
-      const nested = path.join(spec.installRoot, 'packages-local', dirName(repo), 'node_modules');
-      if (fs.existsSync(nested)) {
-        const source = fs.realpathSync(nested);
-        try {
-          linkDir(source, path.join(pkgDir, 'node_modules'));
-        } catch (error) {
-          messages.push(`linking ${pkgDir}/node_modules failed: ${(error as Error).message}`);
-          return fail();
-        }
-        messages.push(`${path.join(pkgDir, 'node_modules')} -> ${source}`);
-      }
-      messages.push(`${pkgDir}: ${repo.packageName ?? repo.rel} on ${branch}`);
+    for (const pkg of spec.packages) {
+      const undoPackage = addPackageWorktree({dir, installRoot: spec.installRoot, gitRoot, ...pkg}, messages, run);
+      if (!undoPackage) return fail();
+      undo.push(undoPackage);
     }
 
     try {
@@ -270,6 +252,56 @@ export function createWorktreeSet(spec: WorktreeSetSpec, messages: string[], run
     return fail();
   }
   return undoAll;
+}
+
+/** One package worktree: `repo`'s worktree at `<dir>/packages-local/<dirName>` on new branch `branch` from `start`. */
+export interface PackageWorktreeSpec {
+  /** The app worktree it goes in. */
+  dir: string;
+  /** The checkout whose `packages-local/<dirName>/node_modules` it links to. */
+  installRoot: string;
+  /** The app repo checkout a failure message names the package repo relative to. */
+  gitRoot: string;
+  /** The checkout (or worktree) of the package's repo to run git in. */
+  repo: RepoInfo;
+  branch: string;
+  start: string;
+}
+
+/**
+ * Add the package worktree `spec` names, with its nested `node_modules` linked to the install's.
+ * On success returns how to undo it (remove the worktree, delete the branch); on failure undoes
+ * what it made and returns null. `messages` gets one line per thing made, or why it failed.
+ */
+export function addPackageWorktree(spec: PackageWorktreeSpec, messages: string[], run: Run): (() => void) | null {
+  const {repo, branch, start} = spec;
+  const pkgDir = path.join(spec.dir, 'packages-local', dirName(repo));
+  const r = run('git', ['worktree', 'add', '-b', branch, pkgDir, start], {cwd: repo.dir});
+  if (r.status !== 0) {
+    messages.push(`${path.relative(spec.gitRoot, repo.dir) || '.'}: git worktree add -b ${branch} ${pkgDir} ${start} failed: ${failed(r)}`);
+    return null;
+  }
+  const undo = (): void => {
+    run('git', ['worktree', 'remove', '--force', pkgDir], {cwd: repo.dir});
+    run('git', ['branch', '-D', branch], {cwd: repo.dir});
+  };
+  // npm nests version-conflicting dependencies in the checkout's own
+  // node_modules; without them the worktree's imports fall through to the
+  // root's versions. The install's own directory, never a link to a link.
+  const nested = path.join(spec.installRoot, 'packages-local', dirName(repo), 'node_modules');
+  if (fs.existsSync(nested)) {
+    const source = fs.realpathSync(nested);
+    try {
+      linkDir(source, path.join(pkgDir, 'node_modules'));
+    } catch (error) {
+      messages.push(`linking ${pkgDir}/node_modules failed: ${(error as Error).message}`);
+      undo();
+      return null;
+    }
+    messages.push(`${path.join(pkgDir, 'node_modules')} -> ${source}`);
+  }
+  messages.push(`${pkgDir}: ${repo.packageName ?? repo.rel} on ${branch}`);
+  return undo;
 }
 
 /**

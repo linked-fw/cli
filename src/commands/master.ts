@@ -40,7 +40,9 @@ import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {localBranchExists, refExists, selectCheckouts, worktreesOf} from './branch.js';
 import {dependencyOrder} from './release.js';
+import {readFarmMarker} from './worktree-node-modules.js';
 import {
+  addPackageWorktree,
   createWorktreeSet,
   defaultWorktreeDir,
   mainCheckoutOf,
@@ -49,6 +51,7 @@ import {
   startCommandFor,
   startEnv,
   worktreeList,
+  worktreeRelink,
 } from './worktree.js';
 
 export interface BranchStartWorktreeOptions {
@@ -663,4 +666,140 @@ export async function runBranchList(options: {json?: boolean}): Promise<void> {
   const list = await branchList(process.cwd());
   process.stdout.write((options.json ? JSON.stringify(list, null, 2) : formatBranchList(list)) + '\n');
   process.exitCode = 0;
+}
+
+export interface BranchAddPackageOptions {
+  /** The branch `<m>` starts from (and its target) in every added repo; default each checkout's current branch. */
+  target?: string;
+}
+
+export interface BranchAddPackageResult {
+  /** 0 added and relinked, 1 refused (nothing made) or failed (undone), or a relink failed. */
+  code: number;
+  added: {rel: string; dir: string; target: string}[];
+  relinked: string[];
+  messages: string[];
+}
+
+/**
+ * `linked branch add-package <m> <packages...>`: give running master `<m>` a worktree of more
+ * `packages-local/` checkouts, as `branch start --worktree` would have made them, then relink the
+ * master and each of its steps. Every check runs before anything is made; when making one fails,
+ * what this run made is undone. Run anywhere in the app.
+ */
+export async function branchAddPackage(
+  appRoot: string,
+  name: string,
+  packages: string[],
+  options: BranchAddPackageOptions = {},
+  run: Run = makeRun(appRoot),
+): Promise<BranchAddPackageResult> {
+  const here = realish(appRoot);
+  const root = mainCheckoutOf(run, here) ?? here;
+  const result: BranchAddPackageResult = {code: 1, added: [], relinked: [], messages: []};
+  const refuse = (...messages: string[]): BranchAddPackageResult => {
+    result.messages.push(...messages);
+    return result;
+  };
+
+  const master = await masterOf(run, root, name);
+  if (!master) return refuse(`${name} is not a master: no branch.${name}.linked-worktree is recorded.`, 'Nothing was made.');
+  const masterDir = realish(master.dir);
+  if (!fs.existsSync(masterDir)) return refuse(`The worktree of master ${name} (${masterDir}) does not exist.`, 'Nothing was made.');
+  if (!packages.length) return refuse('Name at least one packages-local/ checkout to add.');
+  const local = (await listRepos(root, run)).slice(1);
+  const chosen = selectCheckouts(local, packages);
+  if ('error' in chosen) return refuse(chosen.error, 'Nothing was made.');
+
+  const problems: string[] = [];
+  const plan: {repo: RepoInfo; target: string; dir: string}[] = [];
+  for (const repo of [...new Set(chosen.repos)]) {
+    const dir = path.join(masterDir, 'packages-local', path.basename(repo.dir));
+    const recorded = run('git', ['config', '--get', `branch.${name}.linked-worktree`], {cwd: repo.dir}).stdout.trim();
+    if (recorded || fs.existsSync(dir)) {
+      problems.push(`${repo.rel}: already in master ${name} (${recorded || dir}).`);
+      continue;
+    }
+    const target = options.target ?? repo.branch;
+    if (!target) {
+      problems.push(`${repo.rel}: detached HEAD; put it on the branch to work from, or pass --target.`);
+      continue;
+    }
+    if (target === name) problems.push(`${repo.rel}: "${name}" is the target itself; the master's branch needs a name of its own.`);
+    else if (!refExists(run, repo.dir, target)) problems.push(`${repo.rel}: "${target}" does not exist.`);
+    if (localBranchExists(run, repo.dir, name)) problems.push(`${repo.rel}: branch ${name} already exists.`);
+    const stepCopies = worktreesOf(run, repo.dir).filter((w) => w.branch?.startsWith(`${name}--`));
+    if (stepCopies.length) {
+      problems.push(`${repo.rel}: a step of ${name} has a worktree of it already (${stepCopies.map((w) => `${w.path} on ${w.branch}`).join(', ')}).`);
+    }
+    plan.push({repo, target, dir});
+  }
+  if (problems.length) return refuse(...problems, 'Nothing was made.');
+
+  const messages = result.messages;
+  const installRoot = readFarmMarker(masterDir)?.installRoot ?? root;
+  const undo: (() => void)[] = [];
+  const undoAll = (): BranchAddPackageResult => {
+    for (const fn of undo.reverse()) {
+      try {
+        fn();
+      } catch (error) {
+        messages.push(`undo failed: ${(error as Error).message}`);
+      }
+    }
+    result.added = [];
+    messages.push('Undid what this run had made.');
+    return result;
+  };
+  for (const {repo, target, dir} of plan) {
+    const undoWorktree = addPackageWorktree({dir: masterDir, installRoot, gitRoot: root, repo, branch: name, start: target}, messages, run);
+    if (!undoWorktree) return undoAll();
+    undo.push(undoWorktree);
+    try {
+      await setTarget(repo.dir, name, target, run);
+      undo.push(() => void run('git', ['config', '--unset', `branch.${name}.linked-target`], {cwd: repo.dir}));
+      const r = run('git', ['config', `branch.${name}.linked-worktree`, dir], {cwd: repo.dir});
+      if (r.status !== 0) throw new Error(`git config branch.${name}.linked-worktree failed in ${repo.rel}: ${failed(r)}`);
+      undo.push(() => void run('git', ['config', '--unset', `branch.${name}.linked-worktree`], {cwd: repo.dir}));
+    } catch (error) {
+      messages.push(`failed: ${(error as Error).message}`);
+      return undoAll();
+    }
+    result.added.push({rel: repo.rel, dir, target});
+  }
+
+  const steps = (await worktreeList(root, {all: true}, run)).masters.find((m) => m.name === name)?.steps ?? [];
+  let relinkFailed = false;
+  for (const dir of [masterDir, ...steps.map((s) => s.dir)]) {
+    const r = await worktreeRelink(root, undefined, {dir}, run);
+    if (r.code === 0) {
+      result.relinked.push(dir);
+      messages.push(`${dir}: relinked`);
+    } else {
+      relinkFailed = true;
+      messages.push(`${dir}: relink failed: ${r.messages.join(' ')}`);
+    }
+  }
+  const has = fs.existsSync(path.join(masterDir, 'packages-local'))
+    ? fs.readdirSync(path.join(masterDir, 'packages-local')).filter((d) => fs.existsSync(path.join(masterDir, 'packages-local', d, '.git'))).sort()
+    : [];
+  messages.push(`Master ${name} now has: ${has.join(', ')}`, 'Build each added package there: npx linked build');
+  if (relinkFailed) messages.push('Relink the worktrees that failed once fixed: linked worktree relink --all.');
+  result.code = relinkFailed ? 1 : 0;
+  return result;
+}
+
+/** The commander action for `branch add-package`. */
+export async function runBranchAddPackage(
+  name: string,
+  packages: string[],
+  options: {target?: string; json?: boolean},
+): Promise<void> {
+  const result = await branchAddPackage(process.cwd(), name, packages, {target: options.target});
+  if (options.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  else {
+    const write = result.code === 0 ? console.log : console.error;
+    for (const m of result.messages) write(m);
+  }
+  process.exitCode = result.code;
 }

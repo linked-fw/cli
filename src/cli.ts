@@ -730,6 +730,18 @@ branch
   });
 
 branch
+  .command('add-package <name> <packages...>')
+  .description(
+    "Run anywhere in an app. Add packages-local/ checkouts (@_linked/core, core or _linked-core) to running master <name>: per package a worktree <master's dir>/packages-local/<dir> on a new branch <name> from --target (default that checkout's current branch), its nested node_modules linked as branch start --worktree does, and branch.<name>.linked-target and -worktree recorded in that repo; then worktree relink of the master and each of its steps. Refuses (exit 1, nothing made) when <name> is not a master, a package is unknown or already in it, a checkout is detached without --target, the target does not exist, the repo already has a branch <name>, or a step has a worktree of the package. A failure halfway undoes what the run made. Build each added package in the master's worktree afterwards.",
+  )
+  .option('--target <branch>', 'The branch <name> starts from and lands in, in every added repo. Default: the branch each checkout is on.')
+  .option('--json', 'Print {code, added: [{rel, dir, target}], relinked: [<dir>], messages}.')
+  .action(async (name: string, packages: string[], options) => {
+    const {runBranchAddPackage} = await import('./commands/master.js');
+    return runBranchAddPackage(name, packages, options);
+  });
+
+branch
   .command('land <name>')
   .description(
     "Run in the main checkout, once the owner approves. Land master <name> (linked branch start <name> --worktree) into the owner's checkouts, per repo of the master's worktree, frameworks first in dependency order and the app last. Refuses, changing nothing, while a master worktree is dirty, off <name> or mid-merge, a step worktree has not landed in <name>, or an owner checkout is dirty or off its target. Then: merges each target into <name> in the master's worktree where the target moved (a merge, so step SHAs stay) and stops (exit 3) so the master re-tests, unless --no-retest; a conflict stays in progress in the master's worktree (exit 4, files named); then git merge --ff-only <name> in each owner checkout, npx linked build in each landed framework checkout, and git push origin <target> per landed repo. Exit 0 landed, 1 refused, 3 re-test, 4 conflict, 5 landed but a build or push failed.",
