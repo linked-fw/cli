@@ -265,6 +265,7 @@ describe('planBuildSteps', () => {
       'Checking shapes/index',
       'Checking shape hierarchy',
       'Writing shapes.ttl',
+      'Writing components.ttl',
       'Checking sideEffects',
       'Checking dependencies',
     ]);
