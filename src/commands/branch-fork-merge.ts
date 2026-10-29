@@ -645,7 +645,16 @@ export async function branchMerge(
   const keyList = keys.list;
   const keyed: {r: RepoInfo; key: string}[] = [];
   for (const {name, branch: key} of keyList) {
-    if (key === branch) continue;
+    if (key === branch) {
+      // The same-name case: its work is on <branch> only when a checkout of it is on <branch>
+      // here; a detached one would be left out silently.
+      if (!repos.some((x) => x !== app && x.packageName === name))
+        problems.push(
+          `${name}: the app's list keys branch ${branch}, but no checkout of ${name} here is on ${branch}: ` +
+            `switch it to ${branch} (or remove the key) before merging.`,
+        );
+      continue;
+    }
     const r = all.find((x) => x !== app && x.packageName === name);
     if (!r) {
       problems.push(

@@ -208,7 +208,8 @@ changes, lacks `origin/<branch>` or `origin/<into>`, or has commits origin lacks
 
 **Branch keys.** After the fetch it reads the app's `package.json` at `origin/<branch>`. An entry
 whose `branch` key ([localize](localize.md#unpublished-packages)) is `<branch>` is the same-name
-case: that package's checkout is on `<branch>` and is merged as above. A key naming another branch
+case: that package's checkout is on `<branch>` and is merged as above (with no checkout of it on
+`<branch>` here the merge refuses, exit 6, so a detached worktree's work is never left out). A key naming another branch
 `<k>` lands `origin/<k>` instead (`via: "key"`), before the packages on `<branch>` (keyed packages
 in dependency order first, then the rest, the app last); the key decides even when the package's
 checkout is on `<branch>`. Its checkout is found by npm name among the app's `packages-local/`
@@ -552,7 +553,8 @@ the branch. A branch another worktree of the base clone has checked out is refus
 are pins too (`pinFrom: "key"`), read from the app worktree's `package.json` after it is updated:
 the run's pins are `{...keys, ...--pin}`, so an explicit `--pin` wins, with the message `pin
 <npm>=<b> from --pin overrides the app's branch key <k>.` A key alone puts the run in pins mode,
-as a `--pin` does.
+as a `--pin` does. On the app's default branch (origin's HEAD) keys are ignored, each with a
+message: its packages follow their own default branches.
 A pin to the run's own `<branch>` (a fork of its name, written in this checkout) is attached, as the
 rule would; a pin to any other branch is **detached at `origin/<branch>`**: that branch is written
 elsewhere (its own worktree from [`branch fork --worktree`](#linked-branch-fork-branch-package---worktree-dir---from-ref---dir-app---json)),

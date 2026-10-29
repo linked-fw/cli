@@ -359,13 +359,15 @@ class Checkout {
         : path.join(this.root, name, branchDir(branch)),
     );
 
-    this.result.app = this.withBase(repo, (base) =>
-      this.appWorktree(repo, base, appDir),
-    );
+    let appDefault: string | undefined;
+    this.result.app = this.withBase(repo, (base) => {
+      appDefault = this.defaultBranch(base);
+      return this.appWorktree(repo, base, appDir);
+    });
     const appJson = readJson(path.join(appDir, 'package.json'));
     const list = unpublishedPackages(appJson, (m) => this.say(m));
     if (list.length) this.requireSetup(appJson, appDir);
-    this.pinKeys(list);
+    this.pinKeys(list, branch === appDefault);
 
     const published = {
       ...((appJson?.dependencies as Record<string, unknown> | undefined) ?? {}),
@@ -747,10 +749,16 @@ class Checkout {
   /**
    * The app list's `branch` keys become pins, under the explicit ones: `{...keys, ...--pin}`. A
    * `--pin` that overrides a key says so. The parser accepted the keys; git checks them as it
-   * checks a `--pin`.
+   * checks a `--pin`. On the app's default branch keys are ignored, with a warning: its packages
+   * are on their own default branches (a merge strips the keys; one that reached it otherwise).
    */
-  private pinKeys(list: readonly UnpublishedPackage[]): void {
-    const keys = pinsFromKeys(list);
+  private pinKeys(list: readonly UnpublishedPackage[], onDefault: boolean): void {
+    let keys = pinsFromKeys(list);
+    if (onDefault && Object.keys(keys).length) {
+      for (const [name, key] of Object.entries(keys))
+        this.say(`${name}: the app's list keys branch ${key} on the app's default branch ${this.branch}; ignored, its packages follow their default branches.`);
+      keys = {};
+    }
     const flags = this.options.pins ?? {};
     for (const [name, key] of Object.entries(keys)) {
       if (!this.ok(this.root, ['check-ref-format', '--branch', key])) {

@@ -188,6 +188,18 @@ describe("the app list's branch keys", () => {
     assert.ok(res.messages.some((m) => /u9\/gone is not on origin/.test(m)), res.messages.join('\n'));
   });
 
+  test("a key on the app's default branch is ignored, with a warning", () => {
+    const {r, run} = setup();
+    commitOn(r.base, r.ont, 'u1/edits', 'work.ttl', '# working\n');
+    keyAppBranch(r, 'main', {'acme-ont': 'u1/edits'});
+    const res = run('main', {pinsOnly: true});
+    assert.equal(res.code, 0, res.messages.join('\n'));
+    const ont = byName(res, 'acme-ont');
+    assert.equal(ont.pin, undefined);
+    assert.equal(ont.head, git(r.ont, 'rev-parse', 'refs/heads/main'));
+    assert.ok(res.messages.some((m) => /acme-ont: the app's list keys branch u1\/edits on the app's default branch main; ignored/.test(m)), res.messages.join('\n'));
+  });
+
   test('a same-name key is a pin on the run branch: writable', () => {
     const {r, run} = setup();
     keyAppBranch(r, 'change-1', {'acme-assets': 'change-1'});

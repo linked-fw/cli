@@ -251,6 +251,20 @@ describe('linked branch fork / merge / worktree remove --branch', () => {
     assert.equal(git(r.app, 'rev-parse', 'refs/heads/main'), appMain);
   });
 
+  test('a same-name key with no checkout of the package on the branch is refused; nothing is merged', async () => {
+    const {r, run} = setup();
+    keyAppBranch(r, 'change-1', {'acme-ont': 'change-1'});
+    const co = run('change-1');
+    const appDir = co.app!.dir;
+    // Its worktree is detached (say, moved by hand): its work is not on change-1.
+    git(dirOf(co, 'acme-ont'), 'checkout', '-q', '--detach');
+    const appMain = git(r.app, 'rev-parse', 'refs/heads/main');
+    const merge = await branchMerge(appDir, 'change-1', 'main', {env, mode: 'update'});
+    assert.equal(merge.code, 6);
+    assert.match(merge.messages.join('\n'), /acme-ont: the app's list keys branch change-1, but no checkout of acme-ont here is on change-1/);
+    assert.equal(git(r.app, 'rev-parse', 'refs/heads/main'), appMain);
+  });
+
   test('update mode refuses a keyed branch main lacks; once it is in main, one commit strips the keys', async () => {
     const {r, run} = setup();
     commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
