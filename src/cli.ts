@@ -704,6 +704,8 @@ branch
     "Run in an app checkout (a linked checkout worktree, or an app with packages-local/ clones). Create <branch> in the packages-local/ checkout <package> names (its npm name, acme-ont; or @_linked/core, core, _linked-core) from its current head -- usually the fallback linked checkout left detached at origin/<default> -- and push it (-u). Refuses when the checkout has changes, or when origin has <branch> already and the checkout is not on it (linked checkout switches to it). On <branch> already: pushes what origin lacks, else does nothing (exit 0). A token comes only from LINKED_GIT_TOKEN.",
   )
   .option('--dir <dir>', 'The app checkout. Default: the app the current directory is in.')
+  .option('--worktree <dir>', "Make <branch> in a worktree of its own at <dir>, from the package's base clone (found through its checkout in the app), leaving the app checkout as it is: created from --from and pushed (-u), or on origin's <branch> when it has one. A worktree already there on <branch> is reused and pushes what origin lacks.")
+  .option('--from <ref>', 'With --worktree: what a new <branch> starts from. Default: origin/HEAD.')
   .option('--json', 'Print {code, package, dir, branch, from, pushed, messages}.')
   .action(async (name: string, pkg: string, options) => {
     const {runBranchFork} = await import('./commands/branch-fork-merge.js');
@@ -716,6 +718,7 @@ branch
     "Run in an app checkout. Push <branch> in every repo on it -- the app (which must be on <branch>) and each packages-local/ checkout on <branch>; detached fallbacks and checkouts on another branch are left alone -- so that branch merge finds nothing unpushed. Fetches each first; pushes only commits origin lacks (-u when origin has no <branch>); a repo whose branch has diverged from origin is refused, never forced, and the others still push. Exit 0, 2 usage, 4 a fetch failed, 6 refused. A token comes only from LINKED_GIT_TOKEN.",
   )
   .option('--dir <dir>', 'The app checkout. Default: the app the current directory is in.')
+  .option('--worktree <dir>', 'Push only this worktree, which must be on <branch> (a package worktree outside an app checkout).')
   .option('--json', 'Print {code, branch, repos: [{name, dir, repo, result: pushed|up-to-date|refused, sha}], messages}, the app first.')
   .action(async (name: string, options) => {
     const {runBranchPush} = await import('./commands/branch-fork-merge.js');
@@ -825,6 +828,12 @@ program
     "Also check out the package in this https (or file) repo into packages-local/, though no list names it (repeatable): on <branch> when its repo has it, else detached at origin/<default branch>. It never makes the install run and is not built, so the app's package.json and lock stay as committed; a later run without --add reports it unlisted.",
     (value: string, previous: string[] = []) => [...previous, value],
   )
+  .option(
+    '--pin <npm=branch>',
+    "Check the package with this npm name out on this branch instead of by the same-name rule (repeatable): attached, or detached at origin/<branch> when another worktree holds that branch; a re-run fast-forwards it and attaches it once the branch is free. A pin whose branch origin lacks falls back to origin/<default branch>.",
+    (value: string, previous: string[] = []) => [...previous, value],
+  )
+  .option('--pins-only', 'No same-name rule: a package without a --pin sits detached at origin/<default branch>. With --pin or --pins-only, a clean package worktree whose head origin has moves to its new target.')
   .option('--json', 'Print the result as JSON (also on a refusal): code, branch, root, app, packages, install, builds, messages.')
   .action(async (branch: string, options) => {
     const {runCheckout} = await import('./commands/checkout.js');

@@ -16,6 +16,15 @@
  * fast-forward on a clean tree; anything else is left as it is and reported `kept` with the
  * reason. Nothing is ever deleted: a package no longer listed is reported `unlisted`.
  *
+ * Pins (`--pin <npm>=<branch>`, repeatable) override the rule for the packages they name: a pinned
+ * package follows its pin's branch, attached, or detached at `origin/<pin>` when another worktree of
+ * its base clone holds that branch (a branch can be in one worktree only); a re-run fast-forwards
+ * it, and attaches it once the branch is free. `--pins-only` turns the same-name rule off: every
+ * package without a pin sits detached at `origin/<default>`. In either pins mode a clean worktree
+ * whose head origin has moves to its target when the pins change (`switched`); one with unpushed or
+ * uncommitted work is `kept`. A pin whose branch origin lacks falls back to the default branch,
+ * with a message. Without `--pin` and `--pins-only` nothing changes.
+ *
  * `--add <repo>` places one more package worktree that no list names (`added`): checked out by
  * the same rules from its base clone, its npm name read from its `package.json` there, never a
  * reason to install and never built, so the app's install and lock stay as committed. A later run
@@ -91,6 +100,10 @@ export interface CheckoutOptions {
   lock?: RepoLockOptions;
   /** Repos of packages to check out beside the listed ones, unlisted (`--add`). */
   add?: string[];
+  /** npm name -> the branch that package is checked out on (`--pin`), instead of the same-name rule. */
+  pins?: Record<string, string>;
+  /** No same-name rule: a package without a pin sits detached at `origin/<default>` (`--pins-only`). */
+  pinsOnly?: boolean;
 }
 
 /** What happened to a worktree in this run. */
@@ -117,8 +130,10 @@ export interface CheckoutPackage {
   /** The checked-out branch, or the default branch a detached fallback is at. */
   branch: string;
   detached: boolean;
-  /** Its repo has no `<branch>`: detached at `origin/<default>`. */
+  /** Its repo has no `<branch>` (in pins mode: it has no usable pin): detached at `origin/<default>`. */
   fellBack: boolean;
+  /** The branch its `--pin` names; with `detached`, another worktree holds that branch. */
+  pin?: string;
   head: string;
   /** The packages whose lists name it, the app first. */
   requiredBy: string[];
@@ -225,6 +240,16 @@ export function checkout(
   return result;
 }
 
+/** Where a package goes this run: `branch` null = detached at `origin/<def>`. */
+interface Target {
+  branch: string | null;
+  def: string;
+  /** The `--pin` for the package, if any. */
+  pin?: string;
+  /** Chosen by the same-name rule (no pins mode for it). */
+  sameName?: true;
+}
+
 interface Head {
   dir: string;
   before: string | null;
@@ -297,6 +322,14 @@ class Checkout {
         EXIT_USAGE,
       );
     }
+    for (const [name, pin] of Object.entries(this.options.pins ?? {})) {
+      if (!pin || !this.ok(this.root, ['check-ref-format', '--branch', pin])) {
+        throw new LocalizeError(
+          `--pin ${name}=${pin}: "${pin}" is not a valid branch name.`,
+          EXIT_USAGE,
+        );
+      }
+    }
     const repo = cleanRepo(this.options.repo ?? this.originOfCwd(), (m) =>
       this.say(m),
     );
@@ -341,6 +374,10 @@ class Checkout {
       reached.map((r) => r.entry),
     );
     this.result.packages.push(...added);
+    const placed = new Set([...reached.map((r) => r.entry.name), ...added.map((p) => p.name)]);
+    for (const name of Object.keys(this.options.pins ?? {})) {
+      if (!placed.has(name)) this.say(`--pin ${name}: no package of this checkout is ${name}; the pin is unused.`);
+    }
     this.result.packages.push(
       ...this.unlisted(
         appDir,
@@ -687,24 +724,58 @@ class Checkout {
     );
   }
 
+  /** Whether the run is in pins mode: some `--pin`, or `--pins-only`. */
+  private get pinsMode(): boolean {
+    return !!this.options.pinsOnly || Object.keys(this.options.pins ?? {}).length > 0;
+  }
+
+  /**
+   * Where a package goes this run: its pin's branch, else (same-name rule) the run's branch when its
+   * repo has it, else detached at `origin/<default>`. With `--pins-only` there is no same-name rule.
+   */
+  private targetOf(name: string, base: string, def: string): Target {
+    const pin = this.options.pins?.[name];
+    if (pin) {
+      if (this.hasRemoteBranch(base, pin)) return {branch: pin, pin, def};
+      this.say(`${name}: its pin ${pin} is not on origin; it is checked out at origin/${def}.`);
+      return {branch: null, pin, def};
+    }
+    if (this.options.pinsOnly) return {branch: null, def};
+    const rule = packageBranch(this.branch, this.hasRemoteBranch(base, this.branch), def);
+    return {branch: rule.on === 'branch' ? this.branch : null, def, sameName: true};
+  }
+
+  /** Another worktree of `base` that has `branch` checked out, if any. */
+  private holderOf(base: string, branch: string, dir: string) {
+    return worktreesOf(this.local, base).find((wt) => wt.branch === branch && realish(wt.path) !== dir);
+  }
+
+  /** Whether origin has the worktree's head (some `refs/remotes/origin/*` contains it): nothing is lost by moving it. */
+  private headOnOrigin(dir: string): boolean {
+    return (
+      this.git(dir, ['for-each-ref', '--contains', 'HEAD', '--format=%(refname)', 'refs/remotes/origin']) !== ''
+    );
+  }
+
   private packageWorktreeIn(
     entry: ListedPackage,
     appDir: string,
     base: string,
   ): CheckoutPackage {
-    const {branch} = this;
     const dir = path.join(appDir, LOCAL_DIR, checkoutNameFor(entry.name));
     const def = this.defaultBranch(base);
-    const rule = packageBranch(branch, this.hasRemoteBranch(base, branch), def);
+    const target = this.targetOf(entry.name, base, def);
     const pkg = (status: CheckoutStatus, reason?: string): CheckoutPackage => {
       const on = currentBranch(this.local, dir);
+      const fellBack = target.sameName ? on !== this.branch : target.branch === null;
       return {
         name: entry.name,
         repo: entry.repo,
         dir,
-        branch: on ?? def,
+        branch: on ?? (target.pin && target.branch ? target.branch : def),
         detached: on === null,
-        fellBack: on !== branch,
+        fellBack,
+        ...(target.pin ? {pin: target.pin} : {}),
         head: this.head(dir),
         requiredBy: entry.requiredBy,
         status,
@@ -713,12 +784,7 @@ class Checkout {
     };
 
     if (this.worktreeAt(base, dir)) {
-      const {status, reason} = this.updatePackage(
-        dir,
-        base,
-        def,
-        rule.on === 'branch',
-      );
+      const {status, reason} = this.updatePackage(dir, base, target);
       return this.checkName(entry, dir, pkg(status, reason), false);
     }
     if (fs.existsSync(dir)) {
@@ -730,7 +796,12 @@ class Checkout {
       );
     }
     fs.mkdirSync(path.dirname(dir), {recursive: true});
-    if (rule.on === 'branch') {
+    let where: string;
+    if (target.branch && target.pin && this.holderOf(base, target.branch, dir)) {
+      this.git(base, ['worktree', 'add', '-q', '--detach', dir, `origin/${target.branch}`]);
+      where = `detached at origin/${target.branch} (its pin; ${this.holderOf(base, target.branch, dir)?.path} holds the branch)`;
+    } else if (target.branch) {
+      const branch = target.branch;
       this.refuseHeld(base, branch, dir);
       if (refExists(this.local, base, `refs/heads/${branch}`)) {
         this.git(base, ['worktree', 'add', '-q', dir, branch]);
@@ -747,6 +818,7 @@ class Checkout {
           `origin/${branch}`,
         ]);
       }
+      where = `on ${branch}${target.pin ? ' (its pin)' : ''}`;
     } else {
       this.git(base, [
         'worktree',
@@ -756,11 +828,10 @@ class Checkout {
         dir,
         `origin/${def}`,
       ]);
+      where = `detached at origin/${def} (${target.sameName ? `no ${this.branch} in its repo` : target.pin ? `its pin ${target.pin} is not on origin` : 'no pin'})`;
     }
     this.moved.push({dir, before: null});
-    this.say(
-      `${entry.name}: ${dir} ${rule.on === 'branch' ? `on ${branch}` : `detached at origin/${def} (no ${branch} in its repo)`}`,
-    );
+    this.say(`${entry.name}: ${dir} ${where}`);
     return this.checkName(entry, dir, pkg('created'), true);
   }
 
@@ -785,25 +856,52 @@ class Checkout {
     );
   }
 
-  /** A re-run on a package worktree: follow its branch, switch a fallback whose branch appeared, or move a fallback to the new default tip. */
+  /**
+   * A re-run on a package worktree: follow its branch, switch a fallback whose branch appeared, or
+   * move a fallback to the new default tip. A pinned worktree detached because another worktree
+   * holds its pin fast-forwards to `origin/<pin>`, and attaches once the branch is free. In pins
+   * mode a clean worktree whose head origin has moves to its target when that changed.
+   */
   private updatePackage(
     dir: string,
     base: string,
-    def: string,
-    branchExists: boolean,
+    target: Target,
   ): {status: CheckoutStatus; reason?: string} {
-    const {branch} = this;
+    const {def} = target;
     const on = currentBranch(this.local, dir);
-    if (on === branch) return this.updateOnBranch(dir, base, branch);
-    if (on !== null)
-      return {
-        status: 'kept',
-        reason: `it is on ${on}, not ${branch} or detached`,
-      };
-    if (this.dirty(dir))
+    if (target.branch !== null && on === target.branch)
+      return this.updateOnBranch(dir, base, target.branch);
+    if (!this.pinsMode && on === this.branch)
+      return this.updateOnBranch(dir, base, this.branch);
+    if (on !== null) {
+      if (!this.pinsMode)
+        return {
+          status: 'kept',
+          reason: `it is on ${on}, not ${this.branch} or detached`,
+        };
+      if (this.dirty(dir))
+        return {status: 'kept', reason: 'it has uncommitted changes'};
+      if (!this.headOnOrigin(dir))
+        return {status: 'kept', reason: `it is on ${on}, whose commits origin lacks: push them`};
+    } else if (this.dirty(dir)) {
       return {status: 'kept', reason: 'it has uncommitted changes'};
+    }
     const head = this.head(dir);
-    if (branchExists) {
+    if (target.branch !== null) {
+      const branch = target.branch;
+      if (target.pin && this.holderOf(base, branch, dir)) {
+        const tip = this.git(base, ['rev-parse', `refs/remotes/origin/${branch}`]);
+        if (on === null && head === tip) return {status: 'unchanged'};
+        if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip])) {
+          return {
+            status: 'kept',
+            reason: `its detached HEAD has commits origin/${branch} lacks`,
+          };
+        }
+        this.git(dir, ['checkout', '-q', '--detach', `origin/${branch}`]);
+        this.moved.push({dir, before: head});
+        return {status: on === null ? 'updated' : 'switched'};
+      }
       this.refuseHeld(base, branch, dir);
       if (refExists(this.local, base, `refs/heads/${branch}`)) {
         this.git(dir, ['switch', '-q', branch]);
@@ -822,8 +920,8 @@ class Checkout {
       return {status: 'switched'};
     }
     const tip = this.git(base, ['rev-parse', `refs/remotes/origin/${def}`]);
-    if (head === tip) return {status: 'unchanged'};
-    if (!this.ok(dir, ['merge-base', '--is-ancestor', head, tip])) {
+    if (on === null && head === tip) return {status: 'unchanged'};
+    if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip]) && !(this.pinsMode && this.headOnOrigin(dir))) {
       return {
         status: 'kept',
         reason: `its detached HEAD has commits origin/${def} lacks`,
@@ -831,7 +929,7 @@ class Checkout {
     }
     this.git(dir, ['checkout', '-q', '--detach', `origin/${def}`]);
     this.moved.push({dir, before: head});
-    return {status: 'updated'};
+    return {status: on === null ? 'updated' : 'switched'};
   }
 
   /**
@@ -884,9 +982,10 @@ class Checkout {
     return out;
   }
 
-  /** The npm name a package repo's `package.json` declares: on the run's branch when it has it, else on its default branch. */
+  /** The npm name a package repo's `package.json` declares: on the run's branch when it has it (not in pins mode), else on its default branch. */
   private declaredName(base: string, repo: string): string {
-    const ref = this.hasRemoteBranch(base, this.branch)
+    // In pins mode the name decides the pin, so it is read on the default branch.
+    const ref = !this.pinsMode && this.hasRemoteBranch(base, this.branch)
       ? `refs/remotes/origin/${this.branch}`
       : `refs/remotes/origin/${this.defaultBranch(base)}`;
     const shown = this.local('git', ['show', `${ref}:package.json`], {
@@ -1031,6 +1130,25 @@ export function formatCheckout(r: CheckoutResult): string {
   return lines.join('\n');
 }
 
+/**
+ * `--pin <npm>=<branch>` values as npm name -> branch. A value without `=`, with an empty side, or
+ * naming one package twice with two branches is a usage error.
+ */
+export function parsePins(values: readonly string[]): Record<string, string> {
+  const pins: Record<string, string> = {};
+  for (const value of values) {
+    const at = value.lastIndexOf('=');
+    const name = at > 0 ? value.slice(0, at) : '';
+    const branch = at > 0 ? value.slice(at + 1) : '';
+    if (!name || !branch)
+      throw new LocalizeError(`--pin ${value}: use <npm name>=<branch>.`, EXIT_USAGE);
+    if (pins[name] && pins[name] !== branch)
+      throw new LocalizeError(`--pin names ${name} twice (${pins[name]}, ${branch}).`, EXIT_USAGE);
+    pins[name] = branch;
+  }
+  return pins;
+}
+
 /** The commander action for `checkout`. */
 export async function runCheckout(
   branch: string,
@@ -1042,10 +1160,23 @@ export async function runCheckout(
     install?: boolean;
     build?: string;
     add?: string[];
+    pin?: string[];
+    pinsOnly?: boolean;
     json?: boolean;
   },
 ): Promise<void> {
+  let pins: Record<string, string>;
+  try {
+    pins = parsePins(options.pin ?? []);
+  } catch (e) {
+    if (!(e instanceof LocalizeError)) throw e;
+    console.error(e.message);
+    process.exitCode = e.code;
+    return;
+  }
   const result = checkout(branch, {
+    pins,
+    pinsOnly: options.pinsOnly,
     repo: options.repo,
     root: options.root,
     dir: options.dir,

@@ -152,6 +152,18 @@ pushed is switched to and pushed.
  "branch": "change-1", "from": "4be1…", "pushed": true, "messages": ["acme-ont: created change-1 at 4be1…", "acme-ont: pushed change-1"]}
 ```
 
+### `linked branch fork <branch> <package> --worktree <dir> [--from <ref>] [--dir <app>] [--json]`
+
+Makes `<branch>` in a worktree of its own at `<dir>`, from the base clone of the package's checkout
+in the app (the checkout only says where that base clone is; it is not touched), under the base
+clone's lock. A worktree already at `<dir>` on `<branch>` is reused and pushes what origin lacks;
+otherwise the worktree is added on a local `<branch>`, else on origin's `<branch>` (tracked), else
+on a new `<branch>` from `--from` (default `origin/HEAD`), pushed `-u`. Refused (exit 6): `<dir>`
+is something else, a worktree there is on another branch, or another worktree holds `<branch>`.
+`dir` in the result is `<dir>`. A server uses it for work on a package that belongs to no app
+branch (a person's working branch of an ontology), which app checkouts then follow by
+[`--pin`](#linked-checkout-branch).
+
 ### `linked branch push <branch> [--dir <app>] [--json]`
 
 In an app checkout: pushes `<branch>` in every repo that is on it -- the app, which must be on
@@ -171,6 +183,9 @@ origin lacks.
 
 `result` is `pushed`, `up-to-date` or `refused`; `sha` is the branch tip. Exit 0, 2 usage, 4 a
 fetch failed, 6 refused.
+
+`--worktree <dir>` pushes that one worktree, which must be on `<branch>` (else exit 6), by the same
+rules; it needs no app checkout around it (a worktree `branch fork --worktree` made).
 
 ### `linked branch merge <branch> --into <default> [--mode push|update] [--dir <app>] [--json]`
 
@@ -329,6 +344,8 @@ LINKED_GIT_TOKEN=<short-lived token> npx linked checkout change-1 \
 | `--no-install` | make the worktrees only: no install, no builds |
 | `--build <cmd>` | the build run in each package worktree that moved; default its own `npm run build` when it has a build script; `''` builds nothing |
 | `--add <repo>` | also check out the package in this `https://` (or `file://`) repo, which no list names (repeatable; see **Added packages**) |
+| `--pin <npm>=<branch>` | check this package out on `<branch>` instead of by the branch rule (repeatable; see **Pins**) |
+| `--pins-only` | no same-name rule: a package without a `--pin` sits detached at `origin/<default>` (see **Pins**) |
 | `--json` | print the result (also on a refusal) |
 
 **Layout.**
@@ -351,6 +368,20 @@ not collide (`<owner>/<name>`).
 worktree only and two checkouts that both fall back would both need the default branch.
 [`linked branch fork`](#linked-branch-fork-branch-package---dir-app---json) turns a fallback into
 the branch. A branch another worktree of the base clone has checked out is refused.
+
+**Pins.** `--pin <npm>=<branch>` replaces the branch rule for that package: it is on `<branch>`
+(`pin` in the result), or **detached at `origin/<branch>`** when another worktree of its base clone
+holds the branch (two app checkouts pinned to one branch; the first one, or the branch's own
+worktree from [`branch fork --worktree`](#linked-branch-fork-branch-package---worktree-dir---from-ref---dir-app---json),
+holds it). `--pins-only` turns the same-name rule off: every package without a pin is detached at
+`origin/<default>` (`fellBack: true` then means "no pin"), whatever branches its repo has. A pin
+whose branch origin lacks (deleted after a merge) falls back to `origin/<default>` with a message.
+Re-runs in either pins mode: a detached pinned worktree fast-forwards to `origin/<pin>` (`updated`)
+and attaches once the branch is free (`switched`); a clean worktree whose head origin has moves to
+its new target when the pins change (`switched`: to another pin, or back to `origin/<default>`); one
+with uncommitted changes or commits origin lacks is `kept`. In pins mode `--add` reads a package's
+name on its default branch. Without `--pin` and `--pins-only` nothing of this applies. Create Now
+always passes `--pins-only` with the pins it records for the app branch.
 
 **The list, transitively.** From the app worktree's committed `package.json`, breadth first:
 each listed package's worktree is made, then its own `package.json` (on its branch, or its
