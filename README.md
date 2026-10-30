@@ -108,6 +108,7 @@ linked build --skip-shape-check "<reason>"  # the same without the shape hierarc
 linked build-app                  # build frontend + backend for the current app
 linked build-app --target web     # web release: build and write public/bundles/linked-release.json
 linked build-app --target capacitor  # Capacitor/local native build: local manifest only, never published
+linked build-app --compile-only   # compile and check client + backend only: no store, no manifest
 linked build-workspace            # build all linked packages in the workspace in dependency order
 linked build-updated              # incremental: only packages that changed since last build
 linked build-package <file>       # walk up from a file path to find its package and rebuild
@@ -217,6 +218,7 @@ linked build-app                  # build and write the release manifest (never 
 linked build-app --publish        # ...and upload it in the same run
 linked build-app --revision <sha> # identify the release without asking git
 linked build-app --allow-dirty    # allow uncommitted changes; revision gets a "-dirty" suffix
+linked build-app --compile-only   # compile only: no store, no revision, no manifest (see below)
 linked publish-app                # dry-run the release manifest upload (pass --yes to write)
 linked publish-app --yes          # upload the release described by the manifest
 linked publish-app --manifest <p> # publish a manifest other than the default path
@@ -240,6 +242,13 @@ export default defineConfig({
 Without `manifest: true` the build fails with a missing `public/bundles/.vite/manifest.json`; with a
 different `outDir` nothing is found to publish. Do not set `base` yourself — `build-app` passes it
 (see "How a release is served").
+
+**Compiling is not a release.** `build-app --compile-only` runs the same environment load, Vite
+client build and backend build (with its checks and data copies), then stops. It resolves no
+`appAssets` store, so it needs no `accessURL`; it takes no release revision, so a dirty tree is
+fine; and it writes no `linked-release.json`. The client bundle is built without the release base
+URL. Use it to learn whether an app builds (a CI compile, or a check at a new dependency version);
+it refuses `--target`, `--publish`, `--revision` and `--allow-dirty`.
 
 **Building is not publishing.** `build-app` compiles the app and writes
 `public/bundles/linked-release.json`, a manifest listing every file of the release with its sha256,

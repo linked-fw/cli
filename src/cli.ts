@@ -430,10 +430,19 @@ program
     // Vite is the only app build. An app without a `vite.config.{ts,js,mjs}`
     // is rejected by name rather than falling back to anything.
     await runAppCommand(async () => {
-      const {assertViteApp, buildViteApp} = await import(
-        './commands/build-app.js'
-      );
+      const {assertViteApp, buildViteApp, compileViteApp, compileOnlyConflicts} =
+        await import('./commands/build-app.js');
       assertViteApp();
+      if (options?.compileOnly === true) {
+        const conflicts = compileOnlyConflicts(options);
+        if (conflicts.length) {
+          throw new Error(
+            `--compile-only makes no release, so it does not take ${conflicts.join(', ')}`,
+          );
+        }
+        await compileViteApp({environmentNames: splitEnvOption(options?.env)});
+        return;
+      }
       await buildViteApp({
         environmentNames: splitEnvOption(options?.env),
         target: options?.target,
@@ -457,8 +466,12 @@ program
     '--allow-dirty',
     'Build from a working tree with uncommitted changes; the release revision gets a "-dirty" suffix',
   )
+  .option(
+    '--compile-only',
+    'Compile and check the client and backend only: no file store, no release manifest, nothing published',
+  )
   .description(
-    'Build the linked app frontend and backend for production, and write a release manifest. Requires a vite.config in the app root.',
+    'Build the linked app frontend and backend for production, and write a release manifest (or, with --compile-only, only compile). Requires a vite.config in the app root.',
   );
 
 program

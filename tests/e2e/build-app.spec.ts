@@ -5,11 +5,12 @@
 // app's linked.backend.files.ts for that, not the storage file, which builds
 // every dataset store and awaits a RemoteDataset's init() (a ping of its data
 // server). The app's `main` is a RemoteDataset at a dead url; the build must
-// finish and write its release manifest. No Docker, no Fuseki, no browser, so
+// finish and write its release manifest. `--compile-only` then builds the same
+// app with no store, no revision and no manifest. No Docker, no Fuseki, no browser, so
 // CI runs this spec (.github/workflows/dual-copy-e2e.yml).
 import {test, expect} from '@playwright/test';
 import {spawnSync} from 'node:child_process';
-import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {installApp, removeApp, scaffoldApp, type ScaffoldedApp} from './helpers/app.js';
 
@@ -57,4 +58,29 @@ test('a RemoteDataset app builds with nothing listening on its url', () => {
   expect(output).toContain('Loading file storage from linked.backend.files.ts');
   expect(result.status, output).toBe(0);
   expect(existsSync(join(dir, 'public/bundles/linked-release.json')), output).toBe(true);
+});
+
+test('build-app --compile-only compiles without a store or a release manifest', () => {
+  const dir = app!.dir;
+  const manifest = join(dir, 'public/bundles/linked-release.json');
+  rmSync(manifest, {force: true});
+  // A dirty tree and no revision: a release build would refuse it.
+  const result = spawnSync(
+    'npx',
+    ['--no-install', 'linked', 'build-app', '--compile-only'],
+    {
+      cwd: dir,
+      env: {...process.env, FUSEKI_BASE_URL: DEAD_URL, LINKED_RELEASE_REVISION: '', GITHUB_SHA: ''},
+      encoding: 'utf8',
+      timeout: 3 * 60 * 1000,
+    },
+  );
+  const output = `${result.stdout}${result.stderr}`.replace(/\x1b\[[0-9;]*m/g, '');
+  console.log(output);
+  expect(result.status, output).toBe(0);
+  expect(output).toContain('Application backend build complete');
+  expect(output).toContain('compile only');
+  expect(output).not.toContain('Resolving the appAssets file store');
+  expect(existsSync(join(dir, 'public/bundles/.vite/manifest.json')), output).toBe(true);
+  expect(existsSync(manifest), output).toBe(false);
 });
