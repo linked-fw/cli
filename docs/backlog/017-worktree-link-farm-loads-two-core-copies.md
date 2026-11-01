@@ -49,3 +49,35 @@ that depends on a `--with` package, and is not itself in the worktree, keeps the
 - Or refuse/warn at `worktree add`, as backlog 013 proposes for a master step ("Refusing a second
   copy"), and list the dependents to add with `--with`? If this is the same mechanism, fold one
   item into the other.
+
+## Seen again: master `one-read-method` (core plan 111), 1 Nov 2026
+
+Evidence in CN report 397 ("Two copies of core: the evidence"). Here the second copy was not a
+stale duplicate but an older core: the master changed `IDataset`, and the main checkout's core still
+had the old read methods, so the failures looked like real bugs.
+
+- Cause, narrower than above: the packages localized only in the main checkout and not nested in
+  the worktree. Seventeen farm entries of the step worktree resolved into the main checkout's
+  `packages-local/`: `@_linked/css`, `dcat`, `dcmi`, `icons`, `npm`, `org`, `owl`, `primitives`,
+  `rdfs`, `s3`, `schema`, `sentry`, `sioc`, `translation`, `xsd`, `@linked.cm/zoho-cpaas` and
+  `@semantu/webid-email`. Their own `import '@_linked/core'` climbs from their real path to
+  `/Users/rene/web/create_now/packages-local/_linked-core`.
+- tsc: `NEW type error(s) not in the baseline: 63`, all of them `IDataset`/`Transaction`/
+  `FusekiStore` identity errors between the two copies. `tsc --explainFiles` named the importers of
+  the main copy: `_linked-schema` (3038 imports), `_linked-translation` (200), `_linked-dcmi` (113),
+  `_linked-owl` (85), `_linked-dcat` (56). With `paths` mapping `@_linked/core` to the worktree's
+  copy: 0 errors.
+- Runtime: in-process Playwright specs (`named-graphs.spec.ts:320`, `:454`,
+  `project-image-dsl.spec.ts:80`, `graph-content-dsl.spec.ts:264`, `hub-ontology-terms-dsl:182`)
+  failed with "dispatch.selectQuery is not a function" and "[linked] 2 copies of @_linked/core's
+  shape registry have loaded". Their shapes come from the main checkout's `@_linked/schema`/`owl`,
+  which call the old core.
+- Workaround used: in the step worktree's farm only, each of the 17 links replaced by an `rsync`
+  copy of the package (without `.git` and `node_modules`). Typecheck then `No new type errors`, and
+  the regular set green. Pitfall met: the farm's `@linked.cm` scope was itself a link into the main
+  install, so replacing an entry inside it wrote into the main checkout; the scope must become a
+  directory of the farm first.
+
+A fix in `linked worktree add` / `relink`: give every main-only localized package that depends on a
+`--with` package a farm entry of its own whose `@_linked/core` resolves to the worktree's copy (or
+nest it), and make scope directories real directories of the farm.
