@@ -11,11 +11,10 @@ import { Example } from 'app-shapes';
 type Mode = 'loading' | 'error';
 let mode: Mode = 'loading';
 
-// A stub store: the query never settles while loading, and rejects in error mode.
+// A stub store: every read never settles while loading, and rejects in error mode.
 const stubStore: any = {
-  selectQuery: () =>
+  readQuery: () =>
     mode === 'loading' ? new Promise(() => {}) : Promise.reject(new Error('stub store: query failed')),
-  askQuery: async () => false,
   createQuery: async () => ({}),
   updateQuery: async () => ({}),
   deleteQuery: async () => ({}),
