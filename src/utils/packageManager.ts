@@ -15,7 +15,7 @@ const NPM_MARKERS = ['package-lock.json', 'npm-shrinkwrap.json'];
  * plain `npm`/`npx` is the only thing guaranteed to be on PATH next to node.
  * yarn is only used when the tree actually says so — a `yarn.lock`,
  * `.yarnrc.yml` or a vendored `.yarn/releases/` in this directory or an
- * ancestor. That keeps existing yarn monorepos (create_now pins yarn 3.6.1)
+ * ancestor. That keeps existing yarn monorepos (some pin yarn 3.x)
  * working without assuming yarn anywhere else.
  *
  * The nearest marker wins, so an npm package checked out inside a yarn

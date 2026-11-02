@@ -10,7 +10,7 @@ import {ASSET_HOOK} from './shapeReferences.js';
  *
  * A package offers its components through `components/index` (`lib/esm/components/index.js`): per
  * linked component it exports, the index holds its export name, start shape, query shape and query
- * wire format. A host (Create Now) stores the file's triples as they are and hashes its bytes. The
+ * wire format. A host app stores the file's triples as they are and hashes its bytes. The
  * Turtle comes from `componentIndexTurtle(packageName, exports)` of the `@_linked/react` the package
  * resolves, called in a child `node` that has loaded the built `package.js` (sets the package's
  * publish root), `shapes/index.js` and `components/index.js`, in that order, with asset imports

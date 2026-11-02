@@ -1,6 +1,6 @@
 /**
  * The accessor modules of an ontology, as text: the one generator `linked generate-ontology` and
- * create-now's ontology builder share.
+ * a host app's ontology builder share.
  *
  * An ontology with prefix `<p>` gets three sibling modules in `src/ontologies/`:
  *

@@ -108,7 +108,7 @@ export interface LinkedConfig {
    * (`sh:NodeShape`) on boot — so its app-data holds the shapes its instances
    * validate/query against. Runs in LinkedServer.start()/initOnly().
    * @default true
-   * Set `false` for a server whose default dataset is a context-router (e.g. CN),
+   * Set `false` for a server whose default dataset is a context-router (e.g. a host app that routes data per project),
    * or an app that manages its own shape/dataset lifecycle.
    */
   syncShapesOnBoot?: boolean;

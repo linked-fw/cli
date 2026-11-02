@@ -201,8 +201,8 @@ export async function discoverWorkspacePackages(cwd: string): Promise<WorkspaceP
   const out: WorkspacePackage[] = [];
 
   // Include the root app itself so edits to <cwd>/src/* trigger HMR for
-  // the app's own providers (e.g. CN's src/backend.ts which registers ~25
-  // Express routes).
+  // the app's own providers (e.g. a host app's src/backend.ts that registers
+  // its own Express routes).
   if (pkgJson.name && (await fsExtra.pathExists(path.join(cwd, 'src')))) {
     out.push({name: pkgJson.name, root: cwd, srcDir: path.join(cwd, 'src')});
   }
@@ -429,8 +429,8 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
 
   // Load the app's own `.env` (Node 20.12+ `process.loadEnvFile`) if present — the
   // standard, dependency-free env source for a linked app. Node does NOT override
-  // vars already set in the environment, so CN's injected per-(project,branch) vars
-  // (PORT, FUSEKI_DATASET, CN_APP_ADMIN_SECRET, …) take precedence over the file.
+  // vars already set in the environment, so vars a host app injects per
+  // (project, branch) (PORT, FUSEKI_DATASET, …) take precedence over the file.
   try {
     const envPath = path.join(cwd, '.env');
     if (
@@ -443,7 +443,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
     // best-effort — a missing/invalid .env never blocks start
   }
 
-  // `--env` still loads env-cmd (`.env-cmdrc.json`) for CN's own start:local flow.
+  // `--env` still loads env-cmd (`.env-cmdrc.json`) for apps that still use it.
   const {ensureEnvironmentLoaded} = await import('../lifecycle.js');
   await ensureEnvironmentLoaded();
 
@@ -475,7 +475,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
 
   // Load the storage config through Vite SSR so it
   // configures the SAME LinkedStorage instance the rest of the SSR graph
-  // (LinkedServer, CN providers) uses. Replaces the former Node-direct
+  // (LinkedServer, the app's providers) uses. Replaces the former Node-direct
   // `loadBackendStorageConfig()` (which resolved @_linked/core via the
   // `default`→lib condition, a SEPARATE instance). Safe now that core's lib
   // `initTree` is idempotent. `loadBackendStorageConfig` stays in
@@ -500,7 +500,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
 
   // Load LinkedServer through Vite SSR so it shares the SAME
   // module instances as everything else in the SSR call graph. Without
-  // this, LinkedServer is loaded by Node (→ lib/esm) while CN's App.tsx +
+  // this, LinkedServer is loaded by Node (→ lib/esm) while the app's App.tsx +
   // its transitive imports are loaded by Vite (→ src/). React contexts
   // created in one tree don't reach consumers in the other, causing
   // "Cannot destructure property 'isNativeApp' of useAppContext()" type

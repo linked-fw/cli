@@ -32,7 +32,7 @@ export interface Master {
   dataset: string | null;
 }
 
-/** Preview ports: one slot per master, `45k0` for k = 1..9, outside a CN's live-app band 4000-4399. */
+/** Preview ports: one slot per master, `45k0` for k = 1..9, outside the live-app band 4000-4399 a host app uses. */
 export const MASTER_PORTS = [4510, 4520, 4530, 4540, 4550, 4560, 4570, 4580, 4590];
 
 function configGet(run: Run, repoDir: string, key: string): string | null {

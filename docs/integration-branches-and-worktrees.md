@@ -396,7 +396,7 @@ and `branch.<m>.linked-worktree` (that repo's worktree), and in the app repo
 of a repo, so the records are read from anywhere in the app.
 
 The preview port is the first of 4510, 4520, … 4590 no master on this machine holds (outside a
-CN's live-app band 4000-4399, inside the 4000-4999 a local webid.email signs clients in from;
+host app's live-app band 4000-4399, inside the 4000-4999 a local webid.email signs clients in from;
 `port + 1` is for the master's test runs, `port + 2` to `port + 9` for its steps), or `--port`.
 "On this machine" means this app's masters (its git config) and the **port registry**
 `~/.linked/master-ports.json` (`$LINKED_HOME` overrides `~/.linked`), which maps each port to
@@ -504,7 +504,7 @@ target}], relinked: [<dir>], messages}`.
 ## `linked checkout <branch>`
 
 A branch checkout of an app and the packages it lists in `linked.unpublishedPackages`, made for a
-server that keeps one checkout per project branch (Create Now) — not for a developer's app (one
+server that keeps one checkout per project branch (a hosting app) — not for a developer's app (one
 clone with [`linked localize --listed`](localize.md#commands)) nor an agent's worktree (`linked
 worktree add`, which shares the main checkout's install).
 
@@ -565,8 +565,8 @@ Re-runs in either pins mode: a detached pinned worktree fast-forwards to `origin
 a clean worktree whose head origin has moves to
 its new target when the pins change (`switched`: to another pin, or back to `origin/<default>`); one
 with uncommitted changes or commits origin lacks is `kept`. In pins mode `--add` reads a package's
-name on its default branch. Without a pin (flag or key) and `--pins-only` nothing of this applies. Create Now
-passes `--pins-only` and no `--pin`: the app branch's keys are its pins.
+name on its default branch. Without a pin (flag or key) and `--pins-only` nothing of this applies. A hosting app
+may pass `--pins-only` and no `--pin`: the app branch's keys are its pins.
 
 **The list, transitively.** From the app worktree's committed `package.json`, breadth first:
 each listed package's worktree is made, then its own `package.json` (on its branch, or its
@@ -593,7 +593,7 @@ pushed.
 its npm name is what its `package.json` declares on `<branch>` (else on its default branch), its
 worktree is `packages-local/<dir>` by the same branch rule, under its base clone's lock, and the
 result marks it `"added": true`. It never makes the install run and is never built, so adding it
-leaves the app's `package.json` and lock as committed (Create Now edits a workspace ontology the app
+leaves the app's `package.json` and lock as committed (a hosting app can edit a workspace ontology the app
 does not use this way). It is still in the `packages-local/*` glob: an install a later run makes
 for a listed package links it like every checkout there, and the app's lock-at-rest hook puts the
 committed lockfile back. Its npm name must be one (a name that would leave `packages-local/` is

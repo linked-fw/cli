@@ -10,7 +10,7 @@ status: Open -- the partly stale lib case; the main case is fixed (report 035)
 
 # 009 — The build check skips a dependency's register modules its `lib/` lacks
 
-Source: CN plan 070, independent review of `store-inference` (report 025). The unbuilt-dependency
+Source: independent review of `store-inference` (report 025). The unbuilt-dependency
 case is fixed in report 035: `collectShapeCheckInputs` sets `tsLoader` when a dependency has register
 modules only in `src/`, and the check's child passes core an `importModule` through the cli's TS
 loader.

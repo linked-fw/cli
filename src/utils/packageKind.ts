@@ -1,7 +1,7 @@
 /**
  * What `linked create-package` scaffolds, decided without touching anything.
  *
- * A linked package is one of two kinds (create-now arch-03 §Package types):
+ * A linked package is one of two kinds:
  *
  * - an **ontology package**, `<name>-ont`: exactly one ontology and nothing
  *   else. Its ontology slug is `<name>` (no `-ont`), so its terms mint

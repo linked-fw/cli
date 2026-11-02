@@ -233,7 +233,7 @@ export interface LinkedViteConfigOptions {
    *
    * For apps whose linked-package sources live OUTSIDE their own workspace tree
    * — e.g. an app consumes `packages/lincd.org/modules/*`, which sit one level
-   * up (`../lincd.org/modules/*`) when the app runs inside the CN monorepo, and under
+   * up (`../lincd.org/modules/*`) when the app runs inside a host monorepo, and under
    * `packages/lincd.org/modules/*` when the app runs from its own root. Pass BOTH
    * candidate layouts; only globs whose parent dir actually exists are scanned,
    * so the same config works in either checkout. Each glob's packages are
@@ -438,7 +438,7 @@ export async function discoverWorkspaces(
     out.push(entry);
   };
 
-  // 1. The app's own `workspaces` globs — the monorepo-root case (CN, or any app
+  // 1. The app's own `workspaces` globs — the monorepo-root case (a host app, or any app
   //    that is itself a workspace root). Only trailing `/*` patterns.
   const pkgPath = path.join(cwd, 'package.json');
   if (await fsExtra.pathExists(pkgPath)) {
@@ -635,7 +635,7 @@ export async function resolveSourceSibling(
  * two loaders, and which copy a file ends up in depends on import order: a file
  * the module runner has already evaluated is reused, one it has not is loaded
  * by Node, and Node then loads that file's relative imports itself. Measured in
- * CN: `package.js` and `ontologies/lincd-server.js` evaluated once by each
+ * a host app: `package.js` and `ontologies/lincd-server.js` evaluated once by each
  * loader, and `LocalFileStore.js` too once the package's `backend` was loaded.
  * Bundling the package makes Vite the only loader for it.
  */
@@ -681,7 +681,7 @@ export function ssrNodeShim(id: string): {id: string; code: string} {
  * start` it never gets here: `ssr.external` names the cli, so Vite externalizes the import to Node
  * before resolving it. Under Vitest, which inlines `@_linked/*`, it does get here, and handing it
  * the shim again made the shim re-export itself: an empty module, so a cli helper imported in an
- * app's Vitest run was `undefined` (create-now backlog 130).
+ * app's Vitest run was `undefined`.
  */
 export function ssrNodeShimId(
   id: string,
@@ -831,7 +831,7 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
     // `lincd-*` deps are lib-only). discoverWorkspaces() only registers
     // packages that ship `src/` on disk, so `length === 0` is the exact
     // standalone signal used elsewhere in this file. In WORKSPACE mode
-    // (CN monorepo or its workspace-member clones) this is false and none
+    // (a host monorepo or its workspace-member clones) this is false and none
     // of the standalone-gated branches below apply.
     const isStandalone = isDev && workspaces.length === 0;
 

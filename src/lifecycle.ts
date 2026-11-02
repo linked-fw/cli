@@ -38,7 +38,7 @@ import {importFile} from './utils/platform.js';
  * `.env` going first is what makes migrating a one-step job: add the flat file
  * and it takes over. The profile file can then be deleted whenever convenient.
  *
- * If neither file exists we skip silently — CN-hosted apps have their env
+ * If neither file exists we skip silently — apps run by a host app have their env
  * injected into the child process at spawn time, so there's nothing to read
  * from disk.
  */
@@ -113,7 +113,7 @@ export const envDeprecationNotices = (sources: {
 
 /**
  * Legacy loader: reads `.env-cmdrc.json`, merges `_main` plus the profile(s)
- * named by `--env a,b` (default `development`). Kept for CN and existing apps
+ * named by `--env a,b` (default `development`). Kept for existing apps
  * until they migrate to a flat `.env`.
  */
 const loadEnvCmdrc = async (
@@ -585,7 +585,7 @@ export function orderBuildToolFirst(
  *
  * Every discovered package lands in exactly one of `build` or `skipped`, and
  * `skipped` carries a reason — because the failure mode this replaces was not
- * a narrow scan, it was a SILENT one. `@_linked/maps` is a shipped Create Now
+ * a narrow scan, it was a SILENT one. `@_linked/maps` is a shipped host-app
  * dependency that never got the linked-package flag; `build-all` dropped it and
  * printed nothing, so a build covering half the workspace exited 0 and people
  * acted on it. A skip nobody can see is worse than a failure.

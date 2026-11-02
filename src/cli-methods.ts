@@ -107,7 +107,7 @@ function defaultsDir(...parts: string[]): string {
  * to import. A new app root has none (it is an app, `linked.kind: "app"`, not a linked package), so
  * there the import would be broken: refuse instead. Only the file decides: a
  * app that keeps its shapes at its root with its own `src/package.ts`, as
- * create-now does, is served as before.
+ * a host app may do, is served as before.
  */
 function assertInsidePackage(sourceFolder: string, command: string) {
   if (fs.existsSync(path.join(sourceFolder, 'package.ts'))) return;
@@ -260,8 +260,8 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
     fs.mkdirSync(targetFolder);
   }
 
-  // Scaffold from the canonical template repo (single source of truth; CN's
-  // server-side createProject clones the same repo). Shallow clone, then drop
+  // Scaffold from the canonical template repo (single source of truth; a host
+  // app that creates apps server-side clones the same repo). Shallow clone, then drop
   // .git so the new app starts with clean history.
   await execPromise(`git clone --depth 1 https://github.com/linked-fw/app-template.git "${targetFolder}"`, false, false);
   fs.removeSync(path.join(targetFolder, '.git'));
@@ -577,7 +577,7 @@ function setEnvVar(envText: string, key: string, value: string): string {
 
 /**
  * Stamp the new app's identity into the freshly-cloned template. The template
- * ships without `${var}` placeholders (so a raw CN clone boots on defaults), so
+ * ships without `${var}` placeholders (so a raw clone boots on defaults), so
  * create-app writes the real per-app values here:
  *  - `.env.example` (committed defaults for this app) + `.env` (local): APP_NAME
  *    drives the display name; APP_PREFIX names data files.

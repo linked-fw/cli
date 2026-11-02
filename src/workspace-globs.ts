@@ -13,7 +13,7 @@ import {minimatch} from './utils/minimatch.js';
  * linked-package scanner, and the dev HMR watcher). They used to each
  * hand-roll it, and all three ignored NEGATED patterns — so a monorepo that
  * excludes a directory (`"!packages/core"`) still had that directory treated
- * as a workspace member. For CN that meant dev resolving `@_linked/primitives`
+ * as a workspace member. For one host monorepo that meant dev resolving `@_linked/primitives`
  * to an untracked sibling checkout under `packages/` whose dependencies npm had
  * never installed, and the app not booting. Hence one shared helper.
  *

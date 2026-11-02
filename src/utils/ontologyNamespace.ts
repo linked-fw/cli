@@ -15,7 +15,7 @@ export const LINKED_ONTOLOGY_ROOT = 'https://linked.cm/ont/';
  * (`@_linked/server` → `https://linked.cm/ont/server/`) shares the slug of its shapes.
  *
  * Private packages do not use this root: they publish under a workspace-scoped one
- * (`https://{workspaceSlug}.id.create.now/ont/{ontologySlug}/`), which the caller passes as the
+ * (e.g. `https://{workspaceSlug}.id.example.org/ont/{ontologySlug}/`), which the caller passes as the
  * explicit `uriBase` of `create-package` / `create-ontology`.
  */
 export function defaultOntologyNamespace(name: string): string {

@@ -154,7 +154,7 @@ its export name, start shape, query shape and query wire format; other exports a
 `node` process loads the built `package.js`, `shapes/index.js` and `components/index.js` (asset
 imports such as `.css` and `.svg` stubbed) and calls `componentIndexTurtle(<package name>,
 <exports>)` from the `@_linked/react/utils/componentIndex` that the package resolves. The bytes are
-deterministic: Create Now stores the file's triples and replaces them when its hash changes. No
+deterministic: a host app that stores the file's triples and replaces them when its hash changes can rely on that. No
 `components/index`, no `@_linked/react` dependency or no linked component gives no file (one left
 by an earlier build is removed); a react without `utils/componentIndex` warns and writes none; a
 component whose query does not serialize is left out with a warning; a module that throws fails the
@@ -507,7 +507,7 @@ linked release plan                               # per repo: commits, reports, 
 linked doctor resolve                             # where Vite and Node load each @_linked package; exit 1 on two copies
 ```
 
-**Branch checkouts** (a server making one checkout per project branch, such as Create Now):
+**Branch checkouts** (a server making one checkout per project branch, such as a hosting app):
 `linked checkout <branch>` in a projects root makes one bare base clone per repo
 (`<root>/.repos/<owner>/<name>.git`), the app as a worktree on `<branch>` (created from `--from`
 and pushed when the remote lacks it) and each package of `linked.unpublishedPackages` as a

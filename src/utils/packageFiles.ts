@@ -1,7 +1,7 @@
 /**
  * The files `linked create-package --kind ontology|assets` produces, as data:
  * package-relative path → content. `createPackage` writes them; a host that
- * commits a package elsewhere (Create Now, through the GitHub API) uses the
+ * commits a package elsewhere (an app that commits through the GitHub API) uses the
  * same function, so there is one definition of what a new package holds.
  *
  * Pure apart from reading the templates in this package's own `defaults/`:

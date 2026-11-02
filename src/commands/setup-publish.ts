@@ -474,7 +474,7 @@ async function ensureLockfile(cwd: string): Promise<void> {
   // so any existing lockfile is stale.
   console.log(chalk.magenta('  Running npm install --package-lock-only...'));
 
-  // When running inside a yarn workspace (e.g. CN's packages/* layout), npm
+  // When running inside a yarn workspace (e.g. a monorepo's packages/* layout), npm
   // climbs up, detects the parent workspace, and writes the lockfile at the
   // wrong level. Work around by copying the package to a tmpdir, generating
   // the lockfile in isolation, and copying it back.
