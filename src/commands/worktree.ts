@@ -50,6 +50,7 @@ import {
   type Master,
 } from '../integration/masters.js';
 import {withMachineLockAsync} from '../integration/repo-lock.js';
+import {importFile} from '../utils/platform.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {sharedInstall} from '../localize/shared-install.js';
@@ -61,6 +62,7 @@ import {
   selectCheckouts,
   worktreesOf,
 } from './branch.js';
+import {DEFAULT_APP_PORT, resolveLinkedConfigPath} from './start.js';
 import {
   farmOverlays,
   linkNodeModules,
@@ -401,6 +403,67 @@ export function startEnv(dir: string, port: number | undefined, dataset: string 
   return env;
 }
 
+/** The port the app at `root` listens on: its `.env` `PORT`, else the default. */
+export function appPort(root: string): number {
+  return parseInt(envValue(path.join(root, '.env'), 'PORT') ?? '', 10) || DEFAULT_APP_PORT;
+}
+
+/**
+ * The npm script that clones the app's data into a dataset, when the app's
+ * linked config names none with `datasetCloneScript`. It takes the target
+ * dataset as its one argument.
+ */
+export const DEFAULT_DATASET_CLONE_SCRIPT = 'clone-dataset';
+
+/**
+ * The lines to print for cloning the data of the app at `root` into `dataset`
+ * (a worktree on a dataset of its own starts on an empty one). `configured` is
+ * `datasetCloneScript` from the app's linked config. The command when the
+ * app's `package.json` has the script, else a warning that the dataset starts
+ * empty and how to add the script.
+ */
+export function datasetCloneHint(root: string, dataset: string, configured?: string): string[] {
+  const script = configured || DEFAULT_DATASET_CLONE_SCRIPT;
+  const ds = shellQuote(dataset);
+  const pkg = path.join(root, 'package.json');
+  const scripts = (readJson(pkg)?.scripts ?? {}) as Record<string, unknown>;
+  if (typeof scripts[script] === 'string') {
+    return [`Clone the data into ${dataset} first (from ${root}): npm run ${script} -- ${ds}`];
+  }
+  if (configured) {
+    return [
+      `Warning: datasetCloneScript in the linked config names "${configured}", but ${pkg} has no such script, so ${dataset} starts empty unless it is cloned by hand.`,
+      `  Add a "${configured}" script that copies the app's data into the dataset its argument names (npm run ${configured} -- ${ds}).`,
+    ];
+  }
+  return [
+    `Warning: the app has no ${DEFAULT_DATASET_CLONE_SCRIPT} script, so ${dataset} starts empty unless it is cloned by hand.`,
+    `  To have one: add a "${DEFAULT_DATASET_CLONE_SCRIPT}" script to ${pkg} that copies the app's data into the dataset its argument names (npm run ${DEFAULT_DATASET_CLONE_SCRIPT} -- ${ds}), or name another script with datasetCloneScript in the linked config.`,
+  ];
+}
+
+/**
+ * `datasetCloneScript` from the linked config of the app at `root`; undefined
+ * when there is no config, it does not set the key, or it fails to load (the
+ * hint then looks for the default script).
+ */
+export async function readDatasetCloneScript(root: string): Promise<string | undefined> {
+  const file = resolveLinkedConfigPath(root);
+  if (!fs.existsSync(file)) return undefined;
+  try {
+    const mod = await importFile(file);
+    const value: unknown = (mod?.default ?? mod)?.datasetCloneScript;
+    return typeof value === 'string' && value ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `datasetCloneHint` with the script the app's linked config names. */
+export async function datasetCloneMessages(root: string, dataset: string): Promise<string[]> {
+  return datasetCloneHint(root, dataset, await readDatasetCloneScript(root));
+}
+
 /** `cd <dir> && <env> npm run start:local` (or `npm start` without that script). */
 export function startCommandFor(dir: string, env: string[]): string {
   const pkgJson = readJson(path.join(dir, 'package.json'));
@@ -626,18 +689,10 @@ export async function worktreeAdd(
     result.messages.push(
       master?.port
         ? `(pick a free port: steps of ${master.name} use ${stepPorts(master.port)})`
-        : '(pick a free port: the main checkout uses 4040)',
+        : `(pick a free port: the main checkout uses ${appPort(root)})`,
     );
   }
-  const backup = path.join(root, 'scripts', 'backup-cn-state.sh');
-  const restore = path.join(root, 'scripts', 'restore-fuseki-dataset.sh');
-  if (options.dataset && fs.existsSync(backup) && fs.existsSync(restore)) {
-    result.messages.push(
-      `Clone the data into ${options.dataset} first (from ${root}):`,
-      `  scripts/backup-cn-state.sh --yes`,
-      `  scripts/restore-fuseki-dataset.sh <the cn-main dump it wrote> ${shellQuote(options.dataset)} --yes`,
-    );
-  }
+  if (options.dataset) result.messages.push(...(await datasetCloneMessages(root, options.dataset)));
   result.messages.push(
     `Don't run npm install in the worktree: node_modules links into ${installRoot === root ? "the main checkout's" : `${installRoot}'s`} install (the git hooks skip it there too).`,
     'After an npm install in the main checkout, or a package worktree added by hand: linked worktree relink, from the worktree.',

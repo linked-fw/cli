@@ -44,6 +44,9 @@ export const VITE_CONFIG_FILES = ['vite.config.ts', 'vite.config.js', 'vite.conf
  */
 export const LINKED_CONFIG_FILES = ['linked.config.js', 'lincd.config.js'];
 
+/** The port an app listens on when neither `PORT` nor its config sets one. */
+export const DEFAULT_APP_PORT = 4040;
+
 /**
  * Absolute path to the app's linked config. Returns the first name that exists;
  * when none does, the current name — the caller still `existsSync`-guards the
@@ -308,7 +311,7 @@ export function resolveAppUrl(
   env: Record<string, string | undefined>,
   configuredPort?: number,
 ): string {
-  const port = parseInt(env.PORT ?? '', 10) || configuredPort || 4040;
+  const port = parseInt(env.PORT ?? '', 10) || configuredPort || DEFAULT_APP_PORT;
   return `http://localhost:${port}/`;
 }
 

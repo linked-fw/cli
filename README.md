@@ -490,6 +490,7 @@ farm in which the worktree's own checkouts win), and land locally with
 linked branch start overhaul --target main core   # app + packages-local/_linked-core on `overhaul`
 linked branch status                              # per repo: branch, target, dirty, ahead/behind, off-branch
 linked worktree add agent1 --with core --port 4041  # ../wt/agent1 with its own core worktree; Vite, tsc and Node load it
+linked worktree add agent2 --dataset wt-agent2    # its own dataset: prints `npm run clone-dataset -- wt-agent2` (or the script linked.config.js names with datasetCloneScript), else warns it starts empty
 linked worktree relink                            # in a worktree: rebuild its node_modules link farm (after npm install in the main checkout)
 linked worktree list                              # agent worktrees and whether each branch has landed
 linked worktree remove agent1                     # refuses while a branch has not landed (--force, --delete-unlanded)

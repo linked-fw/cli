@@ -264,8 +264,8 @@ when it has none (then agents land straight into that branch).
 |---|---|
 | `--with <pkgs>` | comma-separated `packages-local/` checkouts the agent changes (`@_linked/core`, `core` or `_linked-core`) |
 | `--app-detached` | check the app out detached at the base tip, for work that changes only packages; needs `--with` |
-| `--port <n>` | the port in the printed start command (default `<port>`; the main checkout uses 4040) |
-| `--dataset <name>` | adds `FUSEKI_DATASET=<name>` to the printed start command, and the clone commands when the app has them |
+| `--port <n>` | the port in the printed start command (default `<port>`; the hint names the main checkout's port: its `.env` `PORT`, else 4040) |
+| `--dataset <name>` | adds `FUSEKI_DATASET=<name>` to the printed start command, and how to clone the app's data into it (see Cloning a dataset) |
 | `--dir <path>` | where to put it; default `<parent of the app root>/wt/<agent>`; refused anywhere inside the app root |
 | `--from <m>` | a step of master `<m>` (see Masters); implied when run in the master's worktree |
 
@@ -417,9 +417,31 @@ cd ../wt/m1 && PORT=4510 SITE_ROOT=http://localhost:4510 CN_PROJECTS_ROOT=../wt/
 `SITE_ROOT` is set when the linked `.env` sets it (the server writes absolute asset URLs from it,
 so without it a second server serves the first one's bundles; every `worktree add` start command
 sets it too), `CN_PROJECTS_ROOT` when the `.env` sets it (so the preview's app clones are its
-own), `FUSEKI_DATASET` with `--dataset`. Refuses, making nothing, when `<m>` exists in a repo,
+own), `FUSEKI_DATASET` with `--dataset` (plus the clone hint, see Cloning a dataset). Refuses, making nothing, when `<m>` exists in a repo,
 contains `--`, equals a target, the directory exists, the port is another master's, or it runs
 outside the main checkout. Without `--worktree`, `branch start` is unchanged.
+
+### Cloning a dataset
+
+A worktree or master started with `--dataset <name>` runs on a dataset of its own, which starts
+empty. The cli does not know the app's store, so the app supplies the copy as an npm script in its
+root `package.json` that takes the target dataset as its one argument: `clone-dataset` by
+default, or the script `datasetCloneScript` names in the app's `linked.config.js`:
+
+```js
+export default defineConfig({datasetCloneScript: 'data:clone'});
+```
+
+`worktree add --dataset` and `branch start --worktree --dataset` then print the command to run
+before starting it:
+
+```
+Clone the data into wt-a1 first (from /path/to/app): npm run clone-dataset -- wt-a1
+```
+
+Without the script (or when `datasetCloneScript` names one `package.json` lacks) they print a
+warning instead: the dataset starts empty unless it is cloned by hand, and how to add the script.
+The script should refuse to overwrite the app's own datasets.
 
 ### Steps: `linked worktree add <agent> --from <m>`
 
@@ -718,7 +740,7 @@ Exits 1 when any row is `two-copies`, 0 otherwise. `--json` prints the rows
   package gets the main checkout's copy in Node and `tsc` (Vite gives it the worktree's).
 - **Dependency changes** need a worktree with its own install (see Shared install).
 - **Data is shared.** Worktrees use the same data store unless started with a dataset of their
-  own (`--dataset`).
+  own (`--dataset`, filled by the app's clone script: see Cloning a dataset).
 - **`linked checkout` does not lock.** Concurrent runs on one base clone are the caller's to
   serialise.
 - **`linked worktree remove --branch` reads a squash merge as not landed**; use `--force`.

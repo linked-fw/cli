@@ -112,4 +112,14 @@ export interface LinkedConfig {
    * or an app that manages its own shape/dataset lifecycle.
    */
   syncShapesOnBoot?: boolean;
+
+  /**
+   * The npm script in the app's root `package.json` that copies the app's data
+   * into a dataset, given its name as the one argument
+   * (`npm run <script> -- <dataset>`). `linked worktree add --dataset` and
+   * `linked branch start --worktree --dataset` print that command for the new
+   * dataset, and warn that it starts empty when the script does not exist.
+   * @default 'clone-dataset'
+   */
+  datasetCloneScript?: string;
 }

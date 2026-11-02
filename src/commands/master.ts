@@ -44,10 +44,10 @@ import {readFarmMarker} from './worktree-node-modules.js';
 import {
   addPackageWorktree,
   createWorktreeSet,
+  datasetCloneMessages,
   defaultWorktreeDir,
   mainCheckoutOf,
   realish,
-  shellQuote,
   startCommandFor,
   startEnv,
   worktreeList,
@@ -237,11 +237,7 @@ async function makeMaster(
     `After each landing into ${name}: npx linked build in each changed package worktree under ${path.join(dir, 'packages-local')}, then restart the preview.`,
     `When the owner approves: linked branch land ${name}, from ${root}.`,
   );
-  if (options.dataset) {
-    messages.push(
-      `Clone the data into ${options.dataset} first (from ${root}): scripts/backup-cn-state.sh --yes, then scripts/restore-fuseki-dataset.sh <the cn-main dump> ${shellQuote(options.dataset)} --yes`,
-    );
-  }
+  if (options.dataset) messages.push(...(await datasetCloneMessages(root, options.dataset)));
   result.code = 0;
   return result;
 }
@@ -491,7 +487,7 @@ export async function branchLand(
   result.code = trouble ? 5 : 0;
   result.messages.push(
     '',
-    landed.length ? `Landed ${name}${trouble ? ', with the failures above' : ''}. Restart the CN on ${root} so it runs the landed code.` : `Nothing to land: every target has ${name}.`,
+    landed.length ? `Landed ${name}${trouble ? ', with the failures above' : ''}. Restart the app on ${root} so it runs the landed code.` : `Nothing to land: every target has ${name}.`,
     `Remove the master once done with it: linked worktree remove ${name}.`,
   );
   return result;

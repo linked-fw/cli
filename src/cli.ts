@@ -720,7 +720,7 @@ branch
   .option('--worktree', "Start a master: <name> in a worktree of its own; the checkouts stay where they are.")
   .option('--with <packages>', 'With --worktree: comma-separated packages-local/ checkouts to give a worktree on <name> (as the positional packages).')
   .option('--port <n>', "With --worktree: the master's preview port.")
-  .option('--dataset <name>', "With --worktree: a dataset of the master's own for its preview (FUSEKI_DATASET).")
+  .option('--dataset <name>', "With --worktree: a dataset of the master's own for its preview (FUSEKI_DATASET), with the clone command as for worktree add --dataset.")
   .option('--dir <path>', "With --worktree: where to put the master's worktree.")
   .action(async (name: string, packages: string[], options) => {
     if (options.worktree) {
@@ -824,7 +824,7 @@ worktree
   .option('--with <packages>', 'Comma-separated packages-local/ checkouts to change: @_linked/core, core or _linked-core.')
   .option('--app-detached', 'Check the app out detached at the base tip: for work that changes only packages.')
   .option('--port <n>', 'The port for the printed start command.')
-  .option('--dataset <name>', 'A dataset of its own for the printed start command (FUSEKI_DATASET).')
+  .option('--dataset <name>', "A dataset of its own for the printed start command (FUSEKI_DATASET), with the command that clones the app's data into it (its clone-dataset npm script, or the one datasetCloneScript names in linked.config.js).")
   .option('--dir <path>', 'Where to put the worktree.')
   .option('--from <master>', "A step of this master (linked branch start <master> --worktree): branch <master>--<agent> from <master>, default dir <master's worktree dir>/../<master>--<agent>, --with from the master's package worktrees, node_modules linking straight into the master's install with the master's packages under the step's own. Implied when run in the master's worktree.")
   .action(async (agent: string, options) => {
