@@ -34,7 +34,7 @@ export {
   normalizeAccessURL,
   resolveAppAssetsStore,
 } from './app-release/app-assets-store.js';
-export {buildViteApp, hasViteConfig} from './commands/build-app.js';
+export {buildViteApp, compileViteApp, hasViteConfig} from './commands/build-app.js';
 export {publishApp} from './commands/publish-app.js';
 export {
   serveCompiledApp,

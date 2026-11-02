@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import {localizeListed} from '../../../src/localize/localize.js';
 import {makeRun, type Deps, type RunOptions} from '../../../src/localize/run.js';
-import {commitOn, git, makeRemotes, tmp, type Remotes} from '../checkout/helpers.js';
+import {appJsonWithKeys, commitOn, git, makeRemotes, tmp, type Remotes} from '../checkout/helpers.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -128,6 +128,21 @@ describe('linked localize --listed', () => {
     assert.equal(localizeListed({build: ''}, deps), 6);
     assert.ok(out.some((m) => /declares itself as "acme-ont", not "acme-other"/.test(m)), out.join('\n'));
     assert.ok(!fs.existsSync(path.join(app, 'packages-local', 'acme-other')));
+  });
+
+  test("an entry's branch key wins over the app's branch; a key the repo lacks stays on the default", () => {
+    commitOn(r.base, r.ont, 'rene/topic', 'topic.ttl', '# topic\n');
+    const app = cloneApp(r, 'change-1');
+    fs.writeFileSync(
+      path.join(app, 'package.json'),
+      appJsonWithKeys(r, {'acme-ont': 'rene/topic', 'acme-assets': 'u9/gone'}),
+    );
+    const {deps, out} = depsFor(app);
+    assert.equal(localizeListed({build: ''}, deps), 0, out.join('\n'));
+    assert.equal(git(path.join(app, 'packages-local', 'acme-ont'), 'rev-parse', '--abbrev-ref', 'HEAD'), 'rene/topic');
+    // acme-assets has change-1, but its key names u9/gone, which its repo lacks.
+    assert.equal(git(path.join(app, 'packages-local', 'acme-assets'), 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+    assert.ok(out.some((m) => /acme-assets: its repo has no branch u9\/gone, so it stays on main/.test(m)), out.join('\n'));
   });
 
   test('no list: nothing to do', () => {

@@ -13,6 +13,8 @@ import {
   appBranch,
   branchDir,
   packageBranch,
+  pinsFromKeys,
+  stripBranchKeys,
   walkUnpublished,
   type ListedPackage,
 } from '../../../src/integration/unpublished.js';
@@ -98,8 +100,112 @@ describe('unpublishedPackages', () => {
   });
 });
 
+describe('the branch key', () => {
+  const keyed = (branch: unknown) => ({
+    name: 'app',
+    linked: {unpublishedPackages: {ont: {repo: 'https://github.com/org/ont.git', branch}}},
+  });
+
+  test('a valid branch is kept', () => {
+    assert.deepEqual(unpublishedPackages(keyed('rene/topic')), [
+      {name: 'ont', repo: 'https://github.com/org/ont.git', branch: 'rene/topic'},
+    ]);
+  });
+
+  test('main, HEAD, empty, invalid names and non-strings refuse, naming the entry', () => {
+    for (const bad of ['main', 'HEAD', '', 'a..b', '-x', 'a b', 'x.lock', 3, null, {}]) {
+      const e = refusal(() => unpublishedPackages(keyed(bad)));
+      assert.equal(e.code, 6, String(bad));
+      assert.match(e.message, /linked\.unpublishedPackages of app: "ont" has branch/);
+    }
+  });
+});
+
+describe('pinsFromKeys and stripBranchKeys', () => {
+  test('pinsFromKeys: the keyed entries as npm name -> branch', () => {
+    assert.deepEqual(
+      pinsFromKeys([
+        {name: 'a', repo: 'https://x/a.git', branch: 'rene/topic'},
+        {name: 'b', repo: 'https://x/b.git'},
+      ]),
+      {a: 'rene/topic'},
+    );
+  });
+
+  test('stripBranchKeys removes only the keys, keeping key order, indent and the trailing newline', () => {
+    const pkg = {
+      name: 'app',
+      version: '1.0.0',
+      linked: {
+        unpublishedPackages: {
+          a: {repo: 'https://x/a.git', branch: 'rene/topic', note: 'kept'},
+          b: {repo: 'https://x/b.git'},
+        },
+        kind: 'app',
+      },
+      branch: 'top-level stays',
+    };
+    for (const [indent, eol] of [[2, '\n'], [4, ''], ['\t', '\n']] as const) {
+      const {text, stripped} = stripBranchKeys(JSON.stringify(pkg, null, indent) + eol);
+      assert.deepEqual(stripped, ['a']);
+      const want = JSON.parse(JSON.stringify(pkg));
+      delete want.linked.unpublishedPackages.a.branch;
+      assert.equal(text, JSON.stringify(want, null, indent) + eol);
+    }
+    const none = JSON.stringify({name: 'x', linked: {unpublishedPackages: {b: {repo: 'r'}}}}, null, 3);
+    assert.deepEqual(stripBranchKeys(none), {text: none, stripped: []});
+  });
+});
+
 describe('walkUnpublished', () => {
   const R = (n: string) => `https://github.com/org/${n}.git`;
+  const withKeys = (name: string, entries: Record<string, {repo: string; branch?: string}>) => ({
+    name,
+    linked: {kind: 'app', unpublishedPackages: entries},
+  });
+
+  test("keeps the root's keys, drops a package's with one warning each", () => {
+    const warnings: string[] = [];
+    const got = walkUnpublished(
+      withKeys('app', {a: {repo: R('a'), branch: 'rene/topic'}, b: {repo: R('b')}}),
+      (e) => (e.name === 'b' ? withKeys('b', {c: {repo: R('c'), branch: 'other'}}) : null),
+      (m) => warnings.push(m),
+    );
+    assert.deepEqual(
+      got.map((p) => [p.name, p.branch]),
+      [
+        ['a', 'rene/topic'],
+        ['b', undefined],
+        ['c', undefined],
+      ],
+    );
+    assert.ok(!('branch' in got[2]));
+    assert.deepEqual(warnings, ["b's list names branch other for c; ignored, the app's list decides."]);
+  });
+
+  test('a name reached twice with differing keys is no conflict; the root key stays', () => {
+    const warnings: string[] = [];
+    const got = walkUnpublished(
+      withKeys('app', {a: {repo: R('a'), branch: 'x'}, b: {repo: R('b')}}),
+      (e) =>
+        e.name === 'b'
+          ? withKeys('b', {a: {repo: R('a'), branch: 'y'}, c: {repo: R('c'), branch: 'z'}})
+          : e.name === 'c'
+            ? withKeys('c', {d: {repo: R('d'), branch: 'w'}, a: {repo: R('a')}})
+            : null,
+      (m) => warnings.push(m),
+    );
+    assert.deepEqual(
+      got.map((p) => [p.name, p.branch, p.requiredBy]),
+      [
+        ['a', 'x', ['app', 'b', 'c']],
+        ['b', undefined, ['app']],
+        ['c', undefined, ['b']],
+        ['d', undefined, ['c']],
+      ],
+    );
+    assert.equal(warnings.length, 3);
+  });
 
   test('breadth first, each package once, with every requirer', () => {
     const packages: Record<string, unknown> = {

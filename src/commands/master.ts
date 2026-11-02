@@ -21,20 +21,37 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
-import {freeMasterPort, listMasters, masterOf, MASTER_PORTS, stepPorts} from '../integration/masters.js';
+import {
+  freeMasterPort,
+  listMasters,
+  masterOf,
+  MASTER_PORTS,
+  MASTER_PORTS_LOCK,
+  portHolder,
+  readPortRegistry,
+  recordPort,
+  stepPorts,
+  type PortEntry,
+} from '../integration/masters.js';
+import {withMachineLockAsync} from '../integration/repo-lock.js';
+import {LocalizeError} from '../localize/errors.js';
 import {currentBranch, getTarget, listRepos, setTarget, type RepoInfo} from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {localBranchExists, refExists, selectCheckouts, worktreesOf} from './branch.js';
 import {dependencyOrder} from './release.js';
+import {readFarmMarker} from './worktree-node-modules.js';
 import {
+  addPackageWorktree,
   createWorktreeSet,
   defaultWorktreeDir,
+  mainCheckoutOf,
   realish,
   shellQuote,
   startCommandFor,
   startEnv,
   worktreeList,
+  worktreeRelink,
 } from './worktree.js';
 
 export interface BranchStartWorktreeOptions {
@@ -106,15 +123,6 @@ export async function branchStartWorktree(
   if ('error' in chosen) return refuse(chosen.error);
   const selected: RepoInfo[] = [app, ...chosen.repos];
 
-  const masters = await listMasters(run, root);
-  if (options.port !== undefined) {
-    const holder = masters.find((m) => m.port === options.port);
-    if (holder) return refuse(`Port ${options.port} is master ${holder.name}'s. Pick another, or leave --port out.`);
-  }
-  const port = options.port ?? freeMasterPort(masters);
-  if (port === null) return refuse(`Every preview slot (${MASTER_PORTS.join(', ')}) is taken by a master: remove one, or pass --port.`);
-  result.port = port;
-
   const problems: string[] = [];
   const plan = selected.map((repo) => ({repo, target: options.target ?? repo.branch}));
   for (const {repo, target} of plan) {
@@ -128,6 +136,47 @@ export async function branchStartWorktree(
   }
   if (problems.length) return refuse(...problems, 'Nothing was made.');
 
+  // Choosing the port, making the worktrees and recording the master hold the machine-wide lock, so
+  // two masters started at once (in this app or another) never take one port.
+  try {
+    return await withMachineLockAsync(MASTER_PORTS_LOCK, `linked branch start ${name} --worktree (${root})`, async () => {
+      const masters = await listMasters(run, root);
+      const registry = readPortRegistry();
+      if (options.port !== undefined) {
+        const holder = portHolder(options.port, masters, registry);
+        if (holder) return refuse(`Port ${options.port} is master ${holder.master}'s (${holder.dir}). Pick another, or leave --port out.`);
+      }
+      const port = options.port ?? freeMasterPort(masters, registry);
+      if (port === null) return refuse(`Every preview slot (${MASTER_PORTS.join(', ')}) is taken by a master: remove one, or pass --port.`);
+      result.port = port;
+      const made = await makeMaster(root, name, dir, port, app, plan, local, selected, options, result, run);
+      if (made.code === 0) recordPort({port, app: root, master: name, dir});
+      return made;
+    });
+  } catch (error) {
+    if (error instanceof LocalizeError) {
+      result.code = error.code;
+      result.messages.push(error.message, 'Nothing was made.');
+      return result;
+    }
+    throw error;
+  }
+}
+
+/** Make master `name` on `port` once every check passed: the worktrees, then the records. */
+async function makeMaster(
+  root: string,
+  name: string,
+  dir: string,
+  port: number,
+  app: RepoInfo,
+  plan: {repo: RepoInfo; target: string | null}[],
+  local: RepoInfo[],
+  selected: RepoInfo[],
+  options: BranchStartWorktreeOptions,
+  result: BranchStartWorktreeResult,
+  run: Run,
+): Promise<BranchStartWorktreeResult> {
   const messages = result.messages;
   const undoSet = createWorktreeSet(
     {
@@ -490,6 +539,271 @@ export async function runBranchLand(
     build: options.build,
     push: options.push,
   });
+  if (options.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  else {
+    const write = result.code === 0 ? console.log : console.error;
+    for (const m of result.messages) write(m);
+  }
+  process.exitCode = result.code;
+}
+
+export interface BranchListRepo {
+  /** `.` for the app, `packages-local/<dir>` for a package checkout. */
+  rel: string;
+  target: string | null;
+  /** That repo's worktree of the branch, when it records one (a master's). */
+  worktree: string | null;
+}
+
+export interface BranchListEntry {
+  name: string;
+  kind: 'master' | 'integration';
+  /** The app's target, else the first repo's. */
+  target: string | null;
+  repos: BranchListRepo[];
+  /** A master's app worktree. */
+  dir: string | null;
+  port: number | null;
+  dataset: string | null;
+  /** A master's step agents. */
+  steps: string[];
+}
+
+export interface BranchList {
+  branches: BranchListEntry[];
+  /** Masters of other apps holding a preview port on this machine (the port registry). */
+  otherPorts: PortEntry[];
+}
+
+/** `branch.<b>.linked-target` and `-worktree` of the repo at `dir`, by branch. */
+function branchRecords(run: Run, dir: string): Map<string, {target: string | null; worktree: string | null}> {
+  const out = new Map<string, {target: string | null; worktree: string | null}>();
+  const r = run('git', ['config', '--get-regexp', '^branch\\..*\\.linked-(target|worktree)$'], {cwd: dir});
+  if (r.status !== 0) return out;
+  for (const line of r.stdout.split('\n')) {
+    const space = line.indexOf(' ');
+    if (space < 0) continue;
+    const key = line.slice(0, space);
+    const value = line.slice(space + 1).trim();
+    const m = /^branch\.(.+)\.linked-(target|worktree)$/.exec(key);
+    if (!m || !value) continue;
+    const rec = out.get(m[1]) ?? {target: null, worktree: null};
+    if (m[2] === 'target') rec.target = value;
+    else rec.worktree = value;
+    out.set(m[1], rec);
+  }
+  return out;
+}
+
+/**
+ * `linked branch list`: the app's integration branches and masters in one view, from the
+ * `branch.<b>.linked-target` and `-worktree` records of the app repo and every `packages-local/`
+ * checkout, the masters' ports, datasets and steps, and the other apps' masters on this machine.
+ * Run anywhere in the app: it lists from the main checkout.
+ */
+export async function branchList(appRoot: string, run: Run = makeRun(appRoot)): Promise<BranchList> {
+  const here = realish(appRoot);
+  const root = mainCheckoutOf(run, here) ?? here;
+  const repos = await listRepos(root, run);
+  const masters = new Map((await listMasters(run, root)).map((m) => [m.name, m]));
+  const listed = await worktreeList(root, {all: true}, run);
+  const stepsOf = new Map(listed.masters.map((m) => [m.name, m.steps.map((s) => s.agent)]));
+
+  const byName = new Map<string, BranchListRepo[]>();
+  for (const repo of repos) {
+    for (const [name, rec] of branchRecords(run, repo.dir)) {
+      const list = byName.get(name) ?? [];
+      list.push({rel: repo.rel, target: rec.target, worktree: rec.worktree});
+      byName.set(name, list);
+    }
+  }
+  const branches: BranchListEntry[] = [...byName].map(([name, list]) => {
+    const master = masters.get(name);
+    return {
+      name,
+      kind: master ? 'master' : 'integration',
+      target: list.find((r) => r.rel === '.')?.target ?? list.find((r) => r.target)?.target ?? null,
+      repos: list,
+      dir: master?.dir ?? null,
+      port: master?.port ?? null,
+      dataset: master?.dataset ?? null,
+      steps: master ? stepsOf.get(name) ?? [] : [],
+    };
+  });
+  branches.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'master' ? -1 : 1));
+  const otherPorts = readPortRegistry().filter((e) => realish(e.app) !== root);
+  return {branches, otherPorts};
+}
+
+/** At most this many repos are named in a `branch list` row; `--json` has them all. */
+const REPOS_SHOWN = 5;
+
+const repoNames = (repos: BranchListRepo[]): string => {
+  const names = repos.map((r) => (r.rel === '.' ? 'app' : path.basename(r.rel)));
+  return names.length > REPOS_SHOWN ? `${names.slice(0, REPOS_SHOWN - 1).join(', ')}, … (+${names.length - REPOS_SHOWN + 1})` : names.join(', ');
+};
+
+/** The table of `branch list`. */
+export function formatBranchList(list: BranchList): string {
+  const header = ['BRANCH', 'KIND', 'TARGET', 'REPOS', 'WORKTREE', 'PORT', 'DATASET', 'STEPS'];
+  const rows = list.branches.map((b) => [
+    b.name,
+    b.kind,
+    b.target ?? '-',
+    repoNames(b.repos),
+    b.dir ?? '(checkouts)',
+    b.port === null ? '-' : String(b.port),
+    b.dataset ?? '-',
+    b.kind === 'master' ? String(b.steps.length) : '-',
+  ]);
+  const lines: string[] = [];
+  if (rows.length) {
+    const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+    for (const r of [header, ...rows]) lines.push(r.map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i]))).join('  ').trimEnd());
+  } else {
+    lines.push('No integration branches or masters.');
+  }
+  if (list.otherPorts.length) {
+    lines.push(`Other masters on this machine: ${list.otherPorts.map((e) => `${e.port} ${e.master} (${e.app})`).join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+/** The commander action for `branch list`. */
+export async function runBranchList(options: {json?: boolean}): Promise<void> {
+  const list = await branchList(process.cwd());
+  process.stdout.write((options.json ? JSON.stringify(list, null, 2) : formatBranchList(list)) + '\n');
+  process.exitCode = 0;
+}
+
+export interface BranchAddPackageOptions {
+  /** The branch `<m>` starts from (and its target) in every added repo; default each checkout's current branch. */
+  target?: string;
+}
+
+export interface BranchAddPackageResult {
+  /** 0 added and relinked, 1 refused (nothing made) or failed (undone), or a relink failed. */
+  code: number;
+  added: {rel: string; dir: string; target: string}[];
+  relinked: string[];
+  messages: string[];
+}
+
+/**
+ * `linked branch add-package <m> <packages...>`: give running master `<m>` a worktree of more
+ * `packages-local/` checkouts, as `branch start --worktree` would have made them, then relink the
+ * master and each of its steps. Every check runs before anything is made; when making one fails,
+ * what this run made is undone. Run anywhere in the app.
+ */
+export async function branchAddPackage(
+  appRoot: string,
+  name: string,
+  packages: string[],
+  options: BranchAddPackageOptions = {},
+  run: Run = makeRun(appRoot),
+): Promise<BranchAddPackageResult> {
+  const here = realish(appRoot);
+  const root = mainCheckoutOf(run, here) ?? here;
+  const result: BranchAddPackageResult = {code: 1, added: [], relinked: [], messages: []};
+  const refuse = (...messages: string[]): BranchAddPackageResult => {
+    result.messages.push(...messages);
+    return result;
+  };
+
+  const master = await masterOf(run, root, name);
+  if (!master) return refuse(`${name} is not a master: no branch.${name}.linked-worktree is recorded.`, 'Nothing was made.');
+  const masterDir = realish(master.dir);
+  if (!fs.existsSync(masterDir)) return refuse(`The worktree of master ${name} (${masterDir}) does not exist.`, 'Nothing was made.');
+  if (!packages.length) return refuse('Name at least one packages-local/ checkout to add.');
+  const local = (await listRepos(root, run)).slice(1);
+  const chosen = selectCheckouts(local, packages);
+  if ('error' in chosen) return refuse(chosen.error, 'Nothing was made.');
+
+  const problems: string[] = [];
+  const plan: {repo: RepoInfo; target: string; dir: string}[] = [];
+  for (const repo of [...new Set(chosen.repos)]) {
+    const dir = path.join(masterDir, 'packages-local', path.basename(repo.dir));
+    const recorded = run('git', ['config', '--get', `branch.${name}.linked-worktree`], {cwd: repo.dir}).stdout.trim();
+    if (recorded || fs.existsSync(dir)) {
+      problems.push(`${repo.rel}: already in master ${name} (${recorded || dir}).`);
+      continue;
+    }
+    const target = options.target ?? repo.branch;
+    if (!target) {
+      problems.push(`${repo.rel}: detached HEAD; put it on the branch to work from, or pass --target.`);
+      continue;
+    }
+    if (target === name) problems.push(`${repo.rel}: "${name}" is the target itself; the master's branch needs a name of its own.`);
+    else if (!refExists(run, repo.dir, target)) problems.push(`${repo.rel}: "${target}" does not exist.`);
+    if (localBranchExists(run, repo.dir, name)) problems.push(`${repo.rel}: branch ${name} already exists.`);
+    const stepCopies = worktreesOf(run, repo.dir).filter((w) => w.branch?.startsWith(`${name}--`));
+    if (stepCopies.length) {
+      problems.push(`${repo.rel}: a step of ${name} has a worktree of it already (${stepCopies.map((w) => `${w.path} on ${w.branch}`).join(', ')}).`);
+    }
+    plan.push({repo, target, dir});
+  }
+  if (problems.length) return refuse(...problems, 'Nothing was made.');
+
+  const messages = result.messages;
+  const installRoot = readFarmMarker(masterDir)?.installRoot ?? root;
+  const undo: (() => void)[] = [];
+  const undoAll = (): BranchAddPackageResult => {
+    for (const fn of undo.reverse()) {
+      try {
+        fn();
+      } catch (error) {
+        messages.push(`undo failed: ${(error as Error).message}`);
+      }
+    }
+    result.added = [];
+    messages.push('Undid what this run had made.');
+    return result;
+  };
+  for (const {repo, target, dir} of plan) {
+    const undoWorktree = addPackageWorktree({dir: masterDir, installRoot, gitRoot: root, repo, branch: name, start: target}, messages, run);
+    if (!undoWorktree) return undoAll();
+    undo.push(undoWorktree);
+    try {
+      await setTarget(repo.dir, name, target, run);
+      undo.push(() => void run('git', ['config', '--unset', `branch.${name}.linked-target`], {cwd: repo.dir}));
+      const r = run('git', ['config', `branch.${name}.linked-worktree`, dir], {cwd: repo.dir});
+      if (r.status !== 0) throw new Error(`git config branch.${name}.linked-worktree failed in ${repo.rel}: ${failed(r)}`);
+      undo.push(() => void run('git', ['config', '--unset', `branch.${name}.linked-worktree`], {cwd: repo.dir}));
+    } catch (error) {
+      messages.push(`failed: ${(error as Error).message}`);
+      return undoAll();
+    }
+    result.added.push({rel: repo.rel, dir, target});
+  }
+
+  const steps = (await worktreeList(root, {all: true}, run)).masters.find((m) => m.name === name)?.steps ?? [];
+  let relinkFailed = false;
+  for (const dir of [masterDir, ...steps.map((s) => s.dir)]) {
+    const r = await worktreeRelink(root, undefined, {dir}, run);
+    if (r.code === 0) {
+      result.relinked.push(dir);
+      messages.push(`${dir}: relinked`);
+    } else {
+      relinkFailed = true;
+      messages.push(`${dir}: relink failed: ${r.messages.join(' ')}`);
+    }
+  }
+  const has = fs.existsSync(path.join(masterDir, 'packages-local'))
+    ? fs.readdirSync(path.join(masterDir, 'packages-local')).filter((d) => fs.existsSync(path.join(masterDir, 'packages-local', d, '.git'))).sort()
+    : [];
+  messages.push(`Master ${name} now has: ${has.join(', ')}`, 'Build each added package there: npx linked build');
+  if (relinkFailed) messages.push('Relink the worktrees that failed once fixed: linked worktree relink --all.');
+  result.code = relinkFailed ? 1 : 0;
+  return result;
+}
+
+/** The commander action for `branch add-package`. */
+export async function runBranchAddPackage(
+  name: string,
+  packages: string[],
+  options: {target?: string; json?: boolean},
+): Promise<void> {
+  const result = await branchAddPackage(process.cwd(), name, packages, {target: options.target});
   if (options.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   else {
     const write = result.code === 0 ? console.log : console.error;

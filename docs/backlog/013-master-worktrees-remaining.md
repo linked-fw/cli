@@ -1,53 +1,73 @@
 ---
 summary: >
-  The master-worktree pieces plan 003 left out (report 040): a lock on port allocation,
-  `own-install`, `worktree relink --all`, `branch list`, `branch add-package`, package-only step
-  worktrees, refusing a dirty owner checkout and a second copy of a package, and `land` recording
-  a tested tip. Only the port lock and `own-install` (when a master changes dependencies) block
-  two masters running at once; the rest are conveniences or safety nets.
-source: plan 003, report 040 (Deviations, Follow-ups), 29 Oct 2026
+  The master-worktree pieces still left after report 041: `own-install` (a master that changes
+  dependencies while another runs), package-only step worktrees, refusing a second copy of a
+  package, and two safety nets (`branch start --worktree` refusing a dirty owner checkout, `land`
+  recording a tested tip). Only `own-install` blocks two masters running at once.
+source: plan 003, report 040 (Deviations, Follow-ups), report 041, 29 Oct 2026
 status: open
 ---
 
 # 013 — Master worktrees: what is left
 
 Plan [003](../plans/003-master-worktrees.md) built masters in worktrees of their own
-([report 040](../reports/040-master-worktrees.md)). These pieces were left out of that slice.
+([report 040](../reports/040-master-worktrees.md)); [report 041](../reports/041-master-worktrees-part-one.md)
+added the machine-wide port lock and registry, `worktree relink --all`, `branch list` and
+`branch add-package`. These pieces are still left out.
 
 ## Two masters at once
 
-Running two masters side by side (each `linked branch start <m> --worktree`, each with its own
-steps, preview port and dataset) works today if they are started one after the other and neither
-changes dependencies. What blocks it otherwise:
+Two masters started at once (in one app or two) get different preview ports, and one command
+relinks every worktree after an install. What still blocks running them side by side:
 
-- **A lock on port allocation** (blocks two masters started at the same time). `branch start
-  --worktree` picks the first `45k0` slot (`MASTER_PORTS`, `src/integration/masters.ts`) that no
-  master records, and records it only after creating the worktrees: two concurrent starts can pick
-  the same slot. A lock around choose-and-record (a `mkdir` lock in the common git dir) closes it.
-  Workaround: start masters one after the other, or pass `--port`.
 - **`own-install`** (blocks a master that changes dependencies while another runs). Every master
   and step farms into the one install of the main checkout; an `npm install` for one master's new
   dependency changes what every other worktree loads. `own-install` gives a master (and its steps)
   an install of its own.
 
-Should come with them, not blocking:
-
-- **`worktree relink --all`**: after an `npm install` in the main checkout every worktree (two
-  masters and their steps) needs `relink`; one forgotten runs against a stale farm.
-- **`branch list`**: masters, integration branches and their targets in one view (`worktree list`
-  shows masters today; `branch status` shows checkouts).
-
 ## Within one master
 
-- **`branch add-package <m> <pkgs>`**: add a framework package to a running master. Today a step
-  can `--with` only the master's packages, and adding one is by hand (`git -C
-  <main>/packages-local/<pkg> worktree add -b <m> <wt>/packages-local/<pkg> <target>`, set
-  `branch.<m>.linked-target` and `-worktree` there, `linked worktree relink` in the master and its
-  steps).
 - **Package-only step worktrees** (`--package-only`): a step that changes only a framework package
   gets a worktree of that package, without a full app worktree and farm.
 - **Refusing a second copy**: a step that overrides a package a master package depends on runs two
   copies of it. It is warned, not refused; `doctor resolve` could flag it too.
+
+- **Building the CLI in a fresh worktree**: in a master's or step's `packages-local/_linked-cli`
+  that has no `lib/` yet, `npx linked build` fails (`sh: linked: command not found`): the
+  worktree's farm links `.bin/linked` to that same unbuilt CLI. The first build there runs the main
+  checkout's bin (`<main>/node_modules/.bin/linked build`); `worktree add`/`branch start` could
+  print that, or fall back to it.
+- **`worktree remove <agent>` does not find a master's step by its agent name** (step SY of CN
+  plan 282). Run from the app's main checkout:
+  `npx linked worktree remove sy` →
+  ``No worktree of /Users/rene/web/create_now for sy: none on dev--sy, nor at /Users/rene/web/wt/sy.
+  Pass its directory with --dir; `linked worktree list` shows the worktrees.``
+  while `linked worktree list` showed `step sy  /Users/rene/web/wt/hub-imports--sy`. It worked with
+  `npx linked worktree remove sy --dir /Users/rene/web/wt/hub-imports--sy` (and then kept the landed
+  `hub-imports--sy` branches: `@_linked/core: kept hub-imports--sy (not dev--sy).`). `remove` should
+  look up `<m>--<agent>` steps as `list` does.
+- **A step with its own framework package loads two copies of it.** The link farm points CN's
+  `@_linked/core` at the step's checkout, while the main install's other `@_linked/*` packages
+  (`@_linked/fuseki`, `@_linked/access`, …) resolve core from the main checkout. CN's
+  `npm run typecheck:gate` in step SY's worktree reported 117 errors, every one between
+  `…/hub-imports--sy/packages-local/_linked-core/…` and `…/create_now/packages-local/_linked-core/…`
+  types (e.g. `FusekiStore` not assignable to `IDataset`); with `paths` mapping `@_linked/core` to
+  the step's build, `tsc` gave 0 errors. The farm could link every package that depends on a
+  `--with` package so it resolves the step's copy, or `worktree add` could print the `paths`
+  override for typechecks.
+- **A master with core, server or react needs every localized dependent in it too.** Master
+  `hub-imports` started `--with core,server,react,cli`; its farm linked those to its checkouts while
+  the other localized packages (auth, fuseki, server-utils, schema, …) resolved core from the main
+  checkout: two cores, and CN's `npm run typecheck:gate` there reported ~117 errors. Fixed by hand
+  with `branch add-package hub-imports` of the 19 localized packages that depend on them
+  (transitively), `linked build-all` in the master (26 packages, 6 min), `worktree relink`: `doctor
+  resolve` then showed every `@_linked/*` but css in the master, and the gate gave `No new type
+  errors.` What the CLI could do: `branch start --worktree` and `add-package` compute the localized
+  dependents of the `--with` packages and add them (or refuse, naming them); `doctor resolve`
+  flags a package whose dependencies resolve to another copy than the app's (today it shows each
+  package's own location only, so the two cores did not show); `add-package` prints
+  `linked build-all` for the master. The same still holds for a step: step `ci` of that master has
+  its own core and react, while the master's fuseki and server it links resolve the master's core.
 
 ## Safety nets
 

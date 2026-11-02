@@ -53,6 +53,7 @@ module.exports = {
   rootDir: '.',
   roots: ['<rootDir>/tests/unit'],
   testMatch: ['**/*.test.{ts,js}'],
+  setupFiles: ['<rootDir>/tests/setup-linked-home.cjs'],
   // `@_linked/core` is ESM-only (its export map has no `require` condition) and
   // ships untranspiled ESM, so it is both mapped to its real file path and run
   // through babel like the rest of the sources.

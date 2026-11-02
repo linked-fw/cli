@@ -114,6 +114,26 @@ export function makeRemotes(): Remotes {
   return {base, app, ont, assets, url};
 }
 
+/** The app's `package.json` with `branch` keys on the entries `keys` names (npm name -> branch). */
+export function appJsonWithKeys(r: Remotes, keys: Record<string, string>): string {
+  const entry = (name: string, remote: string) => ({repo: r.url(remote), ...(keys[name] ? {branch: keys[name]} : {})});
+  return json({
+    name: 'acme-app',
+    version: '1.0.0',
+    private: true,
+    workspaces: ['packages-local/*'],
+    linked: {
+      kind: 'app',
+      unpublishedPackages: {'acme-ont': entry('acme-ont', r.ont), 'acme-assets': entry('acme-assets', r.assets)},
+    },
+  });
+}
+
+/** Commit the app's `package.json` with `branch` keys on app branch `branch`; returns the sha. */
+export function keyAppBranch(r: Remotes, branch: string, keys: Record<string, string>): string {
+  return commitOn(r.base, r.app, branch, 'package.json', appJsonWithKeys(r, keys));
+}
+
 /** The fake token every checkout test runs with. */
 export const TOKEN = 'ghs_checkoutE2eFakeToken';
 

@@ -10,7 +10,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {worktreeAdd, worktreeList, worktreeRelink, worktreeRemove} from '../../../src/commands/worktree.js';
+import {branchStartWorktree} from '../../../src/commands/master.js';
+import {
+  formatRelinkAll,
+  runWorktreeRelink,
+  worktreeAdd,
+  worktreeList,
+  worktreeRelink,
+  worktreeRelinkAll,
+  worktreeRemove,
+} from '../../../src/commands/worktree.js';
 import {getTarget} from '../../../src/integration/repos.js';
 import {makeRun, type Run} from '../../../src/localize/run.js';
 
@@ -608,5 +617,94 @@ describe('linked worktree relink', () => {
     const result = await worktreeRelink(app.root, undefined);
     assert.notEqual(result.code, 0);
     assert.match(result.messages.join('\n'), /name the agent/);
+  });
+});
+
+describe('linked worktree relink --all', () => {
+  const homeBefore = process.env.LINKED_HOME;
+  beforeEach(() => {
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'relink-home-')));
+    tmpDirs.push(home);
+    process.env.LINKED_HOME = home;
+  });
+  afterEach(() => {
+    process.env.LINKED_HOME = homeBefore;
+  });
+
+  /** An app with a plain agent worktree a1, a master m1 (with server) and its step s1. */
+  async function appWithEverything(): Promise<{app: App; masterDir: string; stepDir: string}> {
+    const app = makeApp();
+    assert.equal((await worktreeAdd(app.root, 'a1', {with: ['server']})).code, 0);
+    const started = await branchStartWorktree(app.root, 'm1', {with: ['core']});
+    assert.equal(started.code, 0, started.messages.join('\n'));
+    const step = await worktreeAdd(app.root, 's1', {from: 'm1', with: ['core']});
+    assert.equal(step.code, 0, step.messages.join('\n'));
+    return {app, masterDir: started.dir, stepDir: step.dir};
+  }
+
+  test('relinks the masters, then their steps, then the other worktrees, run anywhere in the app', async () => {
+    const {app, masterDir, stepDir} = await appWithEverything();
+    // The main checkout installed something since.
+    fs.mkdirSync(path.join(app.root, 'node_modules', 'lodash'));
+    const result = await worktreeRelinkAll(stepDir);
+    assert.equal(result.code, 0, formatRelinkAll(result));
+    assert.deepEqual(
+      result.worktrees.map((w) => [w.kind, w.dir, w.master]),
+      [
+        ['master', masterDir, undefined],
+        ['step', stepDir, 'm1'],
+        ['agent', app.dir, undefined],
+      ],
+    );
+    for (const dir of [masterDir, stepDir, app.dir]) {
+      assert.equal(real(path.join(dir, 'node_modules', 'lodash')), real(path.join(app.root, 'node_modules', 'lodash')), dir);
+    }
+    const text = formatRelinkAll(result);
+    assert.match(text, new RegExp(`^${masterDir}:\n  `));
+    assert.match(text, /\nRelinked 3 worktrees$/);
+  });
+
+  test('one broken worktree fails with exit 1 while the others relink; an own install is left alone', async () => {
+    const {app, masterDir, stepDir} = await appWithEverything();
+    fs.mkdirSync(path.join(app.root, 'node_modules', 'lodash'));
+    // The step's worktree cannot be written, so neither can its farm.
+    fs.chmodSync(stepDir, 0o555);
+    // The plain agent worktree has an install of its own.
+    const ownNm = path.join(app.dir, 'node_modules');
+    fs.rmSync(ownNm, {recursive: true});
+    fs.mkdirSync(path.join(ownNm, 'own'), {recursive: true});
+    try {
+      const result = await worktreeRelinkAll(app.root);
+      assert.equal(result.code, 1);
+      assert.deepEqual(result.worktrees.map((w) => [w.dir, w.code]), [[masterDir, 0], [stepDir, 1], [app.dir, 0]]);
+      assert.match(result.worktrees[2].messages.join('\n'), /install of the worktree's own: left as it is/);
+      assert.ok(fs.existsSync(path.join(ownNm, 'own')));
+      assert.equal(real(path.join(masterDir, 'node_modules', 'lodash')), real(path.join(app.root, 'node_modules', 'lodash')));
+      assert.match(formatRelinkAll(result), new RegExp(`\nRelinked 2 of 3; failed: ${stepDir}$`));
+    } finally {
+      fs.chmodSync(stepDir, 0o755);
+    }
+  });
+
+  test('--all with an agent name, --dir or --from is refused', async () => {
+    const errors: string[] = [];
+    const spy = jest.spyOn(console, 'error').mockImplementation((m: string) => void errors.push(m));
+    const exitBefore = process.exitCode;
+    try {
+      for (const [agent, options] of [
+        ['a1', {all: true}],
+        [undefined, {all: true, dir: '/tmp/x'}],
+        [undefined, {all: true, from: 'm1'}],
+      ] as const) {
+        process.exitCode = 0;
+        await runWorktreeRelink(agent, options);
+        assert.equal(process.exitCode, 1);
+      }
+      assert.equal(errors.length, 3);
+      assert.match(errors[0], /--all relinks every worktree of the app: it takes no agent name, --dir or --from/);
+    } finally {
+      spy.mockRestore();
+      process.exitCode = exitBefore;
+    }
   });
 });

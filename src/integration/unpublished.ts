@@ -23,6 +23,8 @@ export type LoadListed = (entry: ListedPackage) => unknown;
 
 /**
  * Breadth first from `root` (the app's `package.json`): each package of its list, then of theirs.
+ * Only the root list's `branch` keys are kept: a key in a package's list is dropped with one
+ * warning (the app's list decides which package branch the app uses).
  * Keyed by npm name: a name listed again with the same repo is loaded once and gains a
  * `requiredBy`; listed with another repo it refuses (code 6), naming both requirers, before the
  * second is loaded. Cycles end at the names already seen. `load` runs once per package, in walk
@@ -35,12 +37,19 @@ export function walkUnpublished(
 ): ListedPackage[] {
   const rootName = nameOf(root) ?? 'the app';
   const seen = new Map<string, ListedPackage>();
-  const queue: {from: string; entries: UnpublishedPackage[]}[] = [
-    {from: rootName, entries: unpublishedPackages(root, warn)},
+  const queue: {from: string; fromRoot: boolean; entries: UnpublishedPackage[]}[] = [
+    {from: rootName, fromRoot: true, entries: unpublishedPackages(root, warn)},
   ];
   while (queue.length) {
-    const {from, entries} = queue.shift()!;
-    for (const entry of entries) {
+    const {from, fromRoot, entries} = queue.shift()!;
+    for (const keyed of entries) {
+      let entry = keyed;
+      if (!fromRoot && keyed.branch !== undefined) {
+        warn(
+          `${from}'s list names branch ${keyed.branch} for ${keyed.name}; ignored, the app's list decides.`,
+        );
+        entry = {name: keyed.name, repo: keyed.repo};
+      }
       const known = seen.get(entry.name);
       if (known) {
         if (known.repo !== entry.repo) {
@@ -59,11 +68,48 @@ export function walkUnpublished(
       if (json)
         queue.push({
           from: entry.name,
+          fromRoot: false,
           entries: unpublishedPackages(json, warn),
         });
     }
   }
   return [...seen.values()];
+}
+
+/**
+ * The app list's `branch` keys as pins (npm name -> branch): `linked checkout` places a keyed
+ * package as a `--pin` places it, and an explicit `--pin` for the same name wins.
+ */
+export function pinsFromKeys(list: readonly UnpublishedPackage[]): Record<string, string> {
+  const pins: Record<string, string> = {};
+  for (const entry of list) if (entry.branch !== undefined) pins[entry.name] = entry.branch;
+  return pins;
+}
+
+/**
+ * `text` (a `package.json`) without the `branch` key of any `linked.unpublishedPackages` entry,
+ * and the npm names whose key went. Everything else stays as it was: key order, the file's
+ * indent and its trailing newline. No key: `text` unchanged and `stripped` empty.
+ */
+export function stripBranchKeys(text: string): {text: string; stripped: string[]} {
+  const json: unknown = JSON.parse(text);
+  const linked: unknown = json && typeof json === 'object' ? (json as {linked?: unknown}).linked : undefined;
+  const list: unknown =
+    linked && typeof linked === 'object' ? (linked as {unpublishedPackages?: unknown}).unpublishedPackages : undefined;
+  const stripped: string[] = [];
+  if (list && typeof list === 'object' && !Array.isArray(list)) {
+    for (const [name, entry] of Object.entries(list as Record<string, unknown>)) {
+      if (entry && typeof entry === 'object' && 'branch' in entry) {
+        delete (entry as {branch?: unknown}).branch;
+        stripped.push(name);
+      }
+    }
+  }
+  if (!stripped.length) return {text, stripped};
+  const indent = /^([ \t]+)"/m.exec(text)?.[1] ?? 2;
+  const eol = /\r?\n$/.exec(text)?.[0] ?? '';
+  const body = JSON.stringify(json, null, indent);
+  return {text: (eol === '\r\n' ? body.replace(/\n/g, '\r\n') : body) + eol, stripped};
 }
 
 function nameOf(json: unknown): string | undefined {

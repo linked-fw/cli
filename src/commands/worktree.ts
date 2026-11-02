@@ -40,7 +40,16 @@ import {
   setTarget,
   type RepoInfo,
 } from '../integration/repos.js';
-import {forgetMaster, listMasters, masterOf, stepPorts, type Master} from '../integration/masters.js';
+import {
+  forgetMaster,
+  listMasters,
+  masterOf,
+  MASTER_PORTS_LOCK,
+  releasePort,
+  stepPorts,
+  type Master,
+} from '../integration/masters.js';
+import {withMachineLockAsync} from '../integration/repo-lock.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {sharedInstall} from '../localize/shared-install.js';
@@ -218,28 +227,10 @@ export function createWorktreeSet(spec: WorktreeSetSpec, messages: string[], run
       return fail();
     }
 
-    for (const {repo, branch, start} of spec.packages) {
-      const pkgDir = path.join(dir, 'packages-local', dirName(repo));
-      if (!step(['worktree', 'add', '-b', branch, pkgDir, start], repo.dir)) return fail();
-      undo.push(() => {
-        run('git', ['worktree', 'remove', '--force', pkgDir], {cwd: repo.dir});
-        run('git', ['branch', '-D', branch], {cwd: repo.dir});
-      });
-      // npm nests version-conflicting dependencies in the checkout's own
-      // node_modules; without them the worktree's imports fall through to the
-      // root's versions. The install's own directory, never a link to a link.
-      const nested = path.join(spec.installRoot, 'packages-local', dirName(repo), 'node_modules');
-      if (fs.existsSync(nested)) {
-        const source = fs.realpathSync(nested);
-        try {
-          linkDir(source, path.join(pkgDir, 'node_modules'));
-        } catch (error) {
-          messages.push(`linking ${pkgDir}/node_modules failed: ${(error as Error).message}`);
-          return fail();
-        }
-        messages.push(`${path.join(pkgDir, 'node_modules')} -> ${source}`);
-      }
-      messages.push(`${pkgDir}: ${repo.packageName ?? repo.rel} on ${branch}`);
+    for (const pkg of spec.packages) {
+      const undoPackage = addPackageWorktree({dir, installRoot: spec.installRoot, gitRoot, ...pkg}, messages, run);
+      if (!undoPackage) return fail();
+      undo.push(undoPackage);
     }
 
     try {
@@ -261,6 +252,56 @@ export function createWorktreeSet(spec: WorktreeSetSpec, messages: string[], run
     return fail();
   }
   return undoAll;
+}
+
+/** One package worktree: `repo`'s worktree at `<dir>/packages-local/<dirName>` on new branch `branch` from `start`. */
+export interface PackageWorktreeSpec {
+  /** The app worktree it goes in. */
+  dir: string;
+  /** The checkout whose `packages-local/<dirName>/node_modules` it links to. */
+  installRoot: string;
+  /** The app repo checkout a failure message names the package repo relative to. */
+  gitRoot: string;
+  /** The checkout (or worktree) of the package's repo to run git in. */
+  repo: RepoInfo;
+  branch: string;
+  start: string;
+}
+
+/**
+ * Add the package worktree `spec` names, with its nested `node_modules` linked to the install's.
+ * On success returns how to undo it (remove the worktree, delete the branch); on failure undoes
+ * what it made and returns null. `messages` gets one line per thing made, or why it failed.
+ */
+export function addPackageWorktree(spec: PackageWorktreeSpec, messages: string[], run: Run): (() => void) | null {
+  const {repo, branch, start} = spec;
+  const pkgDir = path.join(spec.dir, 'packages-local', dirName(repo));
+  const r = run('git', ['worktree', 'add', '-b', branch, pkgDir, start], {cwd: repo.dir});
+  if (r.status !== 0) {
+    messages.push(`${path.relative(spec.gitRoot, repo.dir) || '.'}: git worktree add -b ${branch} ${pkgDir} ${start} failed: ${failed(r)}`);
+    return null;
+  }
+  const undo = (): void => {
+    run('git', ['worktree', 'remove', '--force', pkgDir], {cwd: repo.dir});
+    run('git', ['branch', '-D', branch], {cwd: repo.dir});
+  };
+  // npm nests version-conflicting dependencies in the checkout's own
+  // node_modules; without them the worktree's imports fall through to the
+  // root's versions. The install's own directory, never a link to a link.
+  const nested = path.join(spec.installRoot, 'packages-local', dirName(repo), 'node_modules');
+  if (fs.existsSync(nested)) {
+    const source = fs.realpathSync(nested);
+    try {
+      linkDir(source, path.join(pkgDir, 'node_modules'));
+    } catch (error) {
+      messages.push(`linking ${pkgDir}/node_modules failed: ${(error as Error).message}`);
+      undo();
+      return null;
+    }
+    messages.push(`${path.join(pkgDir, 'node_modules')} -> ${source}`);
+  }
+  messages.push(`${pkgDir}: ${repo.packageName ?? repo.rel} on ${branch}`);
+  return undo;
 }
 
 /**
@@ -1031,7 +1072,7 @@ function removeItems(
 }
 
 /** The main checkout of the repo `dir` is in: git lists it first. */
-function mainCheckoutOf(run: Run, dir: string): string | null {
+export function mainCheckoutOf(run: Run, dir: string): string | null {
   const all = worktreesOf(run, dir);
   return all.length ? realish(all[0].path) : null;
 }
@@ -1067,6 +1108,14 @@ async function removeMaster(
   const repos = [main, ...(master.worktree?.packages.map((p) => p.checkout) ?? [])];
   for (const repo of repos) forgetMaster(run, repo, name);
   result.messages.push(`Forgot master ${name} (its branch.${name}.linked-worktree, -port and -dataset records).`);
+  try {
+    const released = await withMachineLockAsync(MASTER_PORTS_LOCK, `linked worktree remove ${name} (${main})`, async () =>
+      releasePort(main, name),
+    );
+    if (released.length) result.messages.push(`Released preview port ${released.join(', ')} on this machine.`);
+  } catch (error) {
+    result.messages.push(`Could not release its preview port in the machine registry: ${(error as Error).message}`);
+  }
   if (master.dataset) {
     result.messages.push(`Its dataset ${master.dataset} is still in Fuseki: drop it when no longer needed (DELETE /$/datasets/${master.dataset}).`);
   }
@@ -1207,6 +1256,69 @@ export async function worktreeRelink(
   return {code: 0, messages};
 }
 
+export interface RelinkAllEntry {
+  dir: string;
+  kind: 'master' | 'step' | 'agent';
+  /** The master a step belongs to. */
+  master?: string;
+  code: number;
+  messages: string[];
+}
+
+export interface RelinkAllResult {
+  code: number;
+  worktrees: RelinkAllEntry[];
+}
+
+/**
+ * `worktree relink --all`: relink every worktree of the app the directory is in: each master's
+ * worktree, then that master's steps, then every other worktree of the app (the main checkout
+ * aside). A worktree with an install of its own is left as it is. One that fails does not stop
+ * the others; the code is 1 when any failed.
+ */
+export async function worktreeRelinkAll(appRoot: string, run: Run = makeRun(appRoot)): Promise<RelinkAllResult> {
+  const here = realish(appRoot);
+  const root = mainCheckoutOf(run, here);
+  if (!root) return {code: 1, worktrees: [{dir: here, kind: 'agent', code: 1, messages: [`${here} is not in a git repository.`]}]};
+  const list = await worktreeList(root, {all: true}, run);
+  const todo: Omit<RelinkAllEntry, 'code' | 'messages'>[] = [];
+  for (const m of list.masters) {
+    if (m.worktree) todo.push({dir: m.worktree.dir, kind: 'master'});
+    for (const s of m.steps) todo.push({dir: s.dir, kind: 'step', master: m.name});
+  }
+  for (const w of list.worktrees) todo.push({dir: w.dir, kind: 'agent'});
+  const worktrees: RelinkAllEntry[] = [];
+  for (const t of todo) {
+    let r: WorktreeRemoveResult;
+    const nm = path.join(t.dir, 'node_modules');
+    if (fs.existsSync(nm) && !isLink(nm) && !sharedInstall(t.dir)) {
+      // An install of its own (not a farm): relink would refuse it, and it needs none.
+      worktrees.push({...t, code: 0, messages: [`${nm} is an install of the worktree's own: left as it is.`]});
+      continue;
+    }
+    try {
+      r = await worktreeRelink(root, undefined, {dir: t.dir}, run);
+    } catch (error) {
+      r = {code: 1, messages: [`relinking ${t.dir} failed: ${(error as Error).message}`]};
+    }
+    worktrees.push({...t, code: r.code, messages: r.messages});
+  }
+  return {code: worktrees.some((w) => w.code !== 0) ? 1 : 0, worktrees};
+}
+
+/** The text of `worktree relink --all`: each worktree's lines under its directory, then a total. */
+export function formatRelinkAll(result: RelinkAllResult): string {
+  const lines: string[] = [];
+  for (const w of result.worktrees) lines.push(`${w.dir}:`, ...w.messages.map((m) => `  ${m}`));
+  const failedDirs = result.worktrees.filter((w) => w.code !== 0).map((w) => w.dir);
+  lines.push(
+    failedDirs.length
+      ? `Relinked ${result.worktrees.length - failedDirs.length} of ${result.worktrees.length}; failed: ${failedDirs.join(', ')}`
+      : `Relinked ${result.worktrees.length} worktrees`,
+  );
+  return lines.join('\n');
+}
+
 function isLink(p: string): boolean {
   try {
     return fs.lstatSync(p).isSymbolicLink();
@@ -1216,7 +1328,21 @@ function isLink(p: string): boolean {
 }
 
 /** The commander action for `worktree relink`. */
-export async function runWorktreeRelink(agent: string | undefined, options: {dir?: string; from?: string}): Promise<void> {
+export async function runWorktreeRelink(
+  agent: string | undefined,
+  options: {dir?: string; from?: string; all?: boolean; json?: boolean},
+): Promise<void> {
+  if (options.all) {
+    if (agent || options.dir || options.from) {
+      console.error('--all relinks every worktree of the app: it takes no agent name, --dir or --from.');
+      process.exitCode = 1;
+      return;
+    }
+    const all = await worktreeRelinkAll(process.cwd());
+    process.stdout.write((options.json ? JSON.stringify(all, null, 2) : formatRelinkAll(all)) + '\n');
+    process.exitCode = all.code;
+    return;
+  }
   const result = await worktreeRelink(process.cwd(), agent, {dir: resolveDir(options.dir), from: options.from});
   const write = result.code === 0 ? console.log : console.error;
   for (const m of result.messages) write(m);

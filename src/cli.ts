@@ -430,10 +430,19 @@ program
     // Vite is the only app build. An app without a `vite.config.{ts,js,mjs}`
     // is rejected by name rather than falling back to anything.
     await runAppCommand(async () => {
-      const {assertViteApp, buildViteApp} = await import(
-        './commands/build-app.js'
-      );
+      const {assertViteApp, buildViteApp, compileViteApp, compileOnlyConflicts} =
+        await import('./commands/build-app.js');
       assertViteApp();
+      if (options?.compileOnly === true) {
+        const conflicts = compileOnlyConflicts(options);
+        if (conflicts.length) {
+          throw new Error(
+            `--compile-only makes no release, so it does not take ${conflicts.join(', ')}`,
+          );
+        }
+        await compileViteApp({environmentNames: splitEnvOption(options?.env)});
+        return;
+      }
       await buildViteApp({
         environmentNames: splitEnvOption(options?.env),
         target: options?.target,
@@ -457,8 +466,12 @@ program
     '--allow-dirty',
     'Build from a working tree with uncommitted changes; the release revision gets a "-dirty" suffix',
   )
+  .option(
+    '--compile-only',
+    'Compile and check the client and backend only: no file store, no release manifest, nothing published',
+  )
   .description(
-    'Build the linked app frontend and backend for production, and write a release manifest. Requires a vite.config in the app root.',
+    'Build the linked app frontend and backend for production, and write a release manifest (or, with --compile-only, only compile). Requires a vite.config in the app root.',
   );
 
 program
@@ -594,7 +607,7 @@ program
   )
   .option(
     '--listed',
-    "Clone every package the app's committed package.json lists in linked.unpublishedPackages (and those their own lists name) that is not in packages-local/ yet, from the repo the list gives, on the app's current branch where that repo has it (else its default branch); then one npm install and the builds. A token for private repos comes only from LINKED_GIT_TOKEN.",
+    "Clone every package the app's committed package.json lists in linked.unpublishedPackages (and those their own lists name) that is not in packages-local/ yet, from the repo the list gives, on the branch the entry's \"branch\" key names, else on the app's current branch, where that repo has it (else its default branch); then one npm install and the builds. A token for private repos comes only from LINKED_GIT_TOKEN.",
   )
   .option(
     '--repo <git-url>',
@@ -688,6 +701,17 @@ branch
   });
 
 branch
+  .command('list')
+  .description(
+    "Run anywhere in an app. Its integration branches and masters in one view, from the branch.<b>.linked-target and -worktree records of the app repo and every packages-local/ checkout: BRANCH, KIND (master or integration), TARGET, REPOS, WORKTREE (a master's, else (checkouts)), PORT, DATASET and STEPS (a master's step count). Then the masters of other apps holding a preview port on this machine (<LINKED_HOME>/master-ports.json). Exit 0, an empty list too.",
+  )
+  .option('--json', 'Print {branches: [{name, kind, target, repos: [{rel, target, worktree}], dir, port, dataset, steps: [<agent>]}], otherPorts: [{port, app, master, dir}]}.')
+  .action(async (options) => {
+    const {runBranchList} = await import('./commands/master.js');
+    return runBranchList(options);
+  });
+
+branch
   .command('start <name> [packages...]')
   .description(
     'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when: any of them has uncommitted or untracked changes; --target is missing in a repo where <name> has to be created; <name> equals the target; <name> contains "--" (it separates agent branches); or another worktree has <name> checked out. If a switch fails partway, the repos already switched go back: each to its previous branch, a branch the run created is deleted (kept, with its sha printed, when it moved or another branch forked from it), and the target entry is restored. With --worktree: start a master instead, switching nothing -- <name> in a new app worktree (default <parent of the app root>/wt/<name>) with a nested worktree on <name> of each named package (positional or --with), each created from the branch that repo\'s checkout is on (or --target), node_modules a link farm into the main checkout\'s install; records branch.<name>.linked-target, -worktree, -port (first free of 4510, 4520, ... 4590, or --port) and -dataset in each repo, and prints the preview start command (PORT, SITE_ROOT and CN_PROJECTS_ROOT when the .env sets them, FUSEKI_DATASET). Run in the main checkout; refuses, making nothing, when <name> exists in a repo, the directory exists, or the port is another master\'s.',
@@ -716,6 +740,18 @@ branch
     }
     const {runBranchStart} = await import('./commands/branch.js');
     return runBranchStart(name, packages, options);
+  });
+
+branch
+  .command('add-package <name> <packages...>')
+  .description(
+    "Run anywhere in an app. Add packages-local/ checkouts (@_linked/core, core or _linked-core) to running master <name>: per package a worktree <master's dir>/packages-local/<dir> on a new branch <name> from --target (default that checkout's current branch), its nested node_modules linked as branch start --worktree does, and branch.<name>.linked-target and -worktree recorded in that repo; then worktree relink of the master and each of its steps. Refuses (exit 1, nothing made) when <name> is not a master, a package is unknown or already in it, a checkout is detached without --target, the target does not exist, the repo already has a branch <name>, or a step has a worktree of the package. A failure halfway undoes what the run made. Build each added package in the master's worktree afterwards.",
+  )
+  .option('--target <branch>', 'The branch <name> starts from and lands in, in every added repo. Default: the branch each checkout is on.')
+  .option('--json', 'Print {code, added: [{rel, dir, target}], relinked: [<dir>], messages}.')
+  .action(async (name: string, packages: string[], options) => {
+    const {runBranchAddPackage} = await import('./commands/master.js');
+    return runBranchAddPackage(name, packages, options);
   });
 
 branch
@@ -763,7 +799,7 @@ branch
 branch
   .command('merge <branch>')
   .description(
-    "Run in an app checkout. Land <branch> in --into across the repos on it -- each packages-local/ checkout on <branch>, in dependency order (dependencies and linked.unpublishedPackages), then the app; checkouts on another branch or detached are skipped. Fetches each first, and refuses, merging nothing, while one has changes or commits origin lacks. --mode push (default): merge origin/<branch> into origin/<into> with --no-ff (\"Merge branch '<branch>' into <into>\") in a temporary worktree and push <into>. --mode update: merge origin/<into> into <branch> and push <branch>, for a protected <into> that lands by PRs in the order printed. Stops at the first conflict (aborted, files named) or refused push; later repos are skipped, earlier ones stay merged. A token comes only from LINKED_GIT_TOKEN.",
+    "Run in an app checkout. Land <branch> in --into across the repos on it -- each packages-local/ checkout on <branch>, in dependency order (dependencies and linked.unpublishedPackages), then the app; checkouts on another branch or detached are skipped. Fetches each first, and refuses, merging nothing, while one has changes or commits origin lacks. A package the app's package.json (at origin/<branch>) keys to another branch <k> (\"branch\" in linked.unpublishedPackages) lands origin/<k> first, from its checkout here (none: refused). --mode push (default): merge origin/<branch> (or <k>) into origin/<into> with --no-ff (\"Merge branch '<branch>' into <into>\") in a temporary worktree and push <into>; the app's branch keys are removed inside its merge commit. --mode update: merge origin/<into> into <branch>, remove the app's branch keys in one commit (\"Use <into> of <pkgs>\"), and push <branch>, for a protected <into> that lands by PRs in the order printed; it refuses a keyed <k> that origin/<into> does not contain yet. Stops at the first conflict (aborted, files named) or refused push; later repos are skipped, earlier ones stay merged. A token comes only from LINKED_GIT_TOKEN.",
   )
   .requiredOption('--into <branch>', 'The default branch it lands in, e.g. main.')
   .option('--mode <mode>', 'push (merge and push --into) or update (merge --into into the branch and push the branch).', 'push')
@@ -845,6 +881,8 @@ worktree
   )
   .option('--dir <path>', 'The app worktree directory, instead of the agent name or the current directory.')
   .option('--from <master>', 'The agent is a step of this master (same as naming it <master>--<agent>).')
+  .option('--all', "Relink every worktree of the app, run anywhere in it: each master's worktree, then its steps, then the other worktrees (the main checkout aside). Per worktree its lines under a <dir>: heading, then Relinked <n> worktrees (or Relinked <n> of <t>; failed: <dirs>). Exit 1 when one failed; the others still run. Refused with an agent name, --dir or --from.")
+  .option('--json', 'With --all: print {code, worktrees: [{dir, kind: master|step|agent, master, code, messages}]}.')
   .action(async (agent: string | undefined, options) => {
     const {runWorktreeRelink} = await import('./commands/worktree.js');
     return runWorktreeRelink(agent, options);
@@ -853,7 +891,7 @@ worktree
 program
   .command('checkout <branch>')
   .description(
-    "A branch checkout of an app and the packages its committed package.json lists in linked.unpublishedPackages (transitively), in a projects root: one bare base clone per repo in <root>/.repos/<owner>/<name>.git, the app as a git worktree on <branch> (created from --from and pushed when the remote lacks it) in <root>/<name>/<branch-dir>, each package as a worktree in its packages-local/ on <branch> when its repo has it, else detached at origin/<default branch>. Then one npm install in the app worktree and the builds of the package worktrees that moved. Re-running it fetches and fast-forwards clean worktrees; anything else is left as it is and reported. A token for private repos comes only from LINKED_GIT_TOKEN (never the URL): remote git calls use it through GIT_ASKPASS, the install and builds run without it, and it is never written to disk.",
+    "A branch checkout of an app and the packages its committed package.json lists in linked.unpublishedPackages (transitively), in a projects root: one bare base clone per repo in <root>/.repos/<owner>/<name>.git, the app as a git worktree on <branch> (created from --from and pushed when the remote lacks it) in <root>/<name>/<branch-dir>, each package as a worktree in its packages-local/ on <branch> when its repo has it, else detached at origin/<default branch>; a \"branch\" key on the app list's entry is a pin (see --pin). Then one npm install in the app worktree and the builds of the package worktrees that moved. Re-running it fetches and fast-forwards clean worktrees; anything else is left as it is and reported. A token for private repos comes only from LINKED_GIT_TOKEN (never the URL): remote git calls use it through GIT_ASKPASS, the install and builds run without it, and it is never written to disk.",
   )
   .option('--repo <url>', "The app's https git URL. Default: the origin of the app checkout this runs in.")
   .option('--root <dir>', 'The projects root. Default: the current directory.')
@@ -868,10 +906,10 @@ program
   )
   .option(
     '--pin <npm=branch>',
-    "Check the package with this npm name out on this branch instead of by the same-name rule (repeatable): attached when it is <branch> itself, else detached at origin/<pin> (that branch is written in its own worktree); a re-run fast-forwards it. A pin whose branch origin lacks falls back to origin/<default branch>.",
+    "Check the package with this npm name out on this branch instead of by the same-name rule (repeatable): attached when it is <branch> itself, else detached at origin/<pin> (that branch is written in its own worktree); a re-run fast-forwards it. A pin whose branch origin lacks falls back to origin/<default branch>. The app list's \"branch\" keys are pins too; a --pin for the same package wins.",
     (value: string, previous: string[] = []) => [...previous, value],
   )
-  .option('--pins-only', 'No same-name rule: a package without a --pin sits detached at origin/<default branch>. With --pin or --pins-only, a clean package worktree whose head origin has moves to its new target.')
+  .option('--pins-only', 'No same-name rule: a package without a pin (--pin or the app list\'s "branch" key) sits detached at origin/<default branch>. With a pin or --pins-only, a clean package worktree whose head origin has moves to its new target.')
   .option('--json', 'Print the result as JSON (also on a refusal): code, branch, root, app, packages, install, builds, messages.')
   .action(async (branch: string, options) => {
     const {runCheckout} = await import('./commands/checkout.js');

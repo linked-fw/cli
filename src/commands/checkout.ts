@@ -25,6 +25,11 @@
  * uncommitted work is `kept`. A pin whose branch origin lacks falls back to the default branch,
  * with a message. Without `--pin` and `--pins-only` nothing changes.
  *
+ * The app list's `branch` keys (`linked.unpublishedPackages`, read from the app worktree once it
+ * is up to date) are pins too: the run's pins are `{...keys, ...--pin}`, so a `--pin` wins (and
+ * says so), and a key alone puts the run in pins mode. `pinFrom` in the result says which one a
+ * package's pin is.
+ *
  * `--add <repo>` places one more package worktree that no list names (`added`): checked out by
  * the same rules from its base clone, its npm name read from its `package.json` there, never a
  * reason to install and never built, so the app's install and lock stay as committed. A later run
@@ -54,10 +59,11 @@ import {
   appBranch,
   branchDir,
   packageBranch,
+  pinsFromKeys,
   walkUnpublished,
   type ListedPackage,
 } from '../integration/unpublished.js';
-import {unpublishedPackages} from '../installed-packages.js';
+import {unpublishedPackages, type UnpublishedPackage} from '../installed-packages.js';
 import {
   EXIT_INSTALL_FAILED,
   EXIT_NOT_FOUND,
@@ -132,8 +138,13 @@ export interface CheckoutPackage {
   detached: boolean;
   /** Its repo has no `<branch>` (in pins mode: it has no usable pin): detached at `origin/<default>`. */
   fellBack: boolean;
-  /** The branch its `--pin` names; with `detached`, another worktree holds that branch. */
+  /**
+   * The branch its pin names (a `--pin`, or the app list's `branch` key); with `detached`, the pin
+   * is not the run's branch or another worktree holds that branch.
+   */
   pin?: string;
+  /** Where `pin` came from: the app list's `branch` key, or a `--pin` (which wins over a key). */
+  pinFrom?: 'key' | 'flag';
   head: string;
   /** The packages whose lists name it, the app first. */
   requiredBy: string[];
@@ -244,8 +255,9 @@ export function checkout(
 interface Target {
   branch: string | null;
   def: string;
-  /** The `--pin` for the package, if any. */
+  /** The pin for the package (a `--pin` or the app list's `branch` key), if any. */
   pin?: string;
+  pinFrom?: 'key' | 'flag';
   /** Chosen by the same-name rule (no pins mode for it). */
   sameName?: true;
   /** A pin to another branch than the run's: always detached at origin/<pin>, never attached here. */
@@ -264,6 +276,10 @@ class Checkout {
   private readonly moved: Head[] = [];
   /** The worktrees `--add` placed: left out of the install trigger and the builds. */
   private readonly addedDirs = new Set<string>();
+  /** The run's pins: the app list's `branch` keys, then the `--pin`s over them. */
+  private pins: Record<string, string> = {};
+  /** The npm names whose pin is a `branch` key (not overridden by a `--pin`). */
+  private readonly keyed = new Set<string>();
 
   constructor(
     private readonly branch: string,
@@ -332,6 +348,7 @@ class Checkout {
         );
       }
     }
+    this.pins = {...(this.options.pins ?? {})};
     const repo = cleanRepo(this.options.repo ?? this.originOfCwd(), (m) =>
       this.say(m),
     );
@@ -342,12 +359,15 @@ class Checkout {
         : path.join(this.root, name, branchDir(branch)),
     );
 
-    this.result.app = this.withBase(repo, (base) =>
-      this.appWorktree(repo, base, appDir),
-    );
+    let appDefault: string | undefined;
+    this.result.app = this.withBase(repo, (base) => {
+      appDefault = this.defaultBranch(base);
+      return this.appWorktree(repo, base, appDir);
+    });
     const appJson = readJson(path.join(appDir, 'package.json'));
     const list = unpublishedPackages(appJson, (m) => this.say(m));
     if (list.length) this.requireSetup(appJson, appDir);
+    this.pinKeys(list, branch === appDefault);
 
     const published = {
       ...((appJson?.dependencies as Record<string, unknown> | undefined) ?? {}),
@@ -726,9 +746,40 @@ class Checkout {
     );
   }
 
-  /** Whether the run is in pins mode: some `--pin`, or `--pins-only`. */
+  /**
+   * The app list's `branch` keys become pins, under the explicit ones: `{...keys, ...--pin}`. A
+   * `--pin` that overrides a key says so. The parser accepted the keys; git checks them as it
+   * checks a `--pin`. On the app's default branch keys are ignored, with a warning: its packages
+   * are on their own default branches (a merge strips the keys; one that reached it otherwise).
+   */
+  private pinKeys(list: readonly UnpublishedPackage[], onDefault: boolean): void {
+    let keys = pinsFromKeys(list);
+    if (onDefault && Object.keys(keys).length) {
+      for (const [name, key] of Object.entries(keys))
+        this.say(`${name}: the app's list keys branch ${key} on the app's default branch ${this.branch}; ignored, its packages follow their default branches.`);
+      keys = {};
+    }
+    const flags = this.options.pins ?? {};
+    for (const [name, key] of Object.entries(keys)) {
+      if (!this.ok(this.root, ['check-ref-format', '--branch', key])) {
+        throw new LocalizeError(
+          `linked.unpublishedPackages: "${name}" has branch "${key}", which is not a valid branch name.`,
+          EXIT_REFUSED,
+        );
+      }
+      if (flags[name] !== undefined) {
+        if (flags[name] !== key)
+          this.say(`pin ${name}=${flags[name]} from --pin overrides the app's branch key ${key}.`);
+        continue;
+      }
+      this.keyed.add(name);
+    }
+    this.pins = {...keys, ...flags};
+  }
+
+  /** Whether the run is in pins mode: some pin (a `--pin` or a `branch` key), or `--pins-only`. */
   private get pinsMode(): boolean {
-    return !!this.options.pinsOnly || Object.keys(this.options.pins ?? {}).length > 0;
+    return !!this.options.pinsOnly || Object.keys(this.pins).length > 0;
   }
 
   /**
@@ -736,13 +787,14 @@ class Checkout {
    * repo has it, else detached at `origin/<default>`. With `--pins-only` there is no same-name rule.
    */
   private targetOf(name: string, base: string, def: string): Target {
-    const pin = this.options.pins?.[name];
+    const pin = this.pins[name];
     if (pin) {
+      const pinFrom = this.keyed.has(name) ? ('key' as const) : ('flag' as const);
       // A pin to the run's own branch is written here (attached); any other pin is a branch written
       // elsewhere (its own worktree), so the checkout only reads it: detached at origin/<pin>.
-      if (this.hasRemoteBranch(base, pin)) return {branch: pin, pin, def, ...(pin !== this.branch ? {readOnly: true as const} : {})};
+      if (this.hasRemoteBranch(base, pin)) return {branch: pin, pin, pinFrom, def, ...(pin !== this.branch ? {readOnly: true as const} : {})};
       this.say(`${name}: its pin ${pin} is not on origin; it is checked out at origin/${def}.`);
-      return {branch: null, pin, def};
+      return {branch: null, pin, pinFrom, def};
     }
     if (this.options.pinsOnly) return {branch: null, def};
     const rule = packageBranch(this.branch, this.hasRemoteBranch(base, this.branch), def);
@@ -779,7 +831,7 @@ class Checkout {
         branch: on ?? (target.pin && target.branch ? target.branch : def),
         detached: on === null,
         fellBack,
-        ...(target.pin ? {pin: target.pin} : {}),
+        ...(target.pin ? {pin: target.pin, pinFrom: target.pinFrom} : {}),
         head: this.head(dir),
         requiredBy: entry.requiredBy,
         status,
@@ -877,6 +929,13 @@ class Checkout {
       return this.updateOnBranch(dir, base, target.branch);
     if (!this.pinsMode && on === this.branch)
       return this.updateOnBranch(dir, base, this.branch);
+    // In pins mode a worktree moves to where its pin (or key) says only when nothing would be lost:
+    // no uncommitted changes, no commits origin lacks. Else it is refused, naming the worktree.
+    const refuse = (why: string): {status: CheckoutStatus; reason: string} => {
+      const reason = `${dir} ${why}`;
+      this.say(`${path.basename(dir)}: not moved: ${reason}.`);
+      return {status: 'kept', reason};
+    };
     if (on !== null) {
       if (!this.pinsMode)
         return {
@@ -884,10 +943,11 @@ class Checkout {
           reason: `it is on ${on}, not ${this.branch} or detached`,
         };
       if (this.dirty(dir))
-        return {status: 'kept', reason: 'it has uncommitted changes'};
+        return refuse('has uncommitted changes: commit or discard them so it follows its pin');
       if (!this.headOnOrigin(dir))
-        return {status: 'kept', reason: `it is on ${on}, whose commits origin lacks: push them`};
+        return refuse(`is on ${on}, whose commits origin lacks: push them so it follows its pin`);
     } else if (this.dirty(dir)) {
+      if (this.pinsMode) return refuse('has uncommitted changes: commit or discard them so it follows its pin');
       return {status: 'kept', reason: 'it has uncommitted changes'};
     }
     const head = this.head(dir);
@@ -896,11 +956,9 @@ class Checkout {
       if (target.pin && (target.readOnly || this.holderOf(base, branch, dir))) {
         const tip = this.git(base, ['rev-parse', `refs/remotes/origin/${branch}`]);
         if (on === null && head === tip) return {status: 'unchanged'};
-        if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip])) {
-          return {
-            status: 'kept',
-            reason: `its detached HEAD has commits origin/${branch} lacks`,
-          };
+        // Not a fast-forward: still moved when origin has the head (the pin changed), as below.
+        if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip]) && !this.headOnOrigin(dir)) {
+          return refuse(`has a detached HEAD with commits origin/${branch} lacks: push them so it follows its pin`);
         }
         this.git(dir, ['checkout', '-q', '--detach', `origin/${branch}`]);
         this.moved.push({dir, before: head});
@@ -926,6 +984,7 @@ class Checkout {
     const tip = this.git(base, ['rev-parse', `refs/remotes/origin/${def}`]);
     if (on === null && head === tip) return {status: 'unchanged'};
     if (on === null && !this.ok(dir, ['merge-base', '--is-ancestor', head, tip]) && !(this.pinsMode && this.headOnOrigin(dir))) {
+      if (this.pinsMode) return refuse(`has a detached HEAD with commits origin lacks: push them so it follows its pin`);
       return {
         status: 'kept',
         reason: `its detached HEAD has commits origin/${def} lacks`,

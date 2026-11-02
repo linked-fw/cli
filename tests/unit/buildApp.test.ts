@@ -5,6 +5,8 @@ import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
 import {
   assertViteApp,
   buildViteApp,
+  compileOnlyConflicts,
+  compileViteApp,
   hasViteConfig,
 } from '../../src/commands/build-app';
 import {createReleaseManifest} from '../../src/app-release/create-release-manifest';
@@ -285,6 +287,86 @@ describe('buildViteApp', () => {
       {...baseDependencies, resolveStore: async () => fallback as IFileStore},
     );
     expect(manifest.destination.accessURL).toBe('https://files.example.test');
+  });
+});
+
+describe('compileViteApp (build-app --compile-only)', () => {
+  it('compiles client and backend with no store, no identity and no manifest', async () => {
+    const appRoot = makeApp();
+    // No revision anywhere and not a Git checkout: a release build refuses
+    // this tree, a compile does not ask.
+    delete process.env.LINKED_RELEASE_REVISION;
+    delete process.env.GITHUB_SHA;
+    const calls: string[] = [];
+    const bases: (string | undefined)[] = [];
+    await compileViteApp(
+      {appRoot, environmentNames: ['cn-staging']},
+      {
+        loadEnvironment: async () => {
+          calls.push('environment');
+        },
+        buildFrontend: async (root: string, base?: string) => {
+          calls.push('frontend');
+          expect(root).toBe(appRoot);
+          bases.push(base);
+        },
+        buildBackend: async () => {
+          calls.push('backend');
+          return true;
+        },
+      },
+    );
+    expect(calls).toEqual(['environment', 'frontend', 'backend']);
+    // No release base URL: there is no store to serve it from.
+    expect(bases).toEqual([undefined]);
+    expect(
+      fs.existsSync(path.join(appRoot, 'public/bundles/linked-release.json')),
+    ).toBe(false);
+  });
+
+  it('fails when the backend does not build', async () => {
+    await expect(
+      compileViteApp(
+        {appRoot: makeApp()},
+        {
+          loadEnvironment: async () => undefined,
+          buildFrontend: async () => undefined,
+          buildBackend: async () => false,
+        },
+      ),
+    ).rejects.toThrow('Backend build did not complete successfully');
+  });
+
+  it('does not build the backend after a frontend failure', async () => {
+    const buildBackend = jest.fn(async () => true);
+    await expect(
+      compileViteApp(
+        {appRoot: makeApp()},
+        {
+          loadEnvironment: async () => undefined,
+          buildFrontend: async () => {
+            throw new Error('vite failed');
+          },
+          buildBackend,
+        },
+      ),
+    ).rejects.toThrow('vite failed');
+    expect(buildBackend).not.toHaveBeenCalled();
+  });
+});
+
+describe('compileOnlyConflicts', () => {
+  it('names every release flag given with --compile-only', () => {
+    expect(compileOnlyConflicts({})).toEqual([]);
+    expect(compileOnlyConflicts({publish: false, allowDirty: false})).toEqual([]);
+    expect(
+      compileOnlyConflicts({
+        target: 'web',
+        publish: true,
+        revision: 'abc',
+        allowDirty: true,
+      }),
+    ).toEqual(['--target', '--publish', '--revision', '--allow-dirty']);
   });
 });
 
