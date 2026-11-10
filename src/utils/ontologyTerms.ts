@@ -115,7 +115,10 @@ export function ontologyTermsFromQuads(
   const skipped = new Set<string>();
   const ontologies = new Set<string>();
   // Per named subject: its vann values, read once the ontology node is known.
-  const vann = new Map<string, {prefixes: Set<string>; namespaces: Set<string>}>();
+  const vann = new Map<
+    string,
+    {prefixes: Set<string>; namespaces: Set<string>}
+  >();
   for (const {subject, predicate, object} of quads) {
     if (
       subject.termType === 'NamedNode' &&
@@ -123,10 +126,16 @@ export function ontologyTermsFromQuads(
     ) {
       let entry = vann.get(subject.value);
       if (!entry)
-        vann.set(subject.value, (entry = {prefixes: new Set(), namespaces: new Set()}));
+        vann.set(
+          subject.value,
+          (entry = {prefixes: new Set(), namespaces: new Set()}),
+        );
       if (predicate.value === VANN_PREFIX) {
         if (object.termType === 'Literal') entry.prefixes.add(object.value);
-      } else if (object.termType === 'Literal' || object.termType === 'NamedNode') {
+      } else if (
+        object.termType === 'Literal' ||
+        object.termType === 'NamedNode'
+      ) {
         entry.namespaces.add(object.value);
       }
     }
@@ -211,19 +220,29 @@ export function ontologySuggestedPrefix(
     fail(`its data declares no owl:Ontology for the namespace <${namespace}>`);
   }
   const {preferredPrefixes: prefixes, preferredNamespaces: namespaces} = result;
-  if (!prefixes.length) fail(`<${subject}> has no vann:preferredNamespacePrefix`);
+  if (!prefixes.length)
+    fail(`<${subject}> has no vann:preferredNamespacePrefix`);
   if (prefixes.length > 1) {
-    fail(`<${subject}> has more than one vann:preferredNamespacePrefix (${prefixes.map((p) => JSON.stringify(p)).join(', ')})`);
+    fail(
+      `<${subject}> has more than one vann:preferredNamespacePrefix (${prefixes.map((p) => JSON.stringify(p)).join(', ')})`,
+    );
   }
-  if (!namespaces.length) fail(`<${subject}> has no vann:preferredNamespaceUri`);
+  if (!namespaces.length)
+    fail(`<${subject}> has no vann:preferredNamespaceUri`);
   if (namespaces.length > 1) {
-    fail(`<${subject}> has more than one vann:preferredNamespaceUri (${namespaces.map((n) => `"${n}"`).join(', ')})`);
+    fail(
+      `<${subject}> has more than one vann:preferredNamespaceUri (${namespaces.map((n) => `"${n}"`).join(', ')})`,
+    );
   }
   if (namespaces[0] !== namespace) {
-    fail(`its vann:preferredNamespaceUri "${namespaces[0]}" is not its namespace "${namespace}"`);
+    fail(
+      `its vann:preferredNamespaceUri "${namespaces[0]}" is not its namespace "${namespace}"`,
+    );
   }
   if (!SUGGESTED_PREFIX.test(prefixes[0])) {
-    fail(`its vann:preferredNamespacePrefix ${JSON.stringify(prefixes[0])} is not a prefix (a letter, then letters, digits, -, _ or ., not ending in .)`);
+    fail(
+      `its vann:preferredNamespacePrefix ${JSON.stringify(prefixes[0])} is not a prefix (a letter, then letters, digits, -, _ or ., not ending in .)`,
+    );
   }
   return prefixes[0];
 }

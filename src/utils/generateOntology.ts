@@ -143,7 +143,12 @@ export async function generatePackageOntologies(
     } catch (error) {
       if (!(error instanceof OntologyVannError)) throw error;
       throw new Error(
-        vannMessage(pkgJson.name, config, sources.map((s) => s.name), error),
+        vannMessage(
+          pkgJson.name,
+          config,
+          sources.map((s) => s.name),
+          error,
+        ),
       );
     }
     const spec: OntologyModuleSpec = {
