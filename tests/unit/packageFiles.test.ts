@@ -148,7 +148,7 @@ describe('buildPackageFiles', () => {
       planning: {namespace: 'https://acme.example/ont/planning/'},
     });
     expect(out['src/data/planning.ttl']).toContain(
-      `<https://acme.example/ont/planning/> a owl:Ontology .`,
+      `<https://acme.example/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://acme.example/ont/planning/" .`,
     );
     for (const [file, content] of Object.entries(out)) {
       expect([file, content]).not.toEqual([
@@ -180,7 +180,7 @@ describe('buildPackageFiles', () => {
   });
 
   test('a slug or namespace the scaffold cannot use is refused', () => {
-    expect(() => buildPackageFiles('3d-ont', 'ontology')).toThrow(/start with a letter/);
+    expect(() => buildPackageFiles('3d-ont', 'ontology')).toThrow(/start with a lowercase letter/);
     expect(() =>
       buildPackageFiles('planning-ont', 'ontology', {uriBase: 'ex.test/x'}),
     ).toThrow(/not an ontology namespace/);

@@ -1412,12 +1412,12 @@ var replaceCurlyVariables = function (string) {
 };
 
 export const createOntology = async (
-  prefix,
+  name,
   uriBase?,
   basePath = process.cwd(),
 ) => {
-  if (!prefix) {
-    console.warn('Please provide a suggested prefix as the first argument');
+  if (!name) {
+    console.warn("Please provide the ontology's name as the first argument");
     return;
   }
 
@@ -1426,16 +1426,16 @@ export const createOntology = async (
   let targetFolder = ensureFolderExists(sourceFolder, 'ontologies');
 
   if (!uriBase) {
-    uriBase = defaultOntologyNamespace(prefix);
+    uriBase = defaultOntologyNamespace(name);
   }
   setVariable('uri_base', asNamespace(uriBase));
 
-  let {hyphenName, camelCaseName, underscoreName} = setNameVariables(prefix);
+  let {hyphenName, camelCaseName, underscoreName} = setNameVariables(name);
 
   const namespace = asNamespace(uriBase);
   // Refused before anything is written: a name the modules, Turtle or build check cannot use.
   checkScaffoldOntology(hyphenName, namespace);
-  log("Creating files for ontology '" + prefix + "'");
+  log("Creating files for ontology '" + name + "'");
 
   // The ontology's data, Turtle. `loadData` reads it beside the compiled module
   // (`../data/<name>.ttl`), and `linked build` copies it to lib/esm/data/.
@@ -1496,7 +1496,7 @@ export const createOntology = async (
   if (!sourceFolder.includes('frontend')) {
     //then also add an import to index
     // Import the register sibling, not the terms module: only the sibling calls
-    // linkedOntology(). See the comment in the generated <prefix>.register.ts.
+    // linkedOntology(). See the comment in the generated <name>.register.ts.
     let indexPath = addLineToIndex(
       `import './ontologies/${hyphenName}.register.js';`,
       'ontologies',

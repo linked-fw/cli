@@ -2,7 +2,8 @@
  * `linked generate-ontology` and the build's staleness check: a package's ontology accessor
  * modules, generated from its Turtle.
  *
- * A package declares its ontologies in `package.json`, one entry per prefix:
+ * A package declares its ontologies in `package.json`, one entry per ontology, keyed by its name
+ * within the package:
  *
  * ```json
  * "linkedOntologies": {
@@ -12,23 +13,31 @@
  * }
  * ```
  *
- * `data` names files in `src/data/` and defaults to `["<prefix>.ttl"]`. Each prefix gets
- * `src/ontologies/<prefix>.ts`, `<prefix>.data.ts` and `<prefix>.register.ts`
- * (`ontologyModules.ts`), with the terms of its namespace found in its data files. The modules
- * are committed; `linked build` fails when one differs from what the data generates.
+ * `data` names files in `src/data/` and defaults to `["<name>.ttl"]`. Each ontology gets
+ * `src/ontologies/<name>.ts`, `<name>.data.ts` and `<name>.register.ts` (`ontologyModules.ts`),
+ * with the terms of its namespace found in its data files. Its suggested prefix is data: the
+ * `vann:preferredNamespacePrefix` of its `owl:Ontology` node, whose `vann:preferredNamespaceUri`
+ * must be the configured namespace. The modules are committed; `linked build` fails when one
+ * differs from what the data generates, or the data lacks the vann triples.
  */
 import fs from 'fs';
 import path from 'path';
 import {
   generateOntologyModules,
-  ONTOLOGY_PREFIX,
+  ONTOLOGY_NAME,
+  SUGGESTED_PREFIX,
   type OntologyModuleSpec,
 } from './ontologyModules.js';
-import {ontologyTermsFromTurtle} from './ontologyTerms.js';
+import {
+  OntologyVannError,
+  ontologySuggestedPrefix,
+  ontologyTermsFromTurtle,
+} from './ontologyTerms.js';
 
 /** One `linkedOntologies` entry, validated. */
 export interface OntologyConfig {
-  prefix: string;
+  /** The ontology's name within the package (the `linkedOntologies` key). */
+  name: string;
   namespace: string;
   /** File names in `src/data/`. */
   data: string[];
@@ -41,7 +50,7 @@ export const ONTOLOGY_NAMESPACE = /^[a-z][a-z0-9+.-]*:\S*[/#:]$/i;
 export const ONTOLOGIES_KEY = 'linkedOntologies';
 
 /**
- * The package's `linkedOntologies`, sorted by prefix; empty when it has none. Throws, naming the
+ * The package's `linkedOntologies`, sorted by name; empty when it has none. Throws, naming the
  * entry, on anything malformed.
  */
 export function readOntologyConfigs(
@@ -52,26 +61,17 @@ export function readOntologyConfigs(
   const where = `package.json "${ONTOLOGIES_KEY}"`;
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(
-      `${where} must be an object of {"<prefix>": {"namespace": "<IRI>"}}.`,
+      `${where} must be an object of {"<name>": {"namespace": "<IRI>"}}.`,
     );
   }
-  // Prefixes equal but for case would write the same files on a case-insensitive file system.
-  const seen = new Map<string, string>();
-  for (const prefix of Object.keys(raw)) {
-    const other = seen.get(prefix.toLowerCase());
-    if (other) {
-      throw new Error(
-        `${where}: the prefixes "${other}" and "${prefix}" differ only in case.`,
-      );
-    }
-    seen.set(prefix.toLowerCase(), prefix);
-  }
   return Object.entries(raw as Record<string, unknown>)
-    .map(([prefix, entry]): OntologyConfig => {
-      const at = `${where}.${prefix}`;
-      if (!ONTOLOGY_PREFIX.test(prefix)) {
+    .map(([name, entry]): OntologyConfig => {
+      const at = `${where}.${name}`;
+      // Lowercase only, so two names never differ only in case (one file on a case-insensitive
+      // file system).
+      if (!ONTOLOGY_NAME.test(name)) {
         throw new Error(
-          `${at}: the prefix must be letters and digits, with single hyphens or underscores between them.`,
+          `${at}: the name must be lowercase letters and digits, with single hyphens or underscores between them.`,
         );
       }
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -87,7 +87,7 @@ export function readOntologyConfigs(
           `${at}.namespace must be an IRI ending in /, # or :, such as "https://example.org/ont/".`,
         );
       }
-      const files = data === undefined ? [`${prefix}.ttl`] : data;
+      const files = data === undefined ? [`${name}.ttl`] : data;
       if (
         !Array.isArray(files) ||
         !files.length ||
@@ -101,9 +101,9 @@ export function readOntologyConfigs(
           `${at}.data must list one or more .ttl file names in src/data/.`,
         );
       }
-      return {prefix, namespace, data: files as string[]};
+      return {name, namespace, data: files as string[]};
     })
-    .sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0));
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 /** One ontology's generated modules, and what was left out. */
@@ -130,17 +130,25 @@ export async function generatePackageOntologies(
       const full = path.join(packagePath, 'src', 'data', file);
       if (!fs.existsSync(full)) {
         throw new Error(
-          `${ONTOLOGIES_KEY}.${config.prefix} names ${name}, which does not exist.`,
+          `${ONTOLOGIES_KEY}.${config.name} names ${name}, which does not exist.`,
         );
       }
       return {name, text: fs.readFileSync(full, 'utf8')};
     });
-    const {terms, skipped, ontology} = await ontologyTermsFromTurtle(
-      sources,
-      config.namespace,
-    );
+    const read = await ontologyTermsFromTurtle(sources, config.namespace);
+    const {terms, skipped, ontology} = read;
+    let suggestedPrefix: string;
+    try {
+      suggestedPrefix = ontologySuggestedPrefix(read, config.namespace);
+    } catch (error) {
+      if (!(error instanceof OntologyVannError)) throw error;
+      throw new Error(
+        vannMessage(pkgJson.name, config, sources.map((s) => s.name), error),
+      );
+    }
     const spec: OntologyModuleSpec = {
-      prefix: config.prefix,
+      name: config.name,
+      suggestedPrefix,
       namespace: config.namespace,
       dataFiles: config.data.map((file) => `../data/${file}`),
       terms,
@@ -154,6 +162,31 @@ export async function generatePackageOntologies(
     });
   }
   return generations;
+}
+
+/**
+ * The build's refusal of an ontology without its vann data: what is wrong, and the triples to add
+ * (on its `owl:Ontology` node, which it declares too when it has none).
+ */
+function vannMessage(
+  packageName: unknown,
+  config: OntologyConfig,
+  files: string[],
+  error: OntologyVannError,
+): string {
+  const pkg = typeof packageName === 'string' ? `${packageName}: ` : '';
+  const prefix = SUGGESTED_PREFIX.test(config.name) ? config.name : '<prefix>';
+  return (
+    `${pkg}the ontology "${config.name}" (${files.join(', ')}) has no suggested prefix: ${error.message}. ` +
+    `Its owl:Ontology node must carry its suggested prefix and its namespace, for example:\n\n` +
+    `  @prefix owl: <http://www.w3.org/2002/07/owl#> .\n` +
+    `  @prefix vann: <http://purl.org/vocab/vann/> .\n\n` +
+    `  <${error.subject}>${error.noOntologyNode ? ' a owl:Ontology ;' : ''}\n` +
+    `    vann:preferredNamespacePrefix "${prefix}" ;\n` +
+    `    vann:preferredNamespaceUri "${config.namespace}" .\n\n` +
+    `Add it to one of its data files (a new file goes in "${ONTOLOGIES_KEY}".${config.name}.data). ` +
+    `For a published vocabulary shipped unedited, put it in src/data/${config.name}-added.ttl, never in the published file.`
+  );
 }
 
 /** Writes every generated module; returns the paths whose content changed. */

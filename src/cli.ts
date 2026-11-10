@@ -298,15 +298,15 @@ program
 
 program
   .command('create-ontology')
-  .action((prefix, uriBase) => {
-    return createOntology(prefix, uriBase).catch(reportRefusal);
+  .action((name, uriBase) => {
+    return createOntology(name, uriBase).catch(reportRefusal);
   })
   .description(
     'Creates a new ontology file for your package. Execute this from your package folder.',
   )
   .argument(
-    '<suggested-prefix>',
-    'The suggested prefix for your ontology. Also the shorthand code used for the file name and the exported ontology object',
+    '<name>',
+    "The ontology's name within the package: the key in package.json \"linkedOntologies\", the modules' file name, and its suggested prefix in the data (vann:preferredNamespacePrefix)",
   )
   .argument(
     '[uribase]',
@@ -316,7 +316,7 @@ program
 program
   .command('generate-ontology')
   .description(
-    `Writes src/ontologies/<prefix>.ts, <prefix>.data.ts and <prefix>.register.ts for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/. Run it from the package folder`,
+    `Writes src/ontologies/<name>.ts, <name>.data.ts and <name>.register.ts for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/ (its suggested prefix from the vann data of its owl:Ontology). Run it from the package folder`,
   )
   .option(
     '--check',
@@ -333,12 +333,12 @@ program
       const generations = await generatePackageOntologies(dir);
       if (!generations.length) {
         throw new Error(
-          `package.json has no "${ONTOLOGIES_KEY}". Declare each ontology as {"<prefix>": {"namespace": "<IRI>", "data": ["<file>.ttl"]}}.`,
+          `package.json has no "${ONTOLOGIES_KEY}". Declare each ontology by its name as {"<name>": {"namespace": "<IRI>", "data": ["<file>.ttl"]}}.`,
         );
       }
       for (const g of generations) {
         console.log(
-          `${g.config.prefix}: ${g.termCount} terms from ${g.config.data.map((f) => 'src/data/' + f).join(', ')}` +
+          `${g.config.name}: ${g.termCount} terms from ${g.config.data.map((f) => 'src/data/' + f).join(', ')}` +
             (g.skipped.length ? ` (${g.skipped.length} subjects under the namespace are not terms: ${g.skipped.slice(0, 3).join(', ')}${g.skipped.length > 3 ? ', …' : ''})` : ''),
         );
       }

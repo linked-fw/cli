@@ -73,7 +73,7 @@ describe('create-shape and friends need a src/package.ts', () => {
     const read = (rel: string) => fs.readFileSync(path.join(app, 'src', rel), 'utf8');
     expect(fs.readdirSync(path.join(app, 'src', 'data'))).toEqual(['planning.ttl']);
     expect(read('data/planning.ttl')).toContain(
-      '<https://linked.cm/ont/planning/> a owl:Ontology .',
+      '<https://linked.cm/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" .',
     );
     expect(read('ontologies/planning.data.ts')).toContain(
       `export const dataFiles = ['../data/planning.ttl'];`,
@@ -104,7 +104,7 @@ describe('create-shape and friends need a src/package.ts', () => {
       `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
     );
     jest.spyOn(process, 'cwd').mockReturnValue(app);
-    await expect(createOntology('3d', undefined, app)).rejects.toThrow(/start with a letter/);
+    await expect(createOntology('3d', undefined, app)).rejects.toThrow(/start with a lowercase letter/);
     expect(fs.existsSync(path.join(app, 'src', 'data'))).toBe(false);
     expect(fs.readJsonSync(path.join(app, 'package.json')).linkedOntologies).toBeUndefined();
   });

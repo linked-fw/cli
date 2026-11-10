@@ -2,9 +2,13 @@
 @prefix other: <https://example.test/other#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix vann: <http://purl.org/vocab/vann/> .
 
+# The suggested prefix differs from the ontology's name (`ex`) on purpose.
 <https://example.test/ex/> a owl:Ontology ;
-  rdfs:label "The example ontology" .
+  rdfs:label "The example ontology" ;
+  vann:preferredNamespacePrefix "exa" ;
+  vann:preferredNamespaceUri "https://example.test/ex/" .
 
 ex:Thing a owl:Class ;
   rdfs:label "Thing" ;

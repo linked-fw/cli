@@ -1,18 +1,22 @@
 /**
  * The terms of an ontology, read from its Turtle: every named subject in the namespace, with its
- * `rdfs:label` and `rdfs:comment`.
+ * `rdfs:label` and `rdfs:comment`; and the ontology's suggested prefix, from the vann data of its
+ * `owl:Ontology` node.
  *
  * Kept apart from `ontologyModules.ts` (which is pure and safe in a browser bundle) because it
  * parses with `n3`. `n3` is loaded by a variable specifier, so bundling the generator does not
  * pull it in and its typings are not needed to compile the cli.
  */
-import type {OntologyTerm} from './ontologyModules.js';
+import {SUGGESTED_PREFIX, type OntologyTerm} from './ontologyModules.js';
 
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#';
 const LABEL = `${RDFS}label`;
 const COMMENT = `${RDFS}comment`;
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const OWL_ONTOLOGY = 'http://www.w3.org/2002/07/owl#Ontology';
+const VANN = 'http://purl.org/vocab/vann/';
+const VANN_PREFIX = `${VANN}preferredNamespacePrefix`;
+const VANN_NAMESPACE = `${VANN}preferredNamespaceUri`;
 
 /** The part of `n3` this module uses. */
 interface N3Term {
@@ -63,6 +67,15 @@ export interface OntologyTermsResult {
    * {@link ontologyIriOf}); absent when no declaration belongs to the namespace.
    */
   ontology?: string;
+  /**
+   * The `vann:preferredNamespacePrefix` values of the {@link ontology} node (literals), distinct
+   * and sorted; empty without that node. {@link ontologySuggestedPrefix} checks them.
+   */
+  preferredPrefixes: string[];
+  /**
+   * Its `vann:preferredNamespaceUri` values (a literal or an IRI), distinct and sorted.
+   */
+  preferredNamespaces: string[];
 }
 
 /**
@@ -101,7 +114,22 @@ export function ontologyTermsFromQuads(
   const subjects = new Map<string, {labels: Literal[]; comments: Literal[]}>();
   const skipped = new Set<string>();
   const ontologies = new Set<string>();
+  // Per named subject: its vann values, read once the ontology node is known.
+  const vann = new Map<string, {prefixes: Set<string>; namespaces: Set<string>}>();
   for (const {subject, predicate, object} of quads) {
+    if (
+      subject.termType === 'NamedNode' &&
+      (predicate.value === VANN_PREFIX || predicate.value === VANN_NAMESPACE)
+    ) {
+      let entry = vann.get(subject.value);
+      if (!entry)
+        vann.set(subject.value, (entry = {prefixes: new Set(), namespaces: new Set()}));
+      if (predicate.value === VANN_PREFIX) {
+        if (object.termType === 'Literal') entry.prefixes.add(object.value);
+      } else if (object.termType === 'Literal' || object.termType === 'NamedNode') {
+        entry.namespaces.add(object.value);
+      }
+    }
     if (
       subject.termType === 'NamedNode' &&
       predicate.value === RDF_TYPE &&
@@ -139,13 +167,65 @@ export function ontologyTermsFromQuads(
       if (comment !== undefined) term.comment = comment;
       return term;
     });
+  const ontology = ontologyIriOf(ontologies, namespace);
+  const own = ontology === undefined ? undefined : vann.get(ontology);
   const result: OntologyTermsResult = {
     terms,
     skipped: [...skipped].sort(compare),
+    preferredPrefixes: [...(own?.prefixes ?? [])].sort(compare),
+    preferredNamespaces: [...(own?.namespaces ?? [])].sort(compare),
   };
-  const ontology = ontologyIriOf(ontologies, namespace);
   if (ontology !== undefined) result.ontology = ontology;
   return result;
+}
+
+/** Why an ontology's data gives no suggested prefix; the message says what is missing. */
+export class OntologyVannError extends Error {
+  constructor(
+    message: string,
+    /** The `owl:Ontology` node the triples belong on (the ontology's IRI, else the namespace). */
+    readonly subject: string,
+    /** Whether the data lacks an `owl:Ontology` node for the namespace altogether. */
+    readonly noOntologyNode: boolean,
+  ) {
+    super(message);
+    this.name = 'OntologyVannError';
+  }
+}
+
+/**
+ * The ontology's suggested prefix: the one `vann:preferredNamespacePrefix` of its `owl:Ontology`
+ * node, whose one `vann:preferredNamespaceUri` must be `namespace`. Throws an
+ * {@link OntologyVannError} saying what is missing or wrong otherwise. Pure, like
+ * {@link ontologyTermsFromQuads}.
+ */
+export function ontologySuggestedPrefix(
+  result: OntologyTermsResult,
+  namespace: string,
+): string {
+  const subject = result.ontology ?? namespace;
+  const fail = (reason: string) => {
+    throw new OntologyVannError(reason, subject, result.ontology === undefined);
+  };
+  if (result.ontology === undefined) {
+    fail(`its data declares no owl:Ontology for the namespace <${namespace}>`);
+  }
+  const {preferredPrefixes: prefixes, preferredNamespaces: namespaces} = result;
+  if (!prefixes.length) fail(`<${subject}> has no vann:preferredNamespacePrefix`);
+  if (prefixes.length > 1) {
+    fail(`<${subject}> has more than one vann:preferredNamespacePrefix (${prefixes.map((p) => JSON.stringify(p)).join(', ')})`);
+  }
+  if (!namespaces.length) fail(`<${subject}> has no vann:preferredNamespaceUri`);
+  if (namespaces.length > 1) {
+    fail(`<${subject}> has more than one vann:preferredNamespaceUri (${namespaces.map((n) => `"${n}"`).join(', ')})`);
+  }
+  if (namespaces[0] !== namespace) {
+    fail(`its vann:preferredNamespaceUri "${namespaces[0]}" is not its namespace "${namespace}"`);
+  }
+  if (!SUGGESTED_PREFIX.test(prefixes[0])) {
+    fail(`its vann:preferredNamespacePrefix ${JSON.stringify(prefixes[0])} is not a prefix (a letter, then letters, digits, -, _ or ., not ending in .)`);
+  }
+  return prefixes[0];
 }
 
 /**

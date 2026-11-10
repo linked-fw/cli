@@ -17,8 +17,10 @@ import {
 } from '../../src/utils/ontologyModules.js';
 import {
   ontologyIriOf,
+  ontologySuggestedPrefix,
   ontologyTermsFromQuads,
   ontologyTermsFromTurtle,
+  OntologyVannError,
 } from '../../src/utils/ontologyTerms.js';
 import {
   checkOntologyModulesStep,
@@ -87,7 +89,7 @@ describe('the identifier rule', () => {
   test('the generator refuses a collision instead of renaming', () => {
     expect(() =>
       generateOntologyTermsModule({
-        prefix: 'ex',
+        name: 'ex',
         namespace: 'https://example.test/ex/',
         dataFiles: ['../data/ex.ttl'],
         terms: [{localName: 'a-b'}, {localName: 'a_b'}],
@@ -128,7 +130,7 @@ describe('the doc line', () => {
 
   test('a module with no terms imports nothing and is still a module', () => {
     const module = generateOntologyTermsModule({
-      prefix: 'ex',
+      name: 'ex',
       namespace: 'https://example.test/ex/',
       dataFiles: ['../data/ex.ttl'],
       terms: [],
@@ -149,7 +151,7 @@ describe('the modules', () => {
   test('the fixture package: golden output for two namespaces', async () => {
     const generations = await generatePackageOntologies(FIXTURE);
     expect(
-      generations.map((g) => [g.config.prefix, g.termCount, g.skipped]),
+      generations.map((g) => [g.config.name, g.termCount, g.skipped]),
     ).toEqual([
       ['ex', 8, ['https://example.test/ex/sub/Deeper']],
       ['other', 2, []],
@@ -199,7 +201,8 @@ describe('the modules', () => {
 
   test('the same input gives the same bytes, in any order', () => {
     const spec = (terms: {localName: string; comment?: string}[]) => ({
-      prefix: 'ex',
+      name: 'ex',
+      suggestedPrefix: 'ex',
       namespace: 'https://example.test/ex/',
       dataFiles: ['../data/ex.ttl'],
       terms,
@@ -282,7 +285,7 @@ describe('the modules', () => {
     expect(ontologyIriOf([], ns)).toBeUndefined();
     // Without a declaration the data module keeps the namespace.
     expect(
-      generateOntologyModules({prefix: 'p', namespace: ns, dataFiles: [], terms: []})[
+      generateOntologyModules({name: 'p', suggestedPrefix: 'p', namespace: ns, dataFiles: [], terms: []})[
         'src/ontologies/p.data.ts'
       ],
     ).toContain("export const _ontologyResource = ns('');");
@@ -308,10 +311,11 @@ describe('the modules', () => {
     ).rejects.toThrow(/src\/data\/bad\.ttl/);
   });
 
-  test('an unsafe prefix names no file', () => {
+  test('an unsafe name names no file', () => {
     expect(() =>
       generateOntologyModules({
-        prefix: '../x',
+        name: '../x',
+        suggestedPrefix: 'x',
         namespace: 'https://x.test/',
         dataFiles: [],
         terms: [],
@@ -320,8 +324,88 @@ describe('the modules', () => {
   });
 });
 
+describe('the suggested prefix', () => {
+  const NS = 'https://example.test/s/';
+  const read = (turtle: string) =>
+    ontologyTermsFromTurtle(
+      [
+        {
+          name: 's.ttl',
+          text:
+            '@prefix owl: <http://www.w3.org/2002/07/owl#> .\n' +
+            '@prefix vann: <http://purl.org/vocab/vann/> .\n' +
+            turtle,
+        },
+      ],
+      NS,
+    );
+  const prefixOf = async (turtle: string) =>
+    ontologySuggestedPrefix(await read(turtle), NS);
+
+  test('is the vann prefix of the ontology node, which need not be the name', async () => {
+    const [ex, other] = await generatePackageOntologies(FIXTURE);
+    expect(ex.files['src/ontologies/ex.data.ts']).toContain(
+      "Prefix.add('exa', 'https://example.test/ex/');",
+    );
+    expect(ex.files['src/ontologies/ex.register.ts']).toContain(
+      "linkedOntology(terms, ns, 'ex', loadData, dataFiles);",
+    );
+    // The vann namespace may be an IRI as well as a literal.
+    expect(other.files['src/ontologies/other.data.ts']).toContain(
+      "Prefix.add('other', 'https://example.test/other#');",
+    );
+    expect(
+      await prefixOf(
+        `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s1" ; vann:preferredNamespaceUri "${NS}" .`,
+      ),
+    ).toBe('s1');
+  });
+
+  test('vann data on another node does not count', async () => {
+    const result = await read(
+      `<${NS}> a owl:Ontology .\n<https://example.test/elsewhere> vann:preferredNamespacePrefix "s" ; vann:preferredNamespaceUri "${NS}" .`,
+    );
+    expect(result.preferredPrefixes).toEqual([]);
+    expect(() => ontologySuggestedPrefix(result, NS)).toThrow(
+      /has no vann:preferredNamespacePrefix/,
+    );
+  });
+
+  test.each([
+    [`<${NS}> vann:preferredNamespacePrefix "s" .`, /declares no owl:Ontology/],
+    [`<${NS}> a owl:Ontology ; vann:preferredNamespaceUri "${NS}" .`, /no vann:preferredNamespacePrefix/],
+    [`<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s" .`, /no vann:preferredNamespaceUri/],
+    [
+      `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s", "t" ; vann:preferredNamespaceUri "${NS}" .`,
+      /more than one vann:preferredNamespacePrefix \("s", "t"\)/,
+    ],
+    [
+      `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s" ; vann:preferredNamespaceUri "${NS}", <https://example.test/t/> .`,
+      /more than one vann:preferredNamespaceUri/,
+    ],
+    [
+      `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s" ; vann:preferredNamespaceUri "https://example.test/t/" .`,
+      /"https:\/\/example\.test\/t\/" is not its namespace/,
+    ],
+    [
+      `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "3d" ; vann:preferredNamespaceUri "${NS}" .`,
+      /"3d" is not a prefix/,
+    ],
+  ])('refuses %s', async (turtle, message) => {
+    const result = await read(turtle);
+    let error: unknown;
+    try {
+      ontologySuggestedPrefix(result, NS);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(OntologyVannError);
+    expect((error as Error).message).toMatch(message);
+  });
+});
+
 describe('the package configuration', () => {
-  test('entries are sorted, and data defaults to <prefix>.ttl', () => {
+  test('entries are sorted, and data defaults to <name>.ttl', () => {
     expect(
       readOntologyConfigs({
         linkedOntologies: {
@@ -334,12 +418,12 @@ describe('the package configuration', () => {
       }),
     ).toEqual([
       {
-        prefix: 'rdf',
+        name: 'rdf',
         namespace: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
         data: ['rdf.ttl'],
       },
       {
-        prefix: 'rdfs',
+        name: 'rdfs',
         namespace: 'http://www.w3.org/2000/01/rdf-schema#',
         data: ['rdfs.ttl'],
       },
@@ -349,14 +433,12 @@ describe('the package configuration', () => {
 
   test.each([
     [[], /must be an object/],
-    [{'bad prefix': {namespace: 'https://x.test/'}}, /prefix must be/],
+    [{'bad name': {namespace: 'https://x.test/'}}, /name must be lowercase/],
+    // Lowercase only, so two names never differ only in case.
+    [{Ex: {namespace: 'https://x.test/'}}, /name must be lowercase/],
     [{x: 'https://x.test/'}, /must be an object with a "namespace"/],
     [{x: {namespace: 'not an iri'}}, /namespace must be an IRI/],
     [{x: {namespace: 'https://x.test/ont'}}, /ending in \/, # or :/],
-    [
-      {Ex: {namespace: 'https://x.test/'}, ex: {namespace: 'https://y.test/'}},
-      /differ only in case/,
-    ],
     [
       {x: {namespace: 'https://x.test/', data: ['../up.ttl']}},
       /data must list/,
@@ -445,6 +527,45 @@ describe('writing and the build check', () => {
     expect(await step().apply()).toEqual({
       error: expect.stringMatching(/namespace must be an IRI/),
     });
+  });
+
+  test('an ontology without vann data fails the build, saying which triples to add and where', async () => {
+    const file = path.join(dir, 'src/data/ex.ttl');
+    fs.writeFileSync(
+      file,
+      fs
+        .readFileSync(file, 'utf8')
+        .replace(/ ;\n  vann:preferredNamespacePrefix "exa" ;\n  vann:preferredNamespaceUri "[^"]*"/, ''),
+    );
+    const {error} = (await step().apply()) as {error: string};
+    expect(error).toContain(
+      'ontology-generator-fixture: the ontology "ex" (src/data/ex.ttl, src/data/ex-extra.ttl) has no suggested prefix: <https://example.test/ex/> has no vann:preferredNamespacePrefix.',
+    );
+    expect(error).toContain(
+      '  <https://example.test/ex/>\n    vann:preferredNamespacePrefix "ex" ;\n    vann:preferredNamespaceUri "https://example.test/ex/" .',
+    );
+    expect(error).toContain('src/data/ex-added.ttl, never in the published file');
+    await expect(generatePackageOntologies(dir)).rejects.toThrow(
+      /the ontology "ex" .* has no suggested prefix/,
+    );
+  });
+
+  test('without an owl:Ontology node the message declares one; a wrong vann namespace is named', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'src/data/other.ttl'),
+      '@prefix other: <https://example.test/other#> .\nother:Elsewhere a <http://www.w3.org/2000/01/rdf-schema#Class> .\n',
+    );
+    const {error} = (await step().apply()) as {error: string};
+    expect(error).toMatch(/its data declares no owl:Ontology for the namespace <https:\/\/example\.test\/other#>/);
+    expect(error).toContain('  <https://example.test/other#> a owl:Ontology ;\n');
+
+    fs.copySync(path.join(FIXTURE, 'src/data/other.ttl'), path.join(dir, 'src/data/other.ttl'));
+    const pkg = fs.readJsonSync(path.join(dir, 'package.json'));
+    pkg.linkedOntologies.other.namespace = 'https://example.test/other/';
+    fs.writeJsonSync(path.join(dir, 'package.json'), pkg);
+    expect(((await step().apply()) as {error: string}).error).toMatch(
+      /its vann:preferredNamespaceUri "https:\/\/example\.test\/other#" is not its namespace "https:\/\/example\.test\/other\/"/,
+    );
   });
 
   test('a package without linkedOntologies passes untouched', async () => {

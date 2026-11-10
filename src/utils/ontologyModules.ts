@@ -2,16 +2,17 @@
  * The accessor modules of an ontology, as text: the one generator `linked generate-ontology` and
  * a host app's ontology builder share.
  *
- * An ontology with prefix `<p>` gets three sibling modules in `src/ontologies/`:
+ * An ontology named `<n>` (its name within its package) gets three sibling modules in
+ * `src/ontologies/`:
  *
- * - `<p>.ts`, the **terms module**: one `export const Term = ns('Term')` per term, sorted, each
+ * - `<n>.ts`, the **terms module**: one `export const Term = ns('Term')` per term, sorted, each
  *   with a one-line JSDoc from its `rdfs:comment` (else `rdfs:label`), and nothing else, so
- *   `import * as p from '<pkg>/ontologies/<p>'` is a namespace of terms only and tree-shakes
+ *   `import * as n from '<pkg>/ontologies/<n>'` is a namespace of terms only and tree-shakes
  *   (every initializer is annotated pure);
- * - `<p>.data.ts`, the **data module**: `ns`, `dataFiles`, `loadData`, `_ontologyResource` (the
+ * - `<n>.data.ts`, the **data module**: `ns`, `dataFiles`, `loadData`, `_ontologyResource` (the
  *   ontology's IRI as its `owl:Ontology` declares it, else the namespace) and the
- *   `Prefix.add` registration of the prefix;
- * - `<p>.register.ts`, the **register module**: the `linkedOntology` call, which needs the terms
+ *   `Prefix.add` registration of its suggested prefix (its data's `vann:preferredNamespacePrefix`);
+ * - `<n>.register.ts`, the **register module**: the `linkedOntology` call, which needs the terms
  *   module's whole namespace and so cannot live in it (see the comment it carries).
  *
  * A term's export name is its local name made a valid identifier by one fixed rule
@@ -37,8 +38,16 @@ export interface OntologyTerm {
 
 /** What the three modules of one ontology are generated from. */
 export interface OntologyModuleSpec {
-  /** The registered prefix, which is also the modules' file name (`src/ontologies/<prefix>.ts`). */
-  prefix: string;
+  /**
+   * The ontology's name within its package: the modules' file name (`src/ontologies/<name>.ts`)
+   * and the name `linkedOntology` registers it under.
+   */
+  name: string;
+  /**
+   * The prefix the data module adds (`Prefix.add`): the ontology's `vann:preferredNamespacePrefix`
+   * ({@link ontologySuggestedPrefix} in `ontologyTerms.ts` reads it).
+   */
+  suggestedPrefix: string;
   /** The term namespace (`http://schema.org/`). */
   namespace: string;
   /** The data files `loadData` reads, relative to `src/ontologies/` (`../data/schema.ttl`). */
@@ -52,8 +61,11 @@ export interface OntologyModuleSpec {
   ontology?: string;
 }
 
-/** A prefix that names an ontology's modules: letters and digits, single `-`/`_` between. */
-export const ONTOLOGY_PREFIX = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/i;
+/** An ontology's name within its package: lowercase letters and digits, single `-`/`_` between. */
+export const ONTOLOGY_NAME = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
+
+/** A suggested prefix: a Turtle prefix name (ASCII), as `Prefix.add` and `@prefix` take it. */
+export const SUGGESTED_PREFIX = /^[A-Za-z](?:[A-Za-z0-9_.-]*[A-Za-z0-9_-])?$/;
 
 /**
  * Reserved words and the names a module (always strict mode) cannot bind: ECMAScript keywords,
@@ -175,11 +187,11 @@ export function findOntologyNameCollisions(
 /** Two or more terms of one ontology would get the same export name. */
 export class OntologyNameCollisionError extends Error {
   constructor(
-    readonly prefix: string,
+    readonly ontologyName: string,
     readonly collisions: OntologyNameCollision[],
   ) {
     super(
-      `The ontology '${prefix}' has terms that get the same export name: ` +
+      `The ontology '${ontologyName}' has terms that get the same export name: ` +
         collisions
           .map((c) => `${c.name} (${c.localNames.join(', ')})`)
           .join('; ') +
@@ -254,18 +266,18 @@ const GENERATED = (dataFiles: string[]) =>
     .replace(/\s+/g, ' ')
     .replace(/\p{Cs}/gu, '\uFFFD')}`;
 
-/** Validates a spec's prefix, so a file name is never derived from something unsafe. */
-function checkPrefix(prefix: string): void {
-  if (!ONTOLOGY_PREFIX.test(prefix)) {
+/** Validates a spec's name, so a file name is never derived from something unsafe. */
+function checkName(name: string): void {
+  if (!ONTOLOGY_NAME.test(name)) {
     throw new Error(
-      `${JSON.stringify(prefix)} cannot name an ontology module: use letters and digits, with single hyphens or underscores between them.`,
+      `${JSON.stringify(name)} cannot name an ontology module: use lowercase letters and digits, with single hyphens or underscores between them.`,
     );
   }
 }
 
 /** The terms sorted by export name, with each export name; refuses collisions. */
 function namedTerms(
-  spec: OntologyModuleSpec,
+  spec: Pick<OntologyModuleSpec, 'name' | 'terms'>,
 ): {name: string; term: OntologyTerm}[] {
   const unique = new Map<string, OntologyTerm>();
   // Sorted first, so which of two entries for one term wins does not depend on input order.
@@ -287,15 +299,17 @@ function namedTerms(
   }
   const collisions = findOntologyNameCollisions([...unique.keys()]);
   if (collisions.length)
-    throw new OntologyNameCollisionError(spec.prefix, collisions);
+    throw new OntologyNameCollisionError(spec.name, collisions);
   return [...unique.values()]
     .map((term) => ({name: ontologyIdentifier(term.localName), term}))
     .sort((a, b) => compare(a.name, b.name));
 }
 
-/** `src/ontologies/<prefix>.ts`: the terms, and nothing else. */
-export function generateOntologyTermsModule(spec: OntologyModuleSpec): string {
-  checkPrefix(spec.prefix);
+/** `src/ontologies/<name>.ts`: the terms, and nothing else. */
+export function generateOntologyTermsModule(
+  spec: Omit<OntologyModuleSpec, 'suggestedPrefix'>,
+): string {
+  checkName(spec.name);
   const terms = namedTerms(spec);
   // The namespace function's local binding must not be a term's name.
   const names = new Set(terms.map((t) => t.name));
@@ -306,7 +320,7 @@ export function generateOntologyTermsModule(spec: OntologyModuleSpec): string {
     GENERATED(spec.dataFiles),
     // No import without terms: an unused one fails under `noUnusedLocals`.
     ...(terms.length
-      ? [`import {${importNs}} from './${spec.prefix}.data.js';`]
+      ? [`import {${importNs}} from './${spec.name}.data.js';`]
       : []),
   ];
   for (const {name, term} of terms) {
@@ -328,11 +342,16 @@ function sourceOfDataFile(file: string): string {
   return file.startsWith('../') ? `src/${file.slice(3)}` : file;
 }
 
-/** `src/ontologies/<prefix>.data.ts`: the namespace, the data files and the prefix. */
+/** `src/ontologies/<name>.data.ts`: the namespace, the data files and the suggested prefix. */
 export function generateOntologyDataModule(
   spec: Omit<OntologyModuleSpec, 'terms'>,
 ): string {
-  checkPrefix(spec.prefix);
+  checkName(spec.name);
+  if (!SUGGESTED_PREFIX.test(spec.suggestedPrefix)) {
+    throw new Error(
+      `${JSON.stringify(spec.suggestedPrefix)} is not a prefix: start with a letter, then letters, digits, -, _ or . (not last).`,
+    );
+  }
   return [
     GENERATED(spec.dataFiles),
     `import {Prefix} from '@_linked/core/utils/Prefix';`,
@@ -347,7 +366,7 @@ export function generateOntologyDataModule(
     '',
     "/** The namespace: `ns('Term')` is the `{id}` reference of any term, listed or not. */",
     `export const ns = createNameSpace(${quote(spec.namespace)});`,
-    `Prefix.add(${quote(spec.prefix)}, ${quote(spec.namespace)});`,
+    `Prefix.add(${quote(spec.suggestedPrefix)}, ${quote(spec.namespace)});`,
     '',
     ...(spec.ontology === undefined || spec.ontology === spec.namespace
       ? [
@@ -362,12 +381,12 @@ export function generateOntologyDataModule(
   ].join('\n');
 }
 
-/** `src/ontologies/<prefix>.register.ts`: the `linkedOntology` registration. */
+/** `src/ontologies/<name>.register.ts`: the `linkedOntology` registration, under the name. */
 export function generateOntologyRegisterModule(
-  spec: Pick<OntologyModuleSpec, 'prefix'>,
+  spec: Pick<OntologyModuleSpec, 'name'>,
 ): string {
-  checkPrefix(spec.prefix);
-  const p = spec.prefix;
+  checkName(spec.name);
+  const p = spec.name;
   return [
     `// Generated by \`linked generate-ontology\`. Do not edit.`,
     '/**',
@@ -390,15 +409,15 @@ export function generateOntologyRegisterModule(
 
 /**
  * The three modules of one ontology, keyed by their path relative to the package
- * (`src/ontologies/<prefix>.ts`, `.data.ts`, `.register.ts`).
+ * (`src/ontologies/<name>.ts`, `.data.ts`, `.register.ts`).
  */
 export function generateOntologyModules(
   spec: OntologyModuleSpec,
 ): Record<string, string> {
   const dir = 'src/ontologies';
   return {
-    [`${dir}/${spec.prefix}.ts`]: generateOntologyTermsModule(spec),
-    [`${dir}/${spec.prefix}.data.ts`]: generateOntologyDataModule(spec),
-    [`${dir}/${spec.prefix}.register.ts`]: generateOntologyRegisterModule(spec),
+    [`${dir}/${spec.name}.ts`]: generateOntologyTermsModule(spec),
+    [`${dir}/${spec.name}.data.ts`]: generateOntologyDataModule(spec),
+    [`${dir}/${spec.name}.register.ts`]: generateOntologyRegisterModule(spec),
   };
 }

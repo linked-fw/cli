@@ -2,9 +2,13 @@
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix vann: <http://purl.org/vocab/vann/> .
 
-# The ontology's IRI is the namespace without its `#`, as owl's and dcat's are.
-<https://example.test/other> a owl:Ontology .
+# The ontology's IRI is the namespace without its `#`, as owl's and dcat's are. Its vann
+# namespace is an IRI here, not a literal: both are read.
+<https://example.test/other> a owl:Ontology ;
+  vann:preferredNamespacePrefix "other" ;
+  vann:preferredNamespaceUri <https://example.test/other#> .
 
 other:Elsewhere a rdfs:Class ; rdfs:comment "A class in the second namespace." .
 other:yield a rdf:Property .

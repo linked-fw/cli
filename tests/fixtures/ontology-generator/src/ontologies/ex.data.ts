@@ -12,7 +12,7 @@ export const loadData = () => loadOntologyFiles(import.meta.url, dataFiles);
 
 /** The namespace: `ns('Term')` is the `{id}` reference of any term, listed or not. */
 export const ns = createNameSpace('https://example.test/ex/');
-Prefix.add('ex', 'https://example.test/ex/');
+Prefix.add('exa', 'https://example.test/ex/');
 
 /** The ontology itself (its namespace IRI). */
 export const _ontologyResource = ns('');
