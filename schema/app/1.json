@@ -4,9 +4,7 @@
   "title": "linked.app.json",
   "description": "A linked app's declarative settings, at the app root. Packages never have one.",
   "type": "object",
-  "required": [
-    "schemaVersion"
-  ],
+  "required": ["schemaVersion"],
   "additionalProperties": false,
   "properties": {
     "$schema": {
