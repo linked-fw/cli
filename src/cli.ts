@@ -41,10 +41,10 @@ import {unknownCommandError} from './unknown-command.js';
 import {installDriftHook} from './localize/drift-hook.js';
 import {
   generatePackageOntologies,
-  ONTOLOGIES_KEY,
   staleOntologyModules,
   writePackageOntologies,
 } from './utils/generateOntology.js';
+import {ONTOLOGIES_KEY} from './utils/ontologyConfig.js';
 
 /**
  * Run an async command action and report a failure the way the rest of this
@@ -316,7 +316,7 @@ program
 program
   .command('generate-ontology')
   .description(
-    `Writes src/ontologies/<name>.ts, <name>.data.ts and <name>.register.ts for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/ (its suggested prefix from the vann data of its owl:Ontology). Run it from the package folder`,
+    `Writes src/ontologies/<module>.ts, <module>.data.ts and <module>.register.ts (the module defaults to the name) for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/ (its suggested prefix from the vann data of its owl:Ontology). An entry with "generated": false has its modules written by hand: only its vann data is checked. Run it from the package folder`,
   )
   .option(
     '--check',
@@ -339,13 +339,16 @@ program
       for (const g of generations) {
         console.log(
           `${g.config.name}: ${g.termCount} terms from ${g.config.data.map((f) => 'src/data/' + f).join(', ')}` +
+            (g.config.generated ? '' : ' (modules written by hand: vann data checked, nothing generated)') +
             (g.skipped.length ? ` (${g.skipped.length} subjects under the namespace are not terms: ${g.skipped.slice(0, 3).join(', ')}${g.skipped.length > 3 ? ', …' : ''})` : ''),
         );
       }
       if (options.check) {
         const stale = await staleOntologyModules(dir, generations);
         if (stale.length) {
-          throw new Error(`Out of date: ${stale.join(', ')}. Run \`linked generate-ontology\`.`);
+          throw new Error(
+            `Out of date: ${stale.join(', ')}. Run \`linked generate-ontology\`, or declare an ontology whose modules are written by hand with "generated": false.`,
+          );
         }
         console.log('Every ontology module is current.');
         return;

@@ -170,7 +170,7 @@ exits 0.
 ### Ontology accessor modules
 
 ```bash
-linked generate-ontology          # write src/ontologies/<name>.ts, .data.ts and .register.ts from src/data/*.ttl
+linked generate-ontology          # write src/ontologies/<module>.ts, .data.ts and .register.ts from src/data/*.ttl
 linked generate-ontology --check  # write nothing; exit 1 when a module is out of date
 ```
 
@@ -204,20 +204,21 @@ A published vocabulary shipped unedited gets these triples in a file of its own,
 `src/data/<name>-added.ttl`, listed in its `data`. `vann:preferredNamespaceUri` (a literal or an
 IRI) must be the entry's `namespace`.
 
-Each ontology gets three committed modules in `src/ontologies/`:
+Each generated ontology gets three committed modules in `src/ontologies/`, named by its module
+(below; the name by default):
 
-- `<name>.ts`: one `export const Term = /*#__PURE__*/ ns('Term')` per subject of its data files
+- `<module>.ts`: one `export const Term = /*#__PURE__*/ ns('Term')` per subject of its data files
   in its namespace (enumeration members and individuals included), sorted by name, each with a
   one-line JSDoc from `rdfs:comment` (else `rdfs:label`). Nothing else, so consumers write
   `import * as schema from '@_linked/schema/ontologies/schema'` and `schema.Person`, and a bundler
   keeps only the terms used. A subject whose remainder after the namespace holds `/`, `#` or `?`
   is not a term, and the command lists it.
-- `<name>.data.ts`: `ns`, `dataFiles`, `loadData`, `_ontologyResource` and `Prefix.add` of the
+- `<module>.data.ts`: `ns`, `dataFiles`, `loadData`, `_ontologyResource` and `Prefix.add` of the
   suggested prefix.
   `_ontologyResource` is the ontology's own IRI as its data declares it with `a owl:Ontology`: the
   namespace, else the namespace without its trailing `#` or `/` (`http://www.w3.org/2002/07/owl`),
   else the only declaration the namespace starts with; otherwise the namespace.
-- `<name>.register.ts`: `linkedOntology(terms, ns, '<name>', loadData, dataFiles)`; `src/index.ts`
+- `<module>.register.ts`: `linkedOntology(terms, ns, '<name>', loadData, dataFiles)`; `src/index.ts`
   imports it.
 
 A term's export name is its local name made a valid identifier by one rule: a character that
@@ -234,8 +235,28 @@ than the configured one; the message names the package, the ontology and its fil
 triples to add. `linked generate-ontology` refuses the same. A package without `linkedOntologies`
 is not checked.
 
+An entry has two more optional keys. `"module"` is the modules' file name in `src/ontologies/`
+without extension (same pattern as a name; defaults to the name), so the ontology's terms import
+as `<package>/ontologies/<module>`. `"generated": false` (the default is `true`) is for an ontology
+whose modules hold more than the generator writes (grouping objects, extra exports) and stay
+written by hand:
+
+```json
+"linkedOntologies": {
+  "core": {"namespace": "https://example.org/core/", "module": "linked-core", "generated": false}
+}
+```
+
+Such an entry still declares the ontology: its name, namespace, module and data. `linked
+generate-ontology` writes nothing for it and the staleness check skips it, but its data must carry
+the same vann triples, and the build refuses it without them. Its hand-written modules register it
+with `linkedOntology(terms, ns, '<name>', …)` and add the suggested prefix themselves. Two entries
+with one `module` are refused.
+
 The generator itself is `@_linked/cli/utils/ontologyModules` (pure, browser-safe: it takes the
 terms as data) and `@_linked/cli/utils/ontologyTerms` (reads them from Turtle with `n3`).
+`@_linked/cli/utils/ontologyConfig`'s `readOntologyConfigs(pkgJson)` (pure) reads a package's
+declarations: `{name, namespace, module, generated, data}` per ontology, sorted by name.
 
 ### App release / production runtime
 

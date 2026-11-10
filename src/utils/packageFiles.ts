@@ -28,7 +28,7 @@ import {
 import {withBaseUri} from './packageBaseUri.js';
 import {shippedDotfileName} from './shippedDotfiles.js';
 import {generateOntologyModules, ONTOLOGY_NAME} from './ontologyModules.js';
-import {ONTOLOGIES_KEY, ONTOLOGY_NAMESPACE} from './generateOntology.js';
+import {ONTOLOGIES_KEY, ONTOLOGY_NAMESPACE} from './ontologyConfig.js';
 
 export interface PackageFilesOptions {
   /**

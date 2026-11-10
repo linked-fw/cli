@@ -13,110 +13,53 @@
  * }
  * ```
  *
- * `data` names files in `src/data/` and defaults to `["<name>.ttl"]`. Each ontology gets
- * `src/ontologies/<name>.ts`, `<name>.data.ts` and `<name>.register.ts` (`ontologyModules.ts`),
+ * `data` names files in `src/data/` and defaults to `["<name>.ttl"]`; `module` names its modules
+ * and defaults to the name. Each ontology gets `src/ontologies/<module>.ts`, `<module>.data.ts`
+ * and `<module>.register.ts` (`ontologyModules.ts`), imported as `<package>/ontologies/<module>`,
  * with the terms of its namespace found in its data files. Its suggested prefix is data: the
  * `vann:preferredNamespacePrefix` of its `owl:Ontology` node, whose `vann:preferredNamespaceUri`
  * must be the configured namespace. The modules are committed; `linked build` fails when one
  * differs from what the data generates, or the data lacks the vann triples.
+ *
+ * An entry with `"generated": false` declares an ontology whose modules are written by hand
+ * (they hold more than the generator writes): nothing is generated or compared for it, but its
+ * data must carry the same vann triples.
  */
 import fs from 'fs';
 import path from 'path';
 import {
   generateOntologyModules,
-  ONTOLOGY_NAME,
   SUGGESTED_PREFIX,
   type OntologyModuleSpec,
 } from './ontologyModules.js';
+import {
+  ONTOLOGIES_KEY,
+  readOntologyConfigs,
+  type OntologyConfig,
+} from './ontologyConfig.js';
 import {
   OntologyVannError,
   ontologySuggestedPrefix,
   ontologyTermsFromTurtle,
 } from './ontologyTerms.js';
 
-/** One `linkedOntologies` entry, validated. */
-export interface OntologyConfig {
-  /** The ontology's name within the package (the `linkedOntologies` key). */
-  name: string;
-  namespace: string;
-  /** File names in `src/data/`. */
-  data: string[];
-}
-
-/** What a `linkedOntologies` namespace must be: an IRI ending in a separator. */
-export const ONTOLOGY_NAMESPACE = /^[a-z][a-z0-9+.-]*:\S*[/#:]$/i;
-
-/** The `package.json` key. */
-export const ONTOLOGIES_KEY = 'linkedOntologies';
-
-/**
- * The package's `linkedOntologies`, sorted by name; empty when it has none. Throws, naming the
- * entry, on anything malformed.
- */
-export function readOntologyConfigs(
-  pkgJson: Record<string, unknown>,
-): OntologyConfig[] {
-  const raw = pkgJson[ONTOLOGIES_KEY];
-  if (raw === undefined) return [];
-  const where = `package.json "${ONTOLOGIES_KEY}"`;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(
-      `${where} must be an object of {"<name>": {"namespace": "<IRI>"}}.`,
-    );
-  }
-  return Object.entries(raw as Record<string, unknown>)
-    .map(([name, entry]): OntologyConfig => {
-      const at = `${where}.${name}`;
-      // Lowercase only, so two names never differ only in case (one file on a case-insensitive
-      // file system).
-      if (!ONTOLOGY_NAME.test(name)) {
-        throw new Error(
-          `${at}: the name must be lowercase letters and digits, with single hyphens or underscores between them.`,
-        );
-      }
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        throw new Error(`${at} must be an object with a "namespace".`);
-      }
-      const {namespace, data} = entry as {namespace?: unknown; data?: unknown};
-      if (
-        typeof namespace !== 'string' ||
-        !ONTOLOGY_NAMESPACE.test(namespace)
-      ) {
-        // Ending in a separator, so `…/ont` cannot claim `…/ontology` as the term `ology`.
-        throw new Error(
-          `${at}.namespace must be an IRI ending in /, # or :, such as "https://example.org/ont/".`,
-        );
-      }
-      const files = data === undefined ? [`${name}.ttl`] : data;
-      if (
-        !Array.isArray(files) ||
-        !files.length ||
-        files.some(
-          (f) =>
-            typeof f !== 'string' ||
-            !/^[A-Za-z0-9_][A-Za-z0-9._-]*\.ttl$/.test(f),
-        )
-      ) {
-        throw new Error(
-          `${at}.data must list one or more .ttl file names in src/data/.`,
-        );
-      }
-      return {name, namespace, data: files as string[]};
-    })
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-}
-
 /** One ontology's generated modules, and what was left out. */
 export interface OntologyGeneration {
   config: OntologyConfig;
-  /** Path relative to the package (`src/ontologies/schema.ts`) → content. */
+  /**
+   * Path relative to the package (`src/ontologies/schema.ts`) → content; empty for an ontology
+   * whose modules are written by hand.
+   */
   files: Record<string, string>;
   termCount: number;
   /** Subjects under the namespace that are not terms of it (`ontologyTermsFromTurtle`). */
   skipped: string[];
 }
 
-/** Every ontology module the package's data generates; none without `linkedOntologies`. */
+/**
+ * Every ontology module the package's data generates; none without `linkedOntologies`. The vann
+ * data of every ontology is checked, including one whose modules are written by hand.
+ */
 export async function generatePackageOntologies(
   packagePath: string,
 ): Promise<OntologyGeneration[]> {
@@ -153,6 +96,7 @@ export async function generatePackageOntologies(
     }
     const spec: OntologyModuleSpec = {
       name: config.name,
+      module: config.module,
       suggestedPrefix,
       namespace: config.namespace,
       dataFiles: config.data.map((file) => `../data/${file}`),
@@ -161,7 +105,7 @@ export async function generatePackageOntologies(
     };
     generations.push({
       config,
-      files: generateOntologyModules(spec),
+      files: config.generated ? generateOntologyModules(spec) : {},
       termCount: terms.length,
       skipped,
     });
@@ -250,7 +194,8 @@ export async function checkOntologyModulesStep(
   return {
     error:
       `${stale.join(', ')} ${stale.length === 1 ? 'is' : 'are'} not what the ontology data generates. ` +
-      `Run \`linked generate-ontology\` and commit the result.`,
+      `Run \`linked generate-ontology\` and commit the result. ` +
+      `If an ontology's modules are written by hand, declare it with "generated": false in "${ONTOLOGIES_KEY}".`,
   };
 }
 

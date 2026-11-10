@@ -25,10 +25,10 @@ import {
 import {
   checkOntologyModulesStep,
   generatePackageOntologies,
-  readOntologyConfigs,
   staleOntologyModules,
   writePackageOntologies,
 } from '../../src/utils/generateOntology.js';
+import {readOntologyConfigs} from '../../src/utils/ontologyConfig.js';
 import {planBuildSteps} from '../../src/cli-methods.js';
 
 const FIXTURE = path.join(__dirname, '..', 'fixtures', 'ontology-generator');
@@ -405,11 +405,15 @@ describe('the suggested prefix', () => {
 });
 
 describe('the package configuration', () => {
-  test('entries are sorted, and data defaults to <name>.ttl', () => {
+  test('entries are sorted; data defaults to <name>.ttl, module to the name, generated to true', () => {
     expect(
       readOntologyConfigs({
         linkedOntologies: {
-          rdfs: {namespace: 'http://www.w3.org/2000/01/rdf-schema#'},
+          rdfs: {
+            namespace: 'http://www.w3.org/2000/01/rdf-schema#',
+            module: 'rdf-schema',
+            generated: false,
+          },
           rdf: {
             namespace: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
             data: ['rdf.ttl'],
@@ -421,11 +425,15 @@ describe('the package configuration', () => {
         name: 'rdf',
         namespace: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
         data: ['rdf.ttl'],
+        module: 'rdf',
+        generated: true,
       },
       {
         name: 'rdfs',
         namespace: 'http://www.w3.org/2000/01/rdf-schema#',
         data: ['rdfs.ttl'],
+        module: 'rdf-schema',
+        generated: false,
       },
     ]);
     expect(readOntologyConfigs({})).toEqual([]);
@@ -445,6 +453,25 @@ describe('the package configuration', () => {
     ],
     [{x: {namespace: 'https://x.test/', data: []}}, /data must list/],
     [{x: {namespace: 'https://x.test/', data: ['x.json']}}, /data must list/],
+    [
+      {x: {namespace: 'https://x.test/', module: 'Linked-Core'}},
+      /x\.module must be a file name in src\/ontologies\/ without extension/,
+    ],
+    [
+      {x: {namespace: 'https://x.test/', module: '../x'}},
+      /x\.module must be a file name/,
+    ],
+    [
+      {x: {namespace: 'https://x.test/', generated: 'no'}},
+      /x\.generated must be true \(the default\) or false/,
+    ],
+    [
+      {
+        a: {namespace: 'https://x.test/a/', module: 'b'},
+        b: {namespace: 'https://x.test/b/'},
+      },
+      /"a" and "b" both use the module src\/ontologies\/b\.ts/,
+    ],
   ])('refuses %j', (value, message) => {
     expect(() => readOntologyConfigs({linkedOntologies: value})).toThrow(
       message,
@@ -566,6 +593,78 @@ describe('writing and the build check', () => {
     expect(((await step().apply()) as {error: string}).error).toMatch(
       /its vann:preferredNamespaceUri "https:\/\/example\.test\/other#" is not its namespace "https:\/\/example\.test\/other\/"/,
     );
+  });
+
+  test('an ontology whose modules are written by hand: nothing generated or compared, vann data still required', async () => {
+    const pkg = fs.readJsonSync(path.join(dir, 'package.json'));
+    pkg.linkedOntologies.ex.generated = false;
+    fs.writeJsonSync(path.join(dir, 'package.json'), pkg);
+    // Hand-written modules: edited, one missing, one extra export.
+    fs.appendFileSync(
+      path.join(dir, 'src/ontologies/ex.ts'),
+      'export const grouping = {};\n',
+    );
+    fs.removeSync(path.join(dir, 'src/ontologies/ex.register.ts'));
+
+    expect(await step().apply()).toBe(true);
+    const generations = await generatePackageOntologies(dir);
+    expect(
+      generations.map((g) => [g.config.name, g.config.generated, Object.keys(g.files).length]),
+    ).toEqual([
+      ['ex', false, 0],
+      ['other', true, 3],
+    ]);
+    expect(generations[0].termCount).toBeGreaterThan(0);
+    expect(await writePackageOntologies(dir)).toEqual([]);
+    expect(
+      fs.existsSync(path.join(dir, 'src/ontologies/ex.register.ts')),
+    ).toBe(false);
+
+    // Without vann data it fails the build with the same message as a generated one.
+    const file = path.join(dir, 'src/data/ex.ttl');
+    fs.writeFileSync(
+      file,
+      fs
+        .readFileSync(file, 'utf8')
+        .replace(/ ;\n  vann:preferredNamespacePrefix "exa" ;\n  vann:preferredNamespaceUri "[^"]*"/, ''),
+    );
+    const {error} = (await step().apply()) as {error: string};
+    expect(error).toContain(
+      'ontology-generator-fixture: the ontology "ex" (src/data/ex.ttl, src/data/ex-extra.ttl) has no suggested prefix: <https://example.test/ex/> has no vann:preferredNamespacePrefix.',
+    );
+    await expect(generatePackageOntologies(dir)).rejects.toThrow(
+      /the ontology "ex" .* has no suggested prefix/,
+    );
+  });
+
+  test('a stale generated module names the option for hand-written modules', async () => {
+    fs.appendFileSync(path.join(dir, 'src/ontologies/ex.ts'), '// hand edit\n');
+    expect(((await step().apply()) as {error: string}).error).toMatch(
+      /declare it with "generated": false in "linkedOntologies"/,
+    );
+  });
+
+  test('a module other than the name: the files take the module, the registration the name', async () => {
+    const pkg = fs.readJsonSync(path.join(dir, 'package.json'));
+    pkg.linkedOntologies.ex.module = 'linked-ex';
+    fs.writeJsonSync(path.join(dir, 'package.json'), pkg);
+    expect(await staleOntologyModules(dir)).toEqual([
+      'src/ontologies/linked-ex.ts',
+      'src/ontologies/linked-ex.data.ts',
+      'src/ontologies/linked-ex.register.ts',
+    ]);
+    await writePackageOntologies(dir);
+    const read = (f: string) =>
+      fs.readFileSync(path.join(dir, 'src/ontologies', f), 'utf8');
+    expect(read('linked-ex.ts')).toBe(
+      read('ex.ts').replace("from './ex.data.js'", "from './linked-ex.data.js'"),
+    );
+    expect(read('linked-ex.data.ts')).toBe(read('ex.data.ts'));
+    const register = read('linked-ex.register.ts');
+    expect(register).toContain("import * as terms from './linked-ex.js';");
+    expect(register).toContain("from './linked-ex.data.js';");
+    expect(register).toContain("linkedOntology(terms, ns, 'ex', loadData, dataFiles);");
+    expect(await step().apply()).toBe(true);
   });
 
   test('a package without linkedOntologies passes untouched', async () => {
