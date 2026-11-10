@@ -1,6 +1,6 @@
 ---
 summary: linkedOntologies keyed by the ontology's name within its package; the suggested prefix is read from the ontology's vann data; the build refuses an ontology without it.
-status: Tasks
+status: Implementation
 ---
 
 # Ontology names and the vann prefix
@@ -72,3 +72,10 @@ Dependencies: phase 2 needs phase 1. No parallel work.
 
 - The host app's own call of `generateOntologyModules` passes `prefix`; it must pass `name` and
   `suggestedPrefix` (and write vann data for the ontologies it creates). Homed with the master.
+
+## Progress
+
+- Phase 1 done (f69a38a): generator, configuration, build check, scaffold template; unit suite
+  104 suites / 1290 tests pass.
+- Phase 2 done: README, stale comments; `npm test` passes (unit 1290, e2e 7);
+  `generate-ontology --check` passes in schema and dcmi, fails in org with the new message.

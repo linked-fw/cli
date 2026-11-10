@@ -85,7 +85,7 @@ export function packageNameFor(name: string, kind: ScaffoldKind): string {
 /**
  * The ontology slug of an ontology package: the bare name without `-ont`.
  * `@acme/foo-ont` → `foo`. It is the `{ontologySlug}` in
- * `{root}ont/{ontologySlug}/{Term}` and the ontology's file name and prefix.
+ * `{root}ont/{ontologySlug}/{Term}`, and the ontology's name (its file name) and suggested prefix.
  */
 export function ontologySlugFor(packageName: string): string {
   const bare = bareName(packageName);

@@ -10,7 +10,7 @@ export const LINKED_ONTOLOGY_ROOT = 'https://linked.cm/ont/';
 /**
  * The default namespace for a scaffolded ontology: `https://linked.cm/ont/{slug}/`.
  *
- * `name` is a package name or an ontology prefix. It is reduced the way core derives a package's
+ * `name` is a package name or an ontology name. It is reduced the way core derives a package's
  * publicSlug — the npm scope is dropped and the rest kebab-cased — so a package's own ontology
  * (`@_linked/server` → `https://linked.cm/ont/server/`) shares the slug of its shapes.
  *

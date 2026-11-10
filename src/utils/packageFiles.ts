@@ -176,7 +176,7 @@ export function buildPackageFiles(
   const {baseUri, dependencies} = options;
 
   // An ontology package `foo-ont` holds the ontology `foo`: that slug names its
-  // files and its prefix, and its terms mint `{root}ont/foo/{Term}`.
+  // name, files and suggested prefix, and its terms mint `{root}ont/foo/{Term}`.
   const ontologySlug =
     kind === 'ontology' ? ontologySlugFor(packageName) : undefined;
   const uriBase =
