@@ -11,9 +11,9 @@
  *   only and tree-shakes. A namespace function, where code needs one, is core's
  *   `createNameSpace(namespace)`;
  * - `index.ts`, the **index**: imports every ontology module of the package (generated or
- *   written by hand) and registers them all with one `registerOntologies([...])` call, each with
- *   its name, namespace, terms, data files and suggested prefix (its data's
- *   `vann:preferredNamespacePrefix`). The package's entry imports it.
+ *   written by hand) and registers them all with one `registerOntologies([...], import.meta.url)`
+ *   call, each with its name, namespace, terms, data files (relative to the index) and suggested
+ *   prefix (its data's `vann:preferredNamespacePrefix`). The package's entry imports it.
  *
  * A term's export name is its local name made a valid identifier by one fixed rule
  * ({@link ontologyIdentifier}). Two terms that the rule gives the same name are refused
@@ -123,11 +123,6 @@ export const RESERVED_IDENTIFIERS: ReadonlySet<string> = new Set([
   'exports',
   'module',
   'require',
-  // Keys core has added to registered terms, which would overwrite a term.
-  '_data',
-  '_load',
-  '_ns',
-  '_prefix',
 ]);
 
 const ID_START = /[\p{ID_Start}$_]/u;
@@ -362,11 +357,7 @@ export interface OntologyIndexEntry {
 }
 
 /** The index's own bindings, which no module import may take. */
-const INDEX_LOCALS = new Set([
-  'registerOntologies',
-  'loadOntologyFiles',
-  'data',
-]);
+const INDEX_LOCALS = new Set(['registerOntologies']);
 
 /**
  * `src/ontologies/index.ts`: imports every ontology module of the package and registers them all
@@ -396,7 +387,7 @@ export function generateOntologyIndexModule(
         `    name: ${quote(entry.name)},`,
         `    namespace: ${quote(entry.namespace)},`,
         `    terms: ${local},`,
-        `    data: data([${entry.dataFiles.map(quote).join(', ')}]),`,
+        `    data: [${entry.dataFiles.map(quote).join(', ')}],`,
         `    suggestedPrefix: ${quote(entry.suggestedPrefix)},`,
         '  },',
       ].join('\n'),
@@ -405,19 +396,16 @@ export function generateOntologyIndexModule(
   return [
     `${GENERATED_HEADER} Do not edit: change package.json "linkedOntologies" or the data and run it again.`,
     '// Registers every ontology of this package. The package entry imports this module.',
-    `import {loadOntologyFiles} from '@_linked/core/ontology/loadOntologyFiles';`,
     `import {registerOntologies} from '../package.js';`,
     ...imports,
     '',
-    '/** Data files, relative to this module (Turtle, copied into `lib/` by the build), and their reader (server only). */',
-    'const data = (files: string[]) => ({',
-    '  files,',
-    '  load: () => loadOntologyFiles(import.meta.url, files),',
-    '});',
-    '',
-    'registerOntologies([',
-    ...registrations,
-    ']);',
+    '// Data files are relative to this module (Turtle, copied into `lib/` by the build).',
+    'registerOntologies(',
+    '  [',
+    ...registrations.map((r) => r.replace(/^/gm, '  ')),
+    '  ],',
+    '  import.meta.url,',
+    ');',
     '',
   ].join('\n');
 }

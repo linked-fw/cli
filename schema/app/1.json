@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linked.cm/schema/app/1.json",
+  "title": "linked.app.json",
+  "description": "A linked app's declarative settings, at the app root. Packages never have one.",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://linked.cm/schema/app/1.json"
+    },
+    "schemaVersion": {
+      "description": "The version of this schema the file follows. A tool refuses a version it does not know.",
+      "const": 1
+    },
+    "prefixes": {
+      "description": "The app's prefix map: prefix → namespace IRI. Its server, its browser bundle and its store queries all use it. Tools only add entries (`linked prefixes`); a rename or removal is the app owner's.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:\\S+$"
+      }
+    }
+  }
+}

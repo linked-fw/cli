@@ -83,7 +83,7 @@ describe('createPackage kinds', () => {
     // The package is `planning-ont`; the ontology slug is `planning`.
     expect(read(pkg, 'src/package.ts')).toContain(`linkedPackage('planning-ont')`);
     expect(read(pkg, 'src/ontologies/index.ts')).toContain(
-      `    name: 'planning',\n    namespace: 'https://linked.cm/ont/planning/',\n    terms: planning,\n    data: data(['../data/planning.ttl']),\n    suggestedPrefix: 'planning',`,
+      `      name: 'planning',\n      namespace: 'https://linked.cm/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,
     );
     expect(manifest.linkedOntologies).toEqual({
       planning: {namespace: 'https://linked.cm/ont/planning/'},

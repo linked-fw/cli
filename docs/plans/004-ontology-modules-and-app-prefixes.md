@@ -35,13 +35,11 @@ Out of scope: regenerating other packages (a later step), `linked.config.js` (a 
 
 ## Contracts (from the master plan, K8–K11)
 
-- Core (built in parallel): `registerOntologies(entries)` and a map-loading call. The master plan
-  does not name the latter; assumed `Prefix.load(map: Record<string, string>)` (decision 1).
-- `registerOntologies` is assumed to come from the package object, like `linkedOntology` today
-  (`import {registerOntologies} from '../package.js'`), since registrations are keyed by package
-  and name (decision 2).
-- Each entry: `{name, namespace, terms, data, suggestedPrefix}`; `terms` is the module's whole
-  namespace object; `data` is `{files, load}` (decision 3).
+- Core (landed in the master during this step): `registerOntologies(ontologies, moduleUrl)` from
+  the package object (`import {registerOntologies} from '../package.js'`); entries `{name,
+  namespace, terms, data?, suggestedPrefix?}`, `terms` the module's namespace object, `data` the
+  data files relative to `moduleUrl` (`['../data/x.ttl']`). Map loading: `Prefix.load(map)`.
+  `registerInstalledOntologies` imports `<pkg>/ontologies/index`.
 
 ## Architecture
 
@@ -116,13 +114,16 @@ command. One agent, sequential.
 
 | # | Where | Problem | Choice | Alternative | Rationale |
 |---|---|---|---|---|---|
-| 1 | contract | The master plan does not name core's map-loading call | `Prefix.load(map)` as instructed; no fallback to `Prefix.add` | Fall back to `Prefix.add` when `load` is missing | One explicit way; no app has a `linked.app.json` before the packages move together, so nothing loads a map earlier |
-| 2 | contract | Where `registerOntologies` is imported from | The package object (`../package.js`), like `linkedOntology` | A free function from `@_linked/core/utils/Package` taking the package name | Registrations are keyed by package; matches the existing pattern |
-| 3 | contract | Shape of `data` | `{files, load}` (`load` reads the files relative to the index) | A list of files only | Maps 1:1 onto core's registration (`files`, `load`); loading needs the module URL |
+| 1 | contract | The master plan did not name core's map-loading call | `Prefix.load(map)`; no fallback to `Prefix.add` (confirmed by F5) | Fall back to `Prefix.add` when `load` is missing | One explicit way; an app without `linked.app.json` loads nothing |
+| 2 | contract | Where `registerOntologies` is imported from | The package object (`../package.js`) (confirmed by F5) | A free function taking the package name | Registrations are keyed by package |
+| 3 | contract | Shape of `data` | First `{files, load}`; changed to F5's `data: ['../data/x.ttl']` with `import.meta.url` as the call's second argument once F5 landed | — | Match the landed API |
 | 4 | K9 | `_ontologyResource` (the ontology IRI) had a home in the data module | Dropped; nothing reads it | Keep it as a registration field | No consumer in any package (checked); the IRI stays in the data |
 | 5 | K10 | A suggested prefix legal in Turtle but not as a map name (`server-utils`) | Characters outside `[A-Za-z0-9_]` become `_` before the `_2` rule | Refuse the package | Add-only builder never fails on a valid package; the result is still a legal prefix |
 | 6 | K10 | Unknown top-level keys in `linked.app.json` | Refused, naming the key | Ignored | A misspelt key would otherwise be silently ignored |
 | 7 | K10 | "Inside an app" for `generate-ontology` | The package is the app, or lies under it in the same git repo | Any app found walking up | A framework checkout nested in an app's folder must not write that app's map |
+| 9 | K9 | The shape check's detection of register modules (`*.register.js`) | `ontologies/index.js` (built) or `src/ontologies/index.ts` only, as core's `registerInstalledOntologies` now imports | Also accept `*.register.js` | Detection must match what core imports, or the check expects a registration that never happens |
+| 10 | K9 | `_data`, `_load`, `_ns`, `_prefix` were reserved term names (keys `linkedOntology` added to the terms) | Removed: `registerOntologies` adds no keys | Keep reserving them | Terms named so get their own names again |
+| 11 | K10 | `generate-ontology` in a package inside an app's folder also writes that app's map | Kept (it is the point of running the builder there); a framework checkout with its own `.git` is outside | — | A package checkout nested in an app keeps its hands off the app's file |
 | 8 | K10 | The web app template is cloned from its own repo | `create-app` writes `linked.app.json` when the clone has none; the react-native template ships one | Change the template repo now | That repo is not in this step; the file reaches every new app either way |
 
 ## Progress
@@ -131,3 +132,12 @@ command. One agent, sequential.
   `npx jest tests/unit/ontologyGenerator.test.ts`: 78 passed; `tsc --noEmit` clean.
 - Phase 2 done: template, `create-package`, `create-ontology`. Unit suite after `npm run build`:
   1301 tests, all pass (the four scaffold tests updated to the layout).
+- Phase 3 done: `appConfig.ts`, schema v1, `linked prefixes`, the builder after `generate-ontology`
+  in an app, `create-app` writes and fills the file. `appConfig.test.ts`: 12 passed.
+- Phase 4 done: map loaded at `linked start` (SSR runner) and by a compiled server (the app's copy
+  of core), Vite plugin `linked:app-prefixes`. F5 landed meanwhile: the index now calls
+  `registerOntologies([...], import.meta.url)` with `data: ['../data/x.ttl']`; the shape check
+  detects `ontologies/index`. A scaffolded package with two terms, generated by the built cli,
+  type-checks against the master's F5 core (`tsc -p tsconfig-esm.json`, exit 0) and registers
+  (`suggestedPrefixes()` → `[{packageName: 'planning-ont', name: 'planning', …, prefix:
+  'planning'}]`).

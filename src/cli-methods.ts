@@ -5,12 +5,18 @@ import {
   checkOntologyModulesStep,
   writePackageOntologies,
 } from './utils/generateOntology.js';
+import {
+  APP_CONFIG_FILE,
+  loadAppPrefixes,
+  newAppConfigText,
+  refreshAppPrefixes,
+} from './utils/appConfig.js';
 import {exec} from 'child_process';
 import depcheck from 'depcheck';
 import {getEnvFile} from 'env-cmd/dist/get-env-vars.js';
 import fs from 'fs-extra';
 import path from 'path';
-import {fileURLToPath} from 'url';
+import {fileURLToPath, pathToFileURL} from 'url';
 import {createInterface} from 'readline';
 import {
   debugInfo,
@@ -52,7 +58,10 @@ import {
   type ShapeReferenceReport,
 } from './utils/shapeReferences.js';
 import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
-import {checkShapeHierarchyStep} from './utils/shapeHierarchy.js';
+import {
+  checkShapeHierarchyStep,
+  resolvePackageDir,
+} from './utils/shapeHierarchy.js';
 import {writeShapesTurtleStep} from './utils/shapesTurtle.js';
 import {writeComponentsTurtleStep} from './utils/componentsTurtle.js';
 
@@ -293,7 +302,13 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
     fs.copySync(datasetsExample, datasetsReal);
   }
 
-  // fs.copySync(path.join(__dirname, '..', 'defaults', 'app'), targetFolder);
+  // The app's prefix map: empty until `linked prefixes` (run after the install below, and by
+  // `linked generate-ontology` in the app) adds its installed ontologies.
+  const appConfigFile = path.join(targetFolder, APP_CONFIG_FILE);
+  if (!fs.existsSync(appConfigFile)) {
+    fs.writeFileSync(appConfigFile, newAppConfigText());
+  }
+
 
   log("Creating new Linked app '" + appName + "'");
 
@@ -350,6 +365,7 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
       if (stderr && stderr.trim()) {
         process.stderr.write(stderr);
       }
+      await fillAppPrefixes(targetFolder);
     }
   }
 
@@ -540,6 +556,7 @@ export async function scaffoldReactNativeApp(
         maxBuffer: 50 * 1024 * 1024,
       });
       spinner.succeed('Dependencies installed (npm)');
+      await fillAppPrefixes(path.join(targetFolder, 'services', 'api'));
     } catch (err) {
       spinner.fail('Could not install dependencies');
       if (err?.stdout) process.stdout.write(err.stdout);
@@ -564,6 +581,38 @@ export async function scaffoldReactNativeApp(
     `  ${chalk.blueBright('cd apps/mobile && npx expo run:ios')}`,
     `See README.md (and services/api/README.md if port 3030 is taken).`,
   );
+}
+
+/**
+ * Imports `specifier` (`@_linked/core/utils/Prefix`) as the app at `appRoot` resolves it, so it is
+ * the app's copy of the package, not this cli's: `<pkg>/lib/esm/<subpath>.js` of the package its
+ * `node_modules` walk finds.
+ */
+async function importFromApp(
+  appRoot: string,
+  specifier: string,
+): Promise<Record<string, any>> {
+  const [, name, subpath] = /^(@[^/]+\/[^/]+|[^@/][^/]*)\/(.+)$/.exec(specifier) ?? [];
+  const dir = name ? resolvePackageDir(name, appRoot) : undefined;
+  if (!dir) {
+    throw new Error(`Cannot find ${specifier} from ${appRoot}: is it installed?`);
+  }
+  return import(pathToFileURL(path.join(dir, 'lib', 'esm', `${subpath}.js`)).href);
+}
+
+/**
+ * A new app's prefix map from its installed ontologies (`linked prefixes`). A failure warns: the
+ * app is created, and `linked prefixes` can be run again.
+ */
+async function fillAppPrefixes(appRoot: string): Promise<void> {
+  try {
+    const {added} = await refreshAppPrefixes(appRoot);
+    log(`${APP_CONFIG_FILE}: ${added.length} prefixes from the installed ontologies`);
+  } catch (error) {
+    warn(
+      `Could not fill ${APP_CONFIG_FILE} from the installed ontologies: ${error instanceof Error ? error.message : String(error)}. Run \`linked prefixes\` in ${appRoot}.`,
+    );
+  }
 }
 
 // Indirection so tests can replace the scaffold step when exercising createApp.
@@ -2173,6 +2222,12 @@ export const startServer = async (
   // // hook.hook('*.css', scssLoadcall);
   // // hook.hook('Body.module.css', scssLoadcall);
   // hook.hook('.module.css', scssLoadcall);
+
+  // The app's prefix map (linked.app.json) into the app's own copy of core, before anything else
+  // of the app loads.
+  await loadAppPrefixes(process.cwd(), (specifier) =>
+    importFromApp(process.cwd(), specifier),
+  );
 
   if (!ServerClass) {
     ServerClass = await loadServerClass();

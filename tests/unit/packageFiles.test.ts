@@ -139,7 +139,7 @@ describe('buildPackageFiles', () => {
     );
     expect(out['src/package.ts']).toMatch(/^  registerOntologies,$/m);
     expect(out['src/ontologies/index.ts']).toContain(
-      `    name: 'planning',\n    namespace: 'https://acme.example/ont/planning/',\n    terms: planning,\n    data: data(['../data/planning.ttl']),\n    suggestedPrefix: 'planning',`,
+      `      name: 'planning',\n      namespace: 'https://acme.example/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,
     );
     expect(out['src/ontologies/planning.ts']).toMatch(/^export \{\};$/m);
     expect(out['src/index.ts']).toMatch(/^import '\.\/ontologies\/index\.js';$/m);

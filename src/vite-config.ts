@@ -10,6 +10,7 @@
 // what the previous bundler chain produced for trace/debug. Production
 // uses `generateScopedNameProduction`, which the Node CSS loader shares so the
 // server renders the class names the client's stylesheet defines.
+import {appPrefixes} from './plugins/app-prefixes.js';
 import {defineConfig} from 'vite';
 import react from '@vitejs/plugin-react';
 import fsExtra from 'fs-extra';
@@ -942,6 +943,8 @@ export function createViteConfig(opts: LinkedViteConfigOptions = {}): ReturnType
               },
             } as Plugin)
           : null,
+        // The app's prefix map (linked.app.json), loaded first by the client entry.
+        appPrefixes({appRoot, entry: opts.entry ?? 'src/index.tsx'}),
         // Published lib JS: keep decorated shape classes named `Foo`, not the
         // `Foo2` Vite's esbuild re-prints would give them — see the plugin.
         pinCompiledClassNames(),

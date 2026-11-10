@@ -44,11 +44,11 @@ live in its packages. A linked package is one of two kinds:
   suggested prefix, `<name>`, and its namespace as `vann:preferredNamespacePrefix` and
   `vann:preferredNamespaceUri`), which
   `loadData` reads on the server through `@_linked/core/ontology/loadOntologyFiles`. The package
-  declares it in `package.json` `"linkedOntologies"`, and its accessor modules
-  (`src/ontologies/<name>.ts`, `.data.ts`, `.register.ts`) are the ones `linked
-  generate-ontology` writes (see [Ontology accessor modules](#ontology-accessor-modules)): add terms
-  to the Turtle and run it. `create-ontology` scaffolds the same files and entry in an existing
-  package.
+  declares it in `package.json` `"linkedOntologies"`, and its modules (`src/ontologies/<name>.ts`,
+  its terms, and `src/ontologies/index.ts`, which registers it; `src/index.ts` imports the index)
+  are the ones `linked generate-ontology` writes (see [Ontology modules](#ontology-modules)): add
+  terms to the Turtle and run it. `create-ontology` adds an ontology to an existing package the same
+  way.
 - an **asset package**, `<name>-assets` — shapes, components and a backend, and no ontology.
 
 `create-package` asks which on a terminal; `--kind ontology|assets|both` answers it (`both`
@@ -126,7 +126,7 @@ to the backend build and read their own `lib/esm/data/`.
 
 After compiling, `linked build` checks the package's shapes against the class hierarchy
 (**Checking shape hierarchy**). In one `node` process it loads the built package's `package.js`,
-`shapes/index.js` and ontology data (`ontologies/*.register.js`), and the ontology data of every
+`shapes/index.js` and ontology data (`ontologies/index.js`), and the ontology data of every
 linked dependency (dependencies and peerDependencies, transitively), then runs
 `@_linked/core/shapes/checkShapeHierarchy`. It reports a shape that extends another whose class its
 data does not make a superclass (`extends-without-subclass`), a subclass whose shape does not extend
@@ -167,10 +167,10 @@ reserved names in `src/data/`: the build writes over them.
 in a package without a package `linked.kind` (it used to exit 0 there). A build that finishes with warnings still
 exits 0.
 
-### Ontology accessor modules
+### Ontology modules
 
 ```bash
-linked generate-ontology          # write src/ontologies/<module>.ts, .data.ts and .register.ts from src/data/*.ttl
+linked generate-ontology          # write src/ontologies/<module>.ts and src/ontologies/index.ts from src/data/*.ttl
 linked generate-ontology --check  # write nothing; exit 1 when a module is out of date
 ```
 
@@ -187,9 +187,9 @@ several entries:
 }
 ```
 
-The name is how the ontology is found: it names its modules and is what `linkedOntology` registers
-it under. It is not a prefix. The **suggested prefix** is data: the ontology's `owl:Ontology` node
-carries it, with its namespace, in one of its data files:
+The name is how the ontology is found: it names its module and is what it is registered under. It
+is not a prefix. The **suggested prefix** is data: the ontology's `owl:Ontology` node carries it,
+with its namespace, in one of its data files:
 
 ```turtle
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -202,24 +202,27 @@ carries it, with its namespace, in one of its data files:
 
 A published vocabulary shipped unedited gets these triples in a file of its own,
 `src/data/<name>-added.ttl`, listed in its `data`. `vann:preferredNamespaceUri` (a literal or an
-IRI) must be the entry's `namespace`.
+IRI) must be the entry's `namespace`. A package registers no prefix: an app's prefixes are its own
+(see [`linked.app.json`](#linkedappjson)).
 
-Each generated ontology gets three committed modules in `src/ontologies/`, named by its module
-(below; the name by default):
+The committed modules in `src/ontologies/`:
 
-- `<module>.ts`: one `export const Term = /*#__PURE__*/ ns('Term')` per subject of its data files
-  in its namespace (enumeration members and individuals included), sorted by name, each with a
-  one-line JSDoc from `rdfs:comment` (else `rdfs:label`). Nothing else, so consumers write
+- `<module>.ts` per generated ontology (the module is its name by default, below): one
+  `export const Term = {id: '<namespace>Term'}` per subject of its data files in its namespace
+  (enumeration members and individuals included), sorted by name, each with a one-line JSDoc from
+  `rdfs:comment` (else `rdfs:label`). It imports nothing and holds nothing else, so consumers write
   `import * as schema from '@_linked/schema/ontologies/schema'` and `schema.Person`, and a bundler
   keeps only the terms used. A subject whose remainder after the namespace holds `/`, `#` or `?`
-  is not a term, and the command lists it.
-- `<module>.data.ts`: `ns`, `dataFiles`, `loadData`, `_ontologyResource` and `Prefix.add` of the
-  suggested prefix.
-  `_ontologyResource` is the ontology's own IRI as its data declares it with `a owl:Ontology`: the
-  namespace, else the namespace without its trailing `#` or `/` (`http://www.w3.org/2002/07/owl`),
-  else the only declaration the namespace starts with; otherwise the namespace.
-- `<module>.register.ts`: `linkedOntology(terms, ns, '<name>', loadData, dataFiles)`; `src/index.ts`
-  imports it.
+  is not a term, and the command lists it. Code that needs a namespace function uses core's
+  `createNameSpace(namespace)`.
+- `index.ts`, one per package: imports every ontology module of the package and registers them all
+  with one call, `registerOntologies([{name, namespace, terms, data, suggestedPrefix}, …],
+  import.meta.url)` (`registerOntologies` from the package's `src/package.ts`; `data` lists the
+  data files relative to the index, `['../data/schema.ttl']`). The package's entry (`src/index.ts` or
+  `src/index.tsx`) imports it; `linked generate-ontology` adds that import, and turns any
+  `import './ontologies/<module>.register.js';` left from an earlier generator into an import of
+  the index. It removes the `<module>.data.ts` and `<module>.register.ts` files the generator wrote
+  before (only files that start with its header).
 
 A term's export name is its local name made a valid identifier by one rule: a character that
 cannot appear in an identifier becomes `_` (`ISO639-2` → `ISO639_2`), a leading digit gets a leading
@@ -228,7 +231,8 @@ no alias map. Two terms that the rule gives one name are refused, naming both. T
 deterministic: the same Turtle gives the same bytes.
 
 `linked build` starts with **Checking ontology modules**: when a module differs from what the data
-generates, or is missing, the build fails and says to run `linked generate-ontology`. It also fails
+generates or is missing, the entry does not import the index, or a file the generator no longer
+writes is left, the build fails and says to run `linked generate-ontology`. It also fails
 when an ontology's data has no `owl:Ontology` node for its namespace, no single
 `vann:preferredNamespacePrefix` or `vann:preferredNamespaceUri` on it, or a vann namespace other
 than the configured one; the message names the package, the ontology and its files, and shows the
@@ -238,7 +242,7 @@ is not checked.
 An entry has two more optional keys. `"module"` is the modules' file name in `src/ontologies/`
 without extension (same pattern as a name; defaults to the name), so the ontology's terms import
 as `<package>/ontologies/<module>`. `"generated": false` (the default is `true`) is for an ontology
-whose modules hold more than the generator writes (grouping objects, extra exports) and stay
+whose module holds more than the generator writes (grouping objects, extra exports) and stays
 written by hand:
 
 ```json
@@ -248,15 +252,52 @@ written by hand:
 ```
 
 Such an entry still declares the ontology: its name, namespace, module and data. `linked
-generate-ontology` writes nothing for it and the staleness check skips it, but its data must carry
-the same vann triples, and the build refuses it without them. Its hand-written modules register it
-with `linkedOntology(terms, ns, '<name>', …)` and add the suggested prefix themselves. Two entries
-with one `module` are refused.
+generate-ontology` writes no module for it and the staleness check does not compare it, but the
+index imports and registers it like a generated one, and its data must carry the same vann triples
+(the build refuses it without them). Its module does not register itself. Two entries with one
+`module`, or the module `index`, are refused.
+
+Inside an app (the package is the app, or a package in the app's folder within the same git
+repository), `linked generate-ontology` then runs `linked prefixes` for that app.
 
 The generator itself is `@_linked/cli/utils/ontologyModules` (pure, browser-safe: it takes the
-terms as data) and `@_linked/cli/utils/ontologyTerms` (reads them from Turtle with `n3`).
+terms as data; `generateOntologyModules(specs, handWritten)` gives every module of a package) and `@_linked/cli/utils/ontologyTerms` (reads them from Turtle with `n3`).
 `@_linked/cli/utils/ontologyConfig`'s `readOntologyConfigs(pkgJson)` (pure) reads a package's
 declarations: `{name, namespace, module, generated, data}` per ontology, sorted by name.
+
+### `linked.app.json`
+
+```bash
+linked prefixes   # add a prefix for every installed ontology the app's map lacks
+```
+
+An app's declarative settings, JSON, at the app root (apps only; a package never has one):
+
+```json
+{
+  "$schema": "https://linked.cm/schema/app/1.json",
+  "schemaVersion": 1,
+  "prefixes": {"schema": "http://schema.org/", "rdfs": "http://www.w3.org/2000/01/rdf-schema#"}
+}
+```
+
+The schema ships with this package, `schema/app/1.json`. A tool refuses a `schemaVersion` it does
+not know and a key the schema does not have. A prefix is a Turtle and SPARQL prefix name that is
+also a JavaScript identifier, `^[A-Za-z][A-Za-z0-9_]*$`; it maps to a namespace IRI.
+
+`prefixes` is the app's prefix map: one per app, used by its server, its browser bundle and its
+store queries. **Tools only add to it.** `linked prefixes` reads every ontology the app has
+installed (the `linkedOntologies` of the app and of every linked package it depends on,
+recursively, with the suggested prefix from each one's data) and, for each namespace the map does
+not have, adds the suggested prefix, or `<prefix>_2`, `_3`, … when it is taken (a suggested
+prefix with other characters, `server-utils`, becomes `server_utils`). It never changes or removes
+an entry: renaming or removing one is the app owner's. Without a `linked.app.json` it creates one.
+`linked create-app` writes one and fills it after the install.
+
+The map is loaded into core (`Prefix.load`) at server start (`linked start`, through the SSR
+runner, and a compiled server) and in the browser: the Vite config's `linked:app-prefixes` plugin
+makes the client entry import `virtual:linked-app-prefixes` first, which loads it. An app writes
+no code for it. Without a `linked.app.json` nothing is loaded.
 
 ### App release / production runtime
 
@@ -602,7 +643,7 @@ sync, Vite's dependency exclusion and `build-all`'s dependency order find it. An
 (`@_linked/server/utils/linkedDependencies` has a byte-identical twin).
 
 A package can also declare its ontologies under `"linkedOntologies"` (see
-[Ontology accessor modules](#ontology-accessor-modules)).
+[Ontology modules](#ontology-modules)).
 
 The `lincd`, `lincdApp`, `linkedPackage` and `linkedApp` flags are not read.
 
@@ -666,7 +707,7 @@ Templates live in `defaults/`:
 - `defaults/app-with-backend/` — used by `linked create-app`
 - `defaults/app-static/` — minimal static app
 - `defaults/package/` — the asset package of `linked create-package` / `create-asset-package`; its manifest, tsconfigs, dotfiles and `src/package.ts` are shared by every kind
-- `defaults/package-ontology/` — what an ontology package (`create-ont-package`) gets on top of the shared files: the example ontology, its register sibling and its data
+- `defaults/package-ontology/` — what an ontology package (`create-ont-package`) gets on top of the shared files: the entry importing `./ontologies/index.js` and the example ontology's data (its modules are generated)
 - `defaults/setup-publish/` — caller workflows + changeset files written by `linked setup-publish` (`main`-only; `--dual-branch` is a deprecated no-op)
 
 ### `linked create-app` template structure

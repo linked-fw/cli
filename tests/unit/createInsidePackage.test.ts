@@ -76,7 +76,7 @@ describe('create-shape and friends need a src/package.ts', () => {
       '<https://linked.cm/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" .',
     );
     expect(read('ontologies/index.ts')).toContain(
-      `    name: 'planning',\n    namespace: 'https://linked.cm/ont/planning/',\n    terms: planning,\n    data: data(['../data/planning.ttl']),\n    suggestedPrefix: 'planning',`,
+      `      name: 'planning',\n      namespace: 'https://linked.cm/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,
     );
     expect(read('index.ts')).toBe(`import './ontologies/index.js';\n`);
     expect(fs.readJsonSync(path.join(app, 'package.json')).linkedOntologies).toEqual({

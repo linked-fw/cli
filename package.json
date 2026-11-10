@@ -69,6 +69,7 @@
     "lib",
     "defaults",
     "hooks",
+    "schema",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

@@ -22,7 +22,7 @@ const FX = 'http://example.org/fx#';
 
 const pkgModule = (name: string) =>
   `import { linkedPackage } from '@_linked/core/utils/Package';
-export const { linkedShape, linkedOntology, packageName } = linkedPackage('${name}');
+export const { linkedShape, registerOntologies, packageName } = linkedPackage('${name}');
 `;
 
 // A shape class as tsc emits it.

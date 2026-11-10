@@ -464,6 +464,11 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   const vite = await createViteServer(await resolveViteServerConfig(cwd, apiOnly));
   configureLinkedServer(linkedConfig.server, vite, cwd, apiOnly);
 
+  // The app's prefix map (linked.app.json) into core, through the SSR runner so it is the copy
+  // the app's modules use; before the storage config and the server load.
+  const {loadAppPrefixes} = await import('../utils/appConfig.js');
+  await loadAppPrefixes(cwd, (specifier) => vite.ssrLoadModule(specifier));
+
   // Stores named in a datasets file load through this server's runner or
   // Node, whichever gives the app's own copy (see createStoreLoader). Set
   // before the storage file loads; a core without the hook ignores it.

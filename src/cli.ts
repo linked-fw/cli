@@ -45,6 +45,21 @@ import {
   writePackageOntologies,
 } from './utils/generateOntology.js';
 import {ONTOLOGIES_KEY} from './utils/ontologyConfig.js';
+import {
+  APP_CONFIG_FILE,
+  findAppRoot,
+  refreshAppPrefixes,
+  type AddedPrefix,
+} from './utils/appConfig.js';
+
+/** One line per prefix `linked prefixes` added. */
+const reportAddedPrefixes = (file: string, added: AddedPrefix[]): void => {
+  for (const a of added) {
+    console.log(
+      `${file}: added "${a.prefix}": "${a.namespace}" (${a.packageName}, ontology "${a.name}")`,
+    );
+  }
+};
 
 /**
  * Run an async command action and report a failure the way the rest of this
@@ -314,6 +329,27 @@ program
   );
 
 program
+  .command('prefixes')
+  .description(
+    `Adds to the app's ${APP_CONFIG_FILE} "prefixes" a prefix for every ontology the app has installed whose namespace the map does not have yet: its suggested prefix (the vann data of its owl:Ontology), or <prefix>_2, _3, … when taken. Never changes or removes an entry. Creates the file when the app has none. Run it from the app folder`,
+  )
+  .action(() =>
+    runAppCommand(async () => {
+      const appRoot = findAppRoot(process.cwd());
+      if (!appRoot) {
+        throw new Error(
+          `No linked app here or above (a package.json with "linked": {"kind": "app"}). ${APP_CONFIG_FILE} belongs to an app.`,
+        );
+      }
+      const {file, created, added} = await refreshAppPrefixes(appRoot);
+      const name = path.relative(process.cwd(), file) || APP_CONFIG_FILE;
+      if (created) console.log(`Created ${name}`);
+      reportAddedPrefixes(name, added);
+      if (!created && !added.length) console.log(`${name}: every installed ontology has a prefix.`);
+    }),
+  );
+
+program
   .command('generate-ontology')
   .description(
     `Writes src/ontologies/<module>.ts (the terms; the module defaults to the name) for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/, and src/ontologies/index.ts, which registers every ontology of the package with its suggested prefix (the vann data of its owl:Ontology); the package entry imports it. An entry with "generated": false has its module written by hand: the index registers it and its vann data is checked. Removes the .data.ts and .register.ts files it generated before. Inside an app, also adds the prefixes of new ontologies to its linked.app.json. Run it from the package folder`,
@@ -354,8 +390,18 @@ program
         return;
       }
       const changed = await writePackageOntologies(dir, generated);
-      console.log(changed.length ? `Wrote ${changed.join(', ')}` : 'Every ontology module is current.');
-      //APP_PREFIXES
+      const removed = new Set(generated.remove);
+      const written = changed.filter((file) => !removed.has(file));
+      if (written.length) console.log(`Wrote ${written.join(', ')}`);
+      if (removed.size) console.log(`Removed ${[...removed].join(', ')}`);
+      if (!changed.length) console.log('Every ontology module is current.');
+      // Inside an app (the package is the app, or lies under it in the same repository), the app's
+      // map gets the prefixes of ontologies it does not map yet.
+      const appRoot = findAppRoot(dir);
+      if (appRoot) {
+        const {file, added} = await refreshAppPrefixes(appRoot);
+        reportAddedPrefixes(path.relative(process.cwd(), file) || APP_CONFIG_FILE, added);
+      }
     }),
   );
 
