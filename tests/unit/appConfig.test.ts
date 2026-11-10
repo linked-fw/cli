@@ -340,9 +340,17 @@ describe('an app', () => {
     expect(await loadAppPrefixes(app, importModule)).toEqual({a: 'urn:a:'});
     expect(loaded).toEqual([{a: 'urn:a:'}]);
 
-    await expect(
-      loadAppPrefixes(app, async () => ({Prefix: {add() {}}})),
-    ).rejects.toThrow(/has no Prefix\.load/);
+    // A core older than Prefix.load: nothing loaded, a warning.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(
+      await loadAppPrefixes(app, async () => ({Prefix: {add() {}}})),
+    ).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /has no Prefix\.load, so its prefix map is not loaded/,
+      ),
+    );
+    warn.mockRestore();
   });
 
   test('the client bundle: the entry imports the virtual module first, on its first line', async () => {
@@ -369,8 +377,8 @@ describe('an app', () => {
     expect(plugin.load.call(ctx, '\0' + APP_PREFIXES_MODULE)).toBe(
       appPrefixesModuleCode({a: 'urn:a:'}),
     );
-    expect(appPrefixesModuleCode({a: 'urn:a:'})).toBe(
-      `import {Prefix} from '@_linked/core/utils/Prefix';\nPrefix.load({"a":"urn:a:"});\n`,
+    expect(appPrefixesModuleCode({a: 'urn:a:'})).toMatch(
+      /^import \{Prefix\} from '@_linked\/core\/utils\/Prefix';\nif \(typeof Prefix\.load === 'function'\) Prefix\.load\(\{"a":"urn:a:"\}\);\nelse console\.warn\(/,
     );
     expect(ctx.watched).toEqual([path.join(app, 'linked.app.json')]);
     expect(plugin.load.call(ctx, '/other.ts')).toBeNull();

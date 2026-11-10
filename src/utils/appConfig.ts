@@ -351,20 +351,28 @@ export function findAppRoot(dir: string): string | undefined {
 /** The core module that holds the prefix map. */
 export const PREFIX_MODULE = '@_linked/core/utils/Prefix';
 
-/** The module the browser bundle evaluates first: it loads the app's map into core. */
+/**
+ * The module the browser bundle evaluates first: it loads the app's map into core. A core older
+ * than `Prefix.load` (its packages still register their own prefixes) is left as it is.
+ */
 export function appPrefixesModuleCode(
   prefixes: Record<string, string>,
 ): string {
   return (
     `import {Prefix} from '${PREFIX_MODULE}';\n` +
-    `Prefix.load(${JSON.stringify(prefixes)});\n`
+    `if (typeof Prefix.load === 'function') Prefix.load(${JSON.stringify(prefixes)});\n` +
+    `else console.warn(${JSON.stringify(OLD_CORE_WARNING)});\n`
   );
 }
+
+/** What loading says when the app's core predates `Prefix.load`. */
+export const OLD_CORE_WARNING = `[linked] ${APP_CONFIG_FILE}: the @_linked/core this app loads has no Prefix.load, so its prefix map is not loaded (its packages register their own prefixes). Update @_linked/core to use the map.`;
 
 /**
  * Loads the app's prefix map (its `linked.app.json`) into core, through `importModule` (the
  * runtime's own import, so it is the app's copy of core). Returns the map, or undefined when the
- * app has no `linked.app.json`. Throws when the file is invalid or core cannot load a map.
+ * app has no `linked.app.json` or its core predates `Prefix.load` (it warns then). Throws when the
+ * file is invalid.
  */
 export async function loadAppPrefixes(
   appRoot: string,
@@ -374,9 +382,8 @@ export async function loadAppPrefixes(
   if (!config) return undefined;
   const {Prefix} = await importModule(PREFIX_MODULE);
   if (typeof Prefix?.load !== 'function') {
-    throw new Error(
-      `${APP_CONFIG_FILE}: the @_linked/core this app loads has no Prefix.load, so its prefix map cannot be loaded. Update @_linked/core.`,
-    );
+    console.warn(OLD_CORE_WARNING);
+    return undefined;
   }
   Prefix.load(config.prefixes);
   return config.prefixes;
