@@ -607,6 +607,23 @@ describe('writing and the build check', () => {
     expect(await step().apply()).toBe(true);
   });
 
+  test('an import of a register module deleted by hand becomes the index; one that exists stays', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'src/ontologies/kept.register.ts'),
+      'export {};\n',
+    );
+    fs.writeFileSync(
+      path.join(dir, 'src/index.ts'),
+      "import './types.js';\nimport './ontologies/gone.register.js';\nimport './ontologies/kept.register.js';\n",
+    );
+    expect(await staleOntologyModules(dir)).toEqual(['src/index.ts']);
+    await writePackageOntologies(dir);
+    expect(fs.readFileSync(path.join(dir, 'src/index.ts'), 'utf8')).toBe(
+      "import './types.js';\nimport './ontologies/index.js';\nimport './ontologies/kept.register.js';\n",
+    );
+    expect(await step().apply()).toBe(true);
+  });
+
   test('the entry must import the index; without an entry the build says so', async () => {
     fs.writeFileSync(path.join(dir, 'src/index.ts'), "import './types.js';\n");
     expect(await staleOntologyModules(dir)).toEqual(['src/index.ts']);

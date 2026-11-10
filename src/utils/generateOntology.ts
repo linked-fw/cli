@@ -180,7 +180,8 @@ function staleGeneratedFiles(
 
 /**
  * The source edits the layout needs: every side-effect import of a removed module
- * (`import './ontologies/x.register.js';`) becomes an import of the index, or goes when the file
+ * (`import './ontologies/x.register.js';`), or of a register module that no longer exists (deleted
+ * by hand), becomes an import of the index, or goes when the file
  * imports the index already, and the entry imports the index. Throws when the package has no
  * entry (`src/index.ts[x]`).
  */
@@ -212,7 +213,10 @@ function sourceEdits(
     const lines: string[] = [];
     for (const line of text.split('\n')) {
       const target = sideEffectImport(line, full);
-      if (target === undefined || !removed.has(target)) {
+      if (
+        target === undefined ||
+        !(removed.has(target) || isMissingRegisterModule(packagePath, target))
+      ) {
         lines.push(line);
         continue;
       }
@@ -228,6 +232,19 @@ function sourceEdits(
     if (next !== text) edits[file] = next;
   }
   return edits;
+}
+
+/**
+ * Whether `target` (an import's path without extension) is a `<name>.register` module in the
+ * package's `src/ontologies/` with no source file: a register module deleted by hand, which the
+ * index replaces like one the generator removes.
+ */
+function isMissingRegisterModule(packagePath: string, target: string): boolean {
+  return (
+    path.dirname(target) === path.join(packagePath, 'src', 'ontologies') &&
+    target.endsWith('.register') &&
+    !['.ts', '.tsx', '.js'].some((ext) => fs.existsSync(target + ext))
+  );
 }
 
 /** The package's TypeScript sources, outside `src/ontologies/`, relative to the package. */
