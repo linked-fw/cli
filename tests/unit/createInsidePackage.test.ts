@@ -1,7 +1,7 @@
 // `create-shape`, `create-component`, `create-set-component` and `create-ontology`
 // write a file that imports `../package.js`. Where there is no src/package.ts (a
 // new app root registers no package) they refuse instead of writing a broken
-// import. An app that does have one, as CN does, is served as before.
+// import. An app that does have one, as some hosts do, is served as before.
 //
 // cli-methods pulls in ora, which is ESM-only.
 jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
@@ -48,12 +48,12 @@ describe('create-shape and friends need a src/package.ts', () => {
     });
   }
 
-  // CN is itself an app that keeps its shapes at its root, with a real
+  // A host app can keep its shapes at its root, with a real
   // src/package.ts: an app manifest alone is no reason to refuse.
-  test('an app WITH src/package.ts is allowed (CN keeps its shapes at its root)', async () => {
+  test('an app WITH src/package.ts is allowed (a host app keeping its shapes at its root)', async () => {
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
-      `export const {linkedShape} = linkedPackage('create-now');\n`,
+      `export const {linkedShape} = linkedPackage('my-app');\n`,
     );
     await createShape('Thing', app);
     expect(fs.existsSync(path.join(app, 'src', 'shapes', 'thing.ts'))).toBe(true);

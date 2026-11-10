@@ -46,14 +46,14 @@ describe('workspacePackagesToExternalize', () => {
     const names = await workspacePackagesToExternalize('/app', async () => [
       {name: '@_linked/server'},
       {name: '@_linked/core'},
-      {name: 'create-now-js'},
+      {name: 'my-app-js'},
       {name: '@_linked/core'},
     ]);
 
     expect(names).toEqual([
       '@_linked/core',
       '@_linked/server',
-      'create-now-js',
+      'my-app-js',
     ]);
   });
 
@@ -125,7 +125,7 @@ describe('assertNoInlinedWorkspaces', () => {
   afterEach(() => fs.rmSync(app, {recursive: true, force: true}));
 
   test('fails on a workspace package compiled in deep inside a feature folder', async () => {
-    // What a resolve.alias to the package's src produced in CN: the entries are
+    // What a resolve.alias to the package's src produced in a host app: the entries are
     // clean, and the copy is reached from a component four folders down.
     emit(
       DEEP,
@@ -247,15 +247,15 @@ describe('assertNoInlinedWorkspaces', () => {
 });
 
 describe('explainUnresolvedWorkspaceImport', () => {
-  const externals = ['@_linked/core', 'create-now-js'];
+  const externals = ['@_linked/core', 'my-app-js'];
 
   test('points a failed workspace import at that package’s stale lib', () => {
     const explained = explainUnresolvedWorkspaceImport(
-      '[vite]: Rollup failed to resolve import "create-now-js/orchestrators/Refresh" from "/app/src/backend.ts".',
+      '[vite]: Rollup failed to resolve import "my-app-js/orchestrators/Refresh" from "/app/src/backend.ts".',
       externals
     );
 
-    expect(explained).toContain('"create-now-js" is a workspace package');
+    expect(explained).toContain('"my-app-js" is a workspace package');
     expect(explained).toContain("that package's lib/ is stale");
   });
 

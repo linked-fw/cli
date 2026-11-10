@@ -19,7 +19,7 @@
 //   - no `${...}` template placeholder survives substitution;
 //   - the package RESOLVES, under both node10 and bundler — the guard against
 //     "fixing" a types field by looking for a file on disk instead of resolving it
-//     (create-now backlog-072, retracted).
+//     (a host app backlog item, retracted).
 //
 // Needs network and takes a few minutes. Gated by RUN_TEMPLATE_FULL=1 (set by
 // `npm run test:template`) so it never runs by accident.
@@ -250,7 +250,7 @@ describeFull('create-package (full)', () => {
     expect(offenders).toEqual([]);
   });
 
-  // The guard against create-now backlog-072: whether the package's TYPES resolve is a
+  // The guard against that retracted backlog item: whether the package's TYPES resolve is a
   // question for ts.resolveModuleName, under every resolution mode a consumer may use —
   // never for `ls`.
   //

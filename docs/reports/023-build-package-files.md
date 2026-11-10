@@ -4,8 +4,8 @@ summary: >
   `buildPackageFiles(packageName, kind, options)` in `@_linked/cli/utils/packageFiles` returns the
   files `linked create-package --kind ontology|assets` produces as package-relative path → content,
   with no writes, prompts or install (cli 1.48.0, minor). `create-package` now writes exactly what
-  it returns; its output was verified byte-identical before and after. Create Now's
-  `appProjectPackages.ts` calls it instead of re-implementing the assembly to commit a project's
+  it returns; its output was verified byte-identical before and after. A host app's
+  project-package provisioner calls it instead of re-implementing the assembly to commit a project's
   packages through the GitHub API.
 ---
 
@@ -13,8 +13,8 @@ summary: >
 
 ## Why
 
-Create Now commits a project's ontology and assets packages through the GitHub API, not to a local
-disk, and had re-implemented the CLI's package assembly (`src/backend/provisioners/appProjectPackages.ts`)
+A host app commits a project's ontology and assets packages through the GitHub API, not to a local
+disk, and had re-implemented the CLI's package assembly (in its project-package provisioner)
 with two deliberate differences: a literal `baseUri` and an added dependency. Two copies of the
 template logic drift. The CLI now exposes the assembly as a pure function, with options covering
 both differences.
@@ -73,7 +73,7 @@ It is reached through the existing `./*` subpath export, like `utils/createPacka
 ## Limits and follow-ups
 
 - Only the `ontology` and `assets` kinds; `both` is two calls.
-- Create Now's switch to `buildPackageFiles` is done (`appProjectPackages.ts` imports it). No open
+- The host app's switch to `buildPackageFiles` is done (its provisioner imports it). No open
   follow-ups.
 
 ## PRs

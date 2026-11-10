@@ -6,7 +6,7 @@ summary: >
   the package, file, specifier and importer. Files under `node_modules` and in localized checkouts
   or workspaces (by `package.json` name) both count; the CLI never does. Measured: a fresh template
   app flags 8 files with a `RemoteDataset` datasets file and 13 with FusekiStore, as on the spike;
-  CN (worktree, installed packages only) flags none. Minor release.
+  the host app (worktree, installed packages only) flags none. Minor release.
 ---
 
 # 015 — The two-copies guard in `linked start`
@@ -49,7 +49,7 @@ summary: >
 
 App-template `main`, created with this build (`node lib/esm/launch.js create-app probe …
 --skip-install`), `npm install`, `npm install` of this build's `npm pack` tarball and of
-`@_linked/core@2.35.0` (the template's lockfile still has 2.33.0, which ignores D1b's loader).
+`@_linked/core@2.35.0` (the template's lockfile still has 2.33.0, which ignores the store loader of report 014).
 `linked start` on its own port with Node v22.23.3; `grep -c "TWO COPIES"` on the boot log.
 
 | Datasets file | Status line | `TWO COPIES` | Boot |
@@ -81,44 +81,44 @@ The FusekiStore boot gets further (the server's providers load) and adds five:
 @_linked/react/lib/esm/utils/ClassNames.js (imported as "@_linked/react/utils/ClassNames" from …/@_linked/primitives/lib/esm/components/Button.js)
 ```
 
-No `@_linked/server` file is flagged: D1b's loader gives `RemoteDataset` the runner's copy. All
+No `@_linked/server` file is flagged: the store loader (report 014) gives `RemoteDataset` the runner's copy. All
 13 come from the external `@_linked/schema` and `@_linked/primitives` importing the bundled
 `@_linked/react` and `@_linked/server-utils`, which the standalone bundling change (backlog 015
 option C) removes.
 
-### CN boot proof
+### Host app boot proof
 
-A CN worktree of `main` (`e4af26cbc`), `npm ci`, `npm install` of this build's tarball, then
-`CN_TEST_PORT=4079 npx playwright test tests/e2e/signin.spec.ts`:
+A worktree of the host app's `main` (`e4af26cbc`), `npm ci`, `npm install` of this build's tarball,
+then its sign-in e2e (`tests/e2e/signin.spec.ts`) on port 4079:
 
 ```
-[globalSetup] CN is healthy on :4079 after 23.2 s
+[globalSetup] app is healthy on :4079 after 23.2 s
   5 passed (45.0s)
 ```
 
 `grep -E "dual-copy guard|TWO COPIES"` on the log:
 
 ```
-[CN] [linked] dual-copy guard: on
+[app] [linked] dual-copy guard: on
 ```
 
-`grep -c "TWO COPIES"`: 0. A CN worktree has no `packages-local/`, so this measures CN with every
-`@_linked/*` installed from npm: the dev `ssr.noExternal` is CN's workspace packages, their
+`grep -c "TWO COPIES"`: 0. The worktree has no `packages-local/`, so this measures the app with every
+`@_linked/*` installed from npm: the dev `ssr.noExternal` is the app's workspace packages, their
 installed dependents and `@_linked/server`. The owner's localized layout (every framework package
-a `packages-local/` checkout, all bundled) was not measured: the owner's CN was listening on
-:4040, and the lib overlay is never run under a running CN.
+a `packages-local/` checkout, all bundled) was not measured: the owner's own instance was listening
+on :4040, and the lib overlay is never run under a running instance.
 
-The log has `[CN-err] Fatal socket error Error: read ECONNRESET` lines during the sign-in
-redirects (4 under `[CN-err]` with this build, and one unprefixed). The same proof with `@_linked/cli@1.48.2` from npm
+The log has `[app-err] Fatal socket error Error: read ECONNRESET` lines during the sign-in
+redirects (4 under `[app-err]` with this build, and one unprefixed). The same proof with `@_linked/cli@1.48.2` from npm
 in the same worktree logs 4 as well (`5 passed (34.9s)`, no guard line), so they predate 1.49.0
 and are not the CLI's.
 
 ## Not done here
 
 - Bundling every `@_linked/*` but core and the CLI in a standalone app (backlog 015 option C,
-  CN plan 068 step D3), which is expected to take the template's counts to 0.
-- The CLI e2e that fails on a `TWO COPIES` line or a guard that is not `on` (option B, step D4).
-- CN's count in the localized layout, at D3's CN measurement.
+  a later step of the host app's plan), which is expected to take the template's counts to 0.
+- The CLI e2e that fails on a `TWO COPIES` line or a guard that is not `on` (option B).
+- The host app's count in the localized layout, measured with option C.
 
 ## PRs
 

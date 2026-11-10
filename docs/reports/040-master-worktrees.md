@@ -78,9 +78,8 @@ Local webid.email accepts sign-ins from preview ports: it signs in any client on
 4000-4999 (`semantu-webid-email/src/oidc/devClients.ts:78` `DEFAULT_DEV_CLIENT_PORTS = {min: 4000,
 max: 4999}`, applied in `src/oidc/clientResolver.ts:172-176`; overridable with `DEV_CLIENT_PORTS`,
 unset in its `.env`) and fetches the client's own Client ID Document from
-`http://localhost:<port>/.well-known/linked-client.jsonld`. CN derives `client_id` and
-`redirect_uri` from `SITE_ROOT` (`src/backend/auth/webIdSignin.ts`, `cnSigninClient(siteRoot)`),
-so a preview with `WEBID_MODE=local` and `SITE_ROOT=http://localhost:45k0` (what the printed
+`http://localhost:<port>/.well-known/linked-client.jsonld`. The host app derives `client_id` and
+`redirect_uri` from `SITE_ROOT`, so a preview with `WEBID_MODE=local` and `SITE_ROOT=http://localhost:45k0` (what the printed
 command sets) works. `WEBID_MODE=production` still only works on 4040 (`DEV_CLIENT_SITE_ROOT`).
 Read from the config, not run.
 
@@ -105,7 +104,7 @@ Read from the config, not run.
   port-allocation lock (two concurrent `start --worktree` can pick the same slot): this report
   (cli backlog when scheduled).
 - The two-copies case for steps is warned, not prevented; `doctor resolve` could flag it.
-- Skills and CN `CLAUDE.md`: proposed changes below, for the owner to apply (not edited here).
+- Skills and the host app's `CLAUDE.md`: proposed changes below, for the owner to apply (not edited here).
 
 #### Proposed skill and CLAUDE.md changes
 
@@ -130,11 +129,11 @@ Read from the config, not run.
   worktree; closing line variant "Landed on `<m>`; preview at :45k0".
 - **release**: unchanged mechanics; add that `land` (master → owner's branch) is not a release,
   and that a master started from `dev` releases through `dev`.
-- **CN CLAUDE.md §Git**: replace "Checkouts stay on the current integration branch…" with "The
-  owner's checkouts stay on his stable branch (`dev`); a master run lives in `../wt/<m>` (`npx
+- **The host app's CLAUDE.md §Git**: replace "Checkouts stay on the current integration
+  branch…" with "The owner's checkouts stay on his stable branch (`dev`); a master run lives in `../wt/<m>` (`npx
   linked branch start <m> --worktree --with …`), its steps in `../wt/<m>--<agent>` (`npx linked
   worktree add <agent> --from <m>`), and it lands into the owner's checkouts only on his approval
   (`npx linked branch land <m>`, which merges, fast-forwards, builds and pushes)". In "Running a
   second backend": add `SITE_ROOT=http://localhost:<port>` (now printed by every `worktree add`),
-  and that CN's built `packages/*` resolve to the worktree's copy after a build plus `linked
+  and that the app's built `packages/*` resolve to the worktree's copy after a build plus `linked
   worktree relink` (unbuilt ones still show as `overlay`, Vite only).

@@ -13,7 +13,7 @@ summary: >
 `4a1d419`, PR [#154](https://github.com/linked-fw/cli/pull/154), released in **1.27.0**.
 
 `linked build-all` is the command this package offers as the answer to *does the workspace
-compile*. Against the Create Now workspace — six tracked members plus 25 localized checkouts —
+compile*. Against a host app's workspace — six tracked members plus 25 localized checkouts —
 it printed
 
 ```
@@ -81,8 +81,8 @@ skip carries a reason:
 ```
 Found 27 linked packages to build: …
 Skipping 4 packages found but not built:
-  - @create-now/editor-chrome: has no `build` script
-  - lincd.org: not in @semantu/create-now's dependency tree
+  - @my-app/editor-chrome: has no `build` script
+  - lincd.org: not in @my-app/app's dependency tree
   - localpkg: has no `build` script
   - my-app: is a linked app — build it with `linked build-app`
 ```

@@ -8,7 +8,7 @@ summary: >
   `_ontologyResource`, `Prefix.add`) and the register module. No aggregated object. `linked build`
   fails on a stale module. On schema.org: 2,802 terms, a 402,091-byte module, and an esbuild bundle
   of `schema.Person` alone of 1,868 bytes (125,759 with every term). The SSR shim no longer empties
-  `@_linked/cli/*` under Vitest (CN backlog 130).
+  `@_linked/cli/*` under Vitest (a backlog item of the host app).
 ---
 
 # 027 — Ontology accessor generator
@@ -34,7 +34,7 @@ one fixed identifier rule, no alias map. Choices made here:
   | owl, xsd, dcat, org | one each, default data |
   | dcmi | `dc` (`dcelems.ttl`), `dcterms`, `dcmitype` |
   | sioc | `sioc` (`sioc.ttl`, `sioc-types.ttl`; the `sioc_t:` subjects are not in its namespace) |
-  | a CN project ontology package | `<ontologySlug>` (its scaffold already names the file `<slug>.ttl`) |
+  | a host app's project ontology package | `<ontologySlug>` (its scaffold already names the file `<slug>.ttl`) |
 
 - **Several namespaces in one package: one entry each**, each with its own three modules and only
   the subjects of its own data files under its own namespace.
@@ -60,18 +60,18 @@ one fixed identifier rule, no alias map. Choices made here:
   is no text or it only repeats the name.
 - **Tree-shaking**: every initializer is `/*#__PURE__*/ ns('Term')`. The data module keeps its
   `Prefix.add` side effect.
-- **One generator.** `@_linked/cli/utils/ontologyModules` is pure (no Node, no parser), so CN's
-  browser-side `useCodeGenerator` can import it: it takes `{prefix, namespace, dataFiles,
+- **One generator.** `@_linked/cli/utils/ontologyModules` is pure (no Node, no parser), so a host app's
+  browser-side code generator can import it: it takes `{prefix, namespace, dataFiles,
   terms}` with `terms: {localName, label?, comment?}[]`. `@_linked/cli/utils/ontologyTerms`
   selects the terms: `ontologyTermsFromQuads` is pure, and `ontologyTermsFromTurtle` parses with
   `n3` (now a cli dependency, loaded by a variable specifier) or with a `Parser` the caller passes.
-  CN should feed the Turtle it writes through the same selection (with its own statically
+  The app should feed the Turtle it writes through the same selection (with its own statically
   imported n3 in the browser) rather than map its draft by hand: `linked build` checks against
   that selection, so a term the draft lists differently (an individual, another label) would read
   as stale.
-- **CN backlog 130 (the SSR shim under Vitest).** Reproduced in a CN worktree:
+- **The host app's backlog item (the SSR shim under Vitest).** Reproduced in a worktree of the app:
   `import {buildPackageFiles} from '@_linked/cli/utils/packageFiles'` in a Vitest test was
-  `undefined`. CN's Vitest inlines `@_linked/*`, so the shim's own `export * from
+  `undefined`. The app's Vitest inlines `@_linked/*`, so the shim's own `export * from
   '@_linked/cli/x'` came back to the resolver, which handed it the shim again: a module
   re-exporting itself. The resolver now lets an import made by the shim resolve as usual
   (`ssrNodeShimId`). Under `linked start` that import never reaches the resolver (`ssr.external`
@@ -165,7 +165,7 @@ Two independent read-only reviews found nothing high-severity. Fixed:
 - `npx linked build`, then the built cli on itself: "✔ Checking ontology modules … ✔ Build
   successful".
 - `npm run test:e2e` (the build steps changed): "6 passed (1.2m)".
-- CN Vitest probe, a temporary test in a CN worktree, since removed:
+- A Vitest probe, a temporary test in a host app worktree, since removed:
   - `import {buildPackageFiles} from '@_linked/cli/utils/packageFiles'` gave "1 failed" with the old
     `vite-config` and passed with this one;
   - the generator imported and ran under jsdom: "2 passed".
@@ -175,12 +175,12 @@ Two independent read-only reviews found nothing high-severity. Fixed:
 - Rewrite the vocabulary packages to `linkedOntologies` and the generated modules, and their
   consumers to `import * as` and the generated names (the next step; consumers of `schema.ns`,
   `loadData`, `dataFiles` move to `<prefix>.data`).
-- Switch CN's `ontologyCodeGenerator` to `@_linked/cli/utils/ontologyModules`, and the cli's
+- Switch the host app's ontology code generator to `@_linked/cli/utils/ontologyModules`, and the cli's
   `create-ontology` / `create-package --kind ontology` scaffold to the same three modules plus a
-  `linkedOntologies` entry. Both together: CN's test compares its output to the scaffold.
+  `linkedOntologies` entry. Both together: the app's test compares its output to the scaffold.
 - Report or remove the modules of a prefix dropped from `linkedOntologies` (in
   `linked generate-ontology --check`).
-- CN backlog 130 can be closed once CN installs this cli; its test workaround
+- The host app's backlog item can be closed once the app installs this cli; its test workaround
   (`lib/esm/utils/packageFiles.js` by path) can then go.
 
 ## PR
@@ -204,10 +204,10 @@ the two drift apart. `linked generate-ontology` generates the accessor modules f
   There is no aggregated object. Names follow one rule: an invalid character becomes `_`, a leading
   digit gets a leading `_`, a reserved word gets a trailing `_`. Collisions are refused.
 - **`linked build`** now starts with **Checking ontology modules**.
-- **For create-now:** `@_linked/cli/utils/ontologyModules` (pure) and
+- **For a host app:** `@_linked/cli/utils/ontologyModules` (pure) and
   `@_linked/cli/utils/ontologyTerms` (`ontologyTermsFromQuads`, `ontologyTermsFromTurtle`).
 - **The dev SSR shim** no longer re-exports itself when Vitest inlines `@_linked/cli/*`. Before,
-  that made a cli helper `undefined` in an app's Vitest run (create-now backlog 130).
+  that made a cli helper `undefined` in an app's Vitest run.
 - **`n3`** is now a cli dependency.
 
 ### Verification
@@ -225,13 +225,13 @@ the two drift apart. `linked generate-ontology` generates the accessor modules f
 
 - The generator also writes the data and register modules, so the namespace lives only in the
   configuration.
-- The `create-ontology` scaffold is unchanged. It switches together with create-now's generator.
+- The `create-ontology` scaffold is unchanged. It switches together with the host app's generator.
 
 ### Follow-ups
 
 All recorded in this report's §Follow-ups:
 
 - rewrite the vocabulary packages and their consumers;
-- switch create-now's generator and the scaffold;
+- switch the host app's generator and the scaffold;
 - report the modules of a dropped prefix;
-- close create-now backlog 130.
+- close the host app's backlog item.

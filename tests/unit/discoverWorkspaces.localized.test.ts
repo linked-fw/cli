@@ -13,7 +13,7 @@ import {discoverWorkspaces} from '../../src/vite-config';
 // Registering the `node_modules` spelling instead makes Vite serve one file
 // under two ids (`/node_modules/@fixture/pkg/src/…` from this table,
 // `/packages-local/pkg/src/…` from Vite's own realpathing resolver), which
-// means two module instances: measured in CN as
+// means two module instances: measured in a host app as
 // `useAuth must be used within a ProvideAuth component`.
 
 function writeJson(file: string, json: unknown) {

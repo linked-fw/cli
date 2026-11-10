@@ -1,6 +1,6 @@
 ---
 summary: >
-  Sub-plan of CN plan 070 (the store infers; ontology data in every app dataset) for
+  Sub-plan of the host app's plan (the store infers; ontology data in every app dataset) for
   `linked-fw/cli`: L1, the package build ships Turtle (`src/**/*.ttl` copied to `lib/esm/`, the app
   backend build copies the app's own `src/**/*.ttl` next to its compiled modules, the ontology
   scaffold in Turtle, the CLI e2e on the inferring Fuseki image); L2 (post-build shape check) is
@@ -10,20 +10,20 @@ status: Plan
 
 # 001 — Store inference: Turtle in the build
 
-Sub-plan of CN's master plan
-[070](https://github.com/Semantu/create-now/blob/store-inference/docs/plans/070-store-inference-and-ontology-data.md)
-(local: `~/web/wt/070/docs/plans/070-store-inference-and-ontology-data.md`). The master plan's
+Sub-plan of the host app's master plan (store inference and ontology data, in the app's
+repository). The master plan's
 §Decisions, §How to use, §Rules and §Contracts govern; this file repeats the contracts this
 repository provides or consumes and adds the plan-mode detail (Files, Pitfalls, Tests) of the
 cli steps. Step agents start at tasks mode, seed their own plan doc from their section here, and
 do not redesign: when the code contradicts this file, stop and report.
 
-Integration branch: `store-inference` (worktree `~/web/wt/070/packages-local/_linked-cli`).
+Integration branch: `store-inference` (worktree `<wt>/packages-local/_linked-cli`, where `<wt>` is
+the master's worktree of the app).
 Records: L1 → report 024, L2 → report 025. Every step adds a **minor**
 changeset (`npx changeset`) at landing.
 
-**Shared files.** L1 runs in wave 1; L2 runs in wave 4. Plan 067's commands (G1) left this plan on
-2026-10-21: another agent runs plan 067; the work started here is on the pushed branch
+**Shared files.** L1 runs in wave 1; L2 runs in wave 4. Another of the app's plans took over the G1
+commands on 2026-10-21 and another agent runs it; the work started here is on the pushed branch
 `store-inference--G1` (tip 7e68bea, P0-P6 committed, not landed).
 
 | File | L1 | L2 |
@@ -47,7 +47,7 @@ landing.
 
 - `ghcr.io/linked-fw/fuseki:<jena>-<n>` (first: `6.2.0-1`), `FROM secoresearch/fuseki:6.2.0`;
   until the release, built locally from `linked-fw/fuseki`'s `server/Dockerfile` (compose
-  `build:` pointing at `~/web/wt/070/packages-local/_linked-fuseki/server`, tag
+  `build:` pointing at `<wt>/packages-local/_linked-fuseki/server`, tag
   `linked-fuseki:dev`). Same env as the base image (`ADMIN_PASSWORD`, `ENABLE_DATA_WRITE`,
   `ENABLE_UPDATE`, `ENABLE_SHACL`, `QUERY_TIMEOUT`), `FUSEKI_BASE=/fuseki-base`, uid 9008.
 - Dataset type `lf:DatasetRDFSLive` (`PREFIX lf: <https://linked.cm/ont/fuseki#>`), declared in an
@@ -68,7 +68,7 @@ landing.
 - The module rewrites `$FUSEKI_BASE/templates/config-tdb2` at start when it is missing or
   different, with a warning (Fuseki copies its stock template only when the file is missing, so a
   persisted volume would otherwise create plain datasets silently).
-- `templates/config-tdb2` (baked in) declares the service with the endpoints CN uses today
+- `templates/config-tdb2` (baked in) declares the service with the endpoints the host app uses today
   (`""`/`sparql`/`query`, `""`/`update`, `""`/`data` GSP read-write, `upload`, `get`) over
   `lf:DatasetRDFSLive`, plus `stored` and `shacl` (store validation, decision 23). A form-created dataset (`POST $/datasets`,
   `dbName`, `dbType=tdb2`) gets it. **Only `dbType=tdb2` datasets infer**; `mem` (`config-mem`)
@@ -82,7 +82,7 @@ landing.
 - `DELETE $/datasets/<ds>` removes the TDB2 files too (a module filter finishes what Fuseki skips
   for a wrapped dataset); a re-created name starts empty.
 - `arq:httpServiceAllowed=false` set by the module for every dataset.
-- *pending F1:* whether `text:TextDataset` (pg-test) works over `lf:DatasetRDFSLive`.
+- *pending F1:* whether `text:TextDataset` (another app's dataset) works over `lf:DatasetRDFSLive`.
 
 ### Ontology data files and loader (provider K1 + L1; consumers N1, N2, P1, C2, C3, T1, every package)
 
@@ -125,7 +125,7 @@ Reads registered shapes, registered ontologies (parsed through the reader unless
 given) and `linkedPackage(..., {mirrors})`. `@linkedShape({sharedTargetClass: true})` exempts a
 shape from `borrowed-target-class`; shape sync stores it as `core:sharedTargetClass` so data-only
 shapes keep it. Boot and sync log findings; `npx linked build` fails on any
-`error` (L2); CN's builder refuses or offers the fix (C3).
+`error` (L2); the host app's builder refuses or offers the fix (C3).
 
 ### CLI build check (provider L2; consumers every package)
 
@@ -144,9 +144,9 @@ the package's own directory and its `@_linked/*` dependencies' (transitive).
 
 ## Which CLI runs in the layout
 
-Every `npx linked …` in plan 070's layout runs the **main checkout's** CLI:
-`~/web/wt/070/node_modules` is a symlink to `~/web/create_now/node_modules`, whose `.bin/linked`
-resolves to `~/web/create_now/packages-local/_linked-cli/lib/esm/launch.js` (on `main`). A
+Every `npx linked …` in the master's layout runs the **main checkout's** CLI:
+`<wt>/node_modules` is a symlink to `<main>/node_modules` (the app's checkout), whose `.bin/linked`
+resolves to `<main>/packages-local/_linked-cli/lib/esm/launch.js` (on `main`). A
 step's own CLI changes run only through its worktree's built bin:
 
 ```sh
@@ -157,7 +157,7 @@ LINKED="node $PWD/lib/esm/launch.js"     # then: (cd <fixture package> && $LINKE
 
 So L1's Verify exercises fixtures with `$LINKED`, never `npx linked`; and until the release,
 packages that need L1's Turtle copy (N1, N2, P1, C2, T1) must be built with the integration CLI,
-`node ~/web/wt/070/packages-local/_linked-cli/lib/esm/launch.js build` (reported to the master as
+`node <wt>/packages-local/_linked-cli/lib/esm/launch.js build` (reported to the master as
 a contradiction with §How to use, 2).
 
 ## L1 — the package build ships Turtle
@@ -232,9 +232,9 @@ master plan** in its own wording (the last bullet of §Ontology data files and l
 - M1-M5 above (commands and output quoted).
 - Phase 2: in a tmp dir, `$LINKED create-package probe --kind ontology`, then
   `npm install <tarball of core's store-inference>` (`npm pack` in
-  `~/web/wt/070-L1/packages-local/_linked-core`, built), then `(cd probe-ont && $LINKED build)`:
+  `<wt>-L1/packages-local/_linked-core`, built), then `(cd probe-ont && $LINKED build)`:
   exit 0 and `lib/esm/data/probe.ttl` present.
-- Phase 3: `docker build -t linked-fuseki:dev ~/web/wt/070/packages-local/_linked-fuseki/server`,
+- Phase 3: `docker build -t linked-fuseki:dev <wt>/packages-local/_linked-fuseki/server`,
   then `npx playwright test --config playwright.config.ts tests/e2e/create-app.spec.ts`.
 - Full: `npm run test:unit`; `npx playwright test --config playwright.config.ts` (all three specs).
 
@@ -266,9 +266,9 @@ changeset are in.
 - `tests/e2e/create-app.spec.ts:40` `new GenericContainer('stain/jena-fuseki')`; `:63`
   `dbType=mem`; the app is cloned from app-template's GitHub `main` (`src/cli-methods.ts:253`)
   and installed from npm (`tests/e2e/helpers/app.ts:55-66`).
-- CN: `src/backend/provisioners/appProjectPackages.test.ts:63` expects
-  `'../data/lego-elevated-planning.json'`; CN builds project packages through `buildPackageFiles`
-  (cli report 023), so the scaffold change reaches CN's generated packages at once.
+- The host app: its project-package test expects a `'../data/<name>.json'` data path; the app
+  builds project packages through `buildPackageFiles` (cli report 023), so the scaffold change
+  reaches its generated packages at once.
 
 **Pitfalls:**
 - `npx linked` runs main's CLI (above). Exercise every fixture with `$LINKED`.
@@ -281,9 +281,9 @@ changeset are in.
 - The scaffold's `loadData` imports `@_linked/core/ontology/loadOntologyFiles`, which npm's core
   lacks until the release: `tests/template/package.full.test.ts` (installs from npm) fails until
   then. Run it at R; L1 verifies the scaffold with core's packed integration build instead.
-- CN's `appProjectPackages.test.ts:63` turns red on CN's `store-inference` the moment L1 lands
-  (Vitest resolves `@_linked/cli` to the nested checkout's source). L1 lands its one-line CN
-  update right after the cli landing (CN last).
+- The host app's project-package test turns red on its `store-inference` branch the moment L1
+  lands (Vitest resolves `@_linked/cli` to the nested checkout's source). L1 lands its one-line
+  update in the app right after the cli landing (the app last).
 - The image's inferring template is `config-tdb2` only: a `dbType=mem` dataset would not infer.
 - The e2e cannot show "a template app reads its Turtle" before T1 and the release: the template
   comes from GitHub `main` and npm. L1's e2e asserts inference on the image directly; the
@@ -292,8 +292,8 @@ changeset are in.
   `<ns> a owl:Ontology .`, no blank nodes) so the first write by the generator or builder is a
   no-op diff.
 
-**Architecture:** CN arch-04 §RDF file formats; arch-03 §Layering; arch-05 (the generator writes
-package data); arch-10 (package layout); core `docs/architecture/ontologies.md`; cli reports 001
+**Architecture:** the host app's architecture docs (RDF file formats, layering, the generator
+writing package data, package layout); core `docs/architecture/ontologies.md`; cli reports 001
 (Vite backend build), 016 (standalone SSR bundling), 020 (`build-app` needs no data server), 023
 (`buildPackageFiles`).
 
@@ -312,12 +312,12 @@ package data); arch-10 (package layout); core `docs/architecture/ontologies.md`;
 - Quick gate (1-2 min), after each phase: `npx linked build` in the cli worktree, then the jest
   line under Verify.
 - Full gate, before landing: `npm run test:unit`; `npx playwright test --config playwright.config.ts`
-  (create-app needs Docker and `linked-fuseki:dev`); CN's
-  `npx vitest run src/backend/provisioners/appProjectPackages.test.ts` in `~/web/wt/070-L1/`.
+  (create-app needs Docker and `linked-fuseki:dev`); the host app's project-package test in
+  `<wt>-L1/`.
 
 **Size:** small, **3 phases** (the master says 2; phase 3 waits for F1 and phase 2 for K1):
 1. Turtle in the package build and the app backend build; M1-M5 verify the contract text.
-2. The scaffold in Turtle (needs K1's `loadOntologyFiles`); CN's test line.
+2. The scaffold in Turtle (needs K1's `loadOntologyFiles`); the host app's test line.
 3. The CLI e2e on the image (needs F1).
 
 **Changeset:** minor. **Record:** report 024.
@@ -337,9 +337,9 @@ register form `linkedOntology(terms, ns, '<name>', loadData, ['../data/<name>.tt
 and `.json.d.ts` example files are gone. Verify passed: `$LINKED create-package probe --kind
 ontology`, core's packed `store-inference` (944b6d0) installed, `$LINKED build` exit 0 with
 `lib/esm/data/probe.ttl`, and core's registry loads it. Gate: build 9.3 s; Verify jest line 130
-tests, 4.9 s; `npm run test:unit` 870 tests, 21.8 s; CN's `appProjectPackages.test.ts` 25 passed,
-5.4 s. CN's landing changes two assertions in that test (lines 56 and 63, not one) and arch-03's
-package tree. Report 024.
+tests, 4.9 s; `npm run test:unit` 870 tests, 21.8 s; the host app's project-package test 25
+passed, 5.4 s. The app's landing changes two assertions in that test, not one, and the package
+tree in its architecture docs. Report 024.
 
 **Outcome (phase 3 of 3).** `create-app.spec.ts` runs Fuseki from `FUSEKI_IMAGE` (default
 `linked-fuseki:dev`) with a `tdb2` dataset; a new test inserts `A rdfs:subClassOf B . a a A`,
@@ -403,7 +403,7 @@ reuses the probe's child-process pattern and asset hook (exported from `shapeRef
   after landing with the integration CLI.
 - Resolve dependencies from the package, not from the CLI: in the layout a package's own
   `node_modules` holds no `@_linked` (it links to the main checkout's nested one), so the walk goes
-  up to `~/web/wt/070/node_modules/@_linked/<x>`. A dependency's `exports` may not expose
+  up to `<wt>/node_modules/@_linked/<x>`. A dependency's `exports` may not expose
   `package.json`, so walk `node_modules` directories rather than `require.resolve`.
 - Import by real path (`fs.realpathSync`): Node resolves the dependency's own imports through the
   real path, and a symlinked URL would evaluate its modules a second time.
@@ -430,7 +430,7 @@ against the repository's core via `fixtureNodeModules`):**
 - Full gate (before landing): `npm run test:unit` and the build.
 
 **Verify:** every package the plan changed builds clean with the worktree's CLI in its
-`~/web/wt/070/packages-local/<dir>` copy: core, server, server-utils, schema, xsd, rdfs, dcmi,
+`<wt>/packages-local/<dir>` copy: core, server, server-utils, schema, xsd, rdfs, dcmi,
 owl, sioc, dcat, org, auth, fuseki; quote each result; `git status` clean after each.
 
 **Size:** 2 phases: (1) the `depCheck` fix; (2) the shape check, its flag and its tests; docs at
@@ -444,7 +444,7 @@ landing.
 through core's `registerInstalledOntologies` (V2, core c3a5ef4), and runs
 `checkShapeHierarchy({dependencies})`; every finding is printed, an error fails the build.
 `--skip-shape-check "<reason>"` skips it. `depCheck` keeps the last missing entry. Deviations:
-dependencies are followed when they are `@_linked/*` **or** `linkedPackage: true` (a CN or app
+dependencies are followed when they are `@_linked/*` **or** `linkedPackage: true` (an app's own
 package depending on another linked package needs its data too); a register module that throws
 (core only warns) fails the check with that warning; a core without `shapes/checkShapeHierarchy`
 or `ontology/registerInstalled` warns and skips. The `depCheck` fix surfaces one formerly hidden
@@ -457,7 +457,7 @@ the quick jest line 5 suites / 111 tests, 14.5 s; `npm run test:unit` 82 suites 
 
 - [ ] Sub-plan reviewed by the master; contradictions routed into the master's §Contracts
 - [x] L1 phase 1 — Turtle in the package and app backend builds; the contract verified, M1-M5 (report 024)
-- [x] L1 phase 2 — scaffold in Turtle; CN's `appProjectPackages.test.ts` updated
+- [x] L1 phase 2 — scaffold in Turtle; the host app's project-package test updated
 - [x] L1 phase 3 — CLI e2e on the image
 - [ ] L1 landed on `store-inference` (commit: )
 - [x] L2 detail written (wave 4)

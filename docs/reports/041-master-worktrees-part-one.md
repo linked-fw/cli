@@ -6,7 +6,7 @@ summary: >
   port registry (`<LINKED_HOME>/master-ports.json`), released by `worktree remove <m>`;
   `withRepoLockAsync`, `linkedHome`, `withMachineLockAsync`; `worktree relink --all`;
   `branch list`; `branch add-package <m> <packages...>` (with `addPackageWorktree` extracted from
-  `createWorktreeSet`). Minor. Step CL of CN plan 282, sub-plan 004.
+  `createWorktreeSet`). Minor. Part of the host app's plan; sub-plan 004 §CL.
 ---
 
 # 041 — Master worktrees, part one
@@ -18,8 +18,8 @@ summary: >
 Two masters started at the same time, in one app or in two, no longer take the same preview port.
 After an `npm install` in the main checkout, one command relinks every worktree of the app. One
 command lists the app's integration branches and masters. A framework package can join a running
-master by command. This is step CL of CN plan 282 (sub-plan [004](../plans/004-hub-imports-cli.md)
-§CL, contract KC) and the first part of backlog [013](../backlog/013-master-worktrees-remaining.md).
+master by command. This is a step of the host app's plan (sub-plan
+[004](../plans/004-hub-imports-cli.md) §CL, contract KC) and the first part of backlog [013](../backlog/013-master-worktrees-remaining.md).
 013 is trimmed to what is still left.
 
 ### Changes
@@ -81,9 +81,9 @@ master by command. This is step CL of CN plan 282 (sub-plan [004](../plans/004-h
 
 ### Verification
 
-Run in `/Users/rene/web/wt/hub-imports--cl/packages-local/_linked-cli`.
+Run in `../wt/hub-imports--cl/packages-local/_linked-cli`.
 
-The build: `/Users/rene/web/create_now/node_modules/.bin/linked build`. `npx linked build` finds no
+The build: `<main>/node_modules/.bin/linked build` (`<main>` being the app's main checkout). `npx linked build` finds no
 `linked` bin in a fresh cli worktree; see Deviations.
 
 ```
@@ -91,7 +91,7 @@ The build: `/Users/rene/web/create_now/node_modules/.bin/linked build`. `npx lin
 ✔ Checking sideEffects
 ✔ Checking dependencies
 ✔ Build successful
-/Users/rene/web/create_now/node_modules/.bin/linked build  10.35s user 1.24s system 92% cpu 12.582 total
+<main>/node_modules/.bin/linked build  10.35s user 1.24s system 92% cpu 12.582 total
 ```
 
 `npx tsc --noEmit -p tsconfig.json` printed no errors.
@@ -194,13 +194,13 @@ $ cat $LINKED_HOME/master-ports.json
 ```
 
 **The running master `hub-imports` read with the built bin.** These are read-only commands, run in
-`/Users/rene/web/create_now` with the real `LINKED_HOME`:
+the app's main checkout with the real `LINKED_HOME`:
 
 ```
 $ linked branch list
 BRANCH       KIND         TARGET  REPOS                                                          WORKTREE                        PORT  DATASET  STEPS
-hub-imports  master       dev     app, _linked-cli, _linked-core, _linked-react, _linked-server  /Users/rene/web/wt/hub-imports  4520  -        3
-side-225     master       dev     app                                                            /Users/rene/web/wt/side-225     4510  -        3
+hub-imports  master       dev     app, _linked-cli, _linked-core, _linked-react, _linked-server  ../wt/hub-imports               4520  -        3
+side-225     master       dev     app                                                            ../wt/side-225                  4510  -        3
 dev          integration  main    app, _linked-auth, _linked-cli, _linked-core, … (+20)          (checkouts)                     -     -        -
 $ linked branch list --json   → hub-imports: port 4520, target dev, 5 repos each with its worktree, steps ["cl","hi","sy"]; otherPorts []
 $ linked worktree list        → Master hub-imports (target dev, preview http://localhost:4520), steps cl, hi, sy; Master side-225 (4510) …  (exit 0)
@@ -208,7 +208,7 @@ $ linked branch status        → Integration branch: dev (target main), rows as
 $ ls -d ~/.linked             → No such file or directory   (nothing was written)
 ```
 
-Not run: `npm run test:e2e` (Docker), and CN's tests (no CN change).
+Not run: `npm run test:e2e` (Docker), and the host app's tests (no change in the app).
 
 ### Deviations from the plan
 
@@ -218,14 +218,15 @@ Not run: `npm run test:e2e` (Docker), and CN's tests (no CN change).
 - **`relink --all` leaves a worktree with an install of its own as it is**, with code 0 and one
   line saying so. A plain `relink` refuses such a worktree (exit 1). Under `--all` that would make
   every run fail once one master has its own install. KC in sub-plan 004 is updated to say so.
-- **`branch list` names at most five repos in a text row** (`… (+n)`). CN's `dev` lists 24 repos.
+- **`branch list` names at most five repos in a text row** (`… (+n)`). The host app's `dev` lists 24
+  repos.
   The JSON keeps all of them. KC is updated.
 - **`add-package`**: the refusal when a step has a worktree of the package (named in the
   Pitfalls) and what happens when a relink fails afterwards (the worktrees stay, exit 1) are added
   to KC.
 - **The `--port` refusal and the free-port choice now run after the per-repo checks**, inside the
   lock, so a run with several problems lists the repo problems first.
-- **The build** used `/Users/rene/web/create_now/node_modules/.bin/linked build`. In a fresh cli
+- **The build** used `<main>/node_modules/.bin/linked build`. In a fresh cli
   worktree, `npx linked build` reports `sh: linked: command not found`: the farm's `.bin/linked`
   points at that same unbuilt CLI. This is recorded in backlog 013.
 
@@ -254,7 +255,7 @@ Not run: `npm run test:e2e` (Docker), and CN's tests (no CN change).
 
 - Existing masters stay readable. A master started before this change is recorded only in its
   app's git config, which `freeMasterPort` and `--port` still read. So `hub-imports` (4520) and
-  `side-225` (4510) keep their ports, and a new master in CN gets 4530. Another app does not see
+  `side-225` (4510) keep their ports, and a new master in that app gets 4530. Another app does not see
   these two masters until they are restarted, because the registry does not have them.
 - `branch list` and `worktree list` never create `~/.linked`. Only `branch start --worktree` and
   `worktree remove <m>` write there, inside the lock.
@@ -273,7 +274,7 @@ Not run: `npm run test:e2e` (Docker), and CN's tests (no CN change).
 | D8 | `relink --all` | A worktree with an install of its own | Left as it is, code 0, one line | Count it as failed (plain `relink` refuses it) | Once `own-install` exists, `--all` would otherwise always exit 1 |
 | D9 | `relink --all` | Which worktrees | `worktree list --all` from the main checkout: masters, then their steps, then every other worktree (non-agent ones too) | Agent worktrees only | KC: "`worktree list --all` minus the main checkout" |
 | D10 | `branch list` | Row order and the TARGET column | Masters first, then integration branches, each by name; TARGET is the app's target, else the first repo's | Order by git config | Masters first matches KC's example; the app's target is what `land` uses |
-| D11 | `branch list` | CN's `dev` has 24 repos, too wide for a row | Text names at most five (`… (+n)`); JSON has all of them | Full list | Readable at a terminal width; nothing is lost in JSON |
+| D11 | `branch list` | The host app's `dev` has 24 repos, too wide for a row | Text names at most five (`… (+n)`); JSON has all of them | Full list | Readable at a terminal width; nothing is lost in JSON |
 | D12 | `branch list` | An app with no records | Prints `No integration branches or masters.`, exit 0 | An empty header | KC: exit 0 for an empty list; a clearer message |
 | D13 | `add-package` | A relink fails after the worktrees were made | The worktrees and records stay; exit 1 with `rerun linked worktree relink --all` | Undo everything | The worktrees are correct, and a relink is repeatable on its own |
 | D14 | `add-package` | Which install the new package's nested `node_modules` links into | The master's farm marker `installRoot`, else the main checkout | Always the main checkout | Same as the master's own farm |

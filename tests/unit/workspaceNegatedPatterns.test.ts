@@ -10,7 +10,7 @@ import {getLincdPackages} from '../../src/lifecycle';
 import {discoverWorkspacePackages} from '../../src/commands/start';
 
 // npm honours NEGATED `workspaces` entries ("!packages/core"); every walker in
-// this CLI must too. CN's npm migration narrows its globs to that form so the
+// this CLI must too. A host app's npm migration narrowed its globs to that form so the
 // gitignored sibling checkouts under packages/ stop counting as members — and a
 // walker that ignores the `!` resolves @_linked/primitives to one of those
 // checkouts, whose deps npm never installed, so dev does not boot.
@@ -148,7 +148,7 @@ describe('workspaces negated patterns', () => {
   // --- the three walkers ----------------------------------------------------
 
   /**
-   * CN's shape in miniature: `packages/*` plus negations for the untracked
+   * A host app's shape in miniature: `packages/*` plus negations for the untracked
    * checkouts, and one tracked member that must survive.
    */
   function makeMonorepo(root: string) {

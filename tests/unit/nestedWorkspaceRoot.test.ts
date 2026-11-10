@@ -7,7 +7,7 @@ import {discoverWorkspaces} from '../../src/vite-config';
 
 // An app made from the app template lists `packages-local/*` in its
 // `workspaces` so it can localize packages standalone. Run inside a parent
-// workspace (CN's `packages-local/<app>`) with no checkout of its own, npm
+// workspace (a host app's `packages-local/<app>`) with no checkout of its own, npm
 // hoisted its dependencies to the parent. A directory counts as a workspace
 // root only when one of its globs matches a package that exists, so the
 // node_modules walk goes on to the parent. Stopping at the app registered no

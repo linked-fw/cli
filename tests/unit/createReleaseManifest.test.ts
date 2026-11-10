@@ -25,7 +25,7 @@ describe('createReleaseManifest', () => {
   const create = (overrides: Record<string, unknown> = {}) =>
     createReleaseManifest({
       appRoot,
-      environmentNames: ['cn-staging'],
+      environmentNames: ['app-staging'],
       target: 'web',
       accessURL: 'https://cdn.example.test',
       builtAt: '2026-09-17T00:00:00.000Z',

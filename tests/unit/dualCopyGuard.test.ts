@@ -16,14 +16,14 @@ const APP = path.resolve('/app');
 const NM = (rel: string) => url(path.join(APP, 'node_modules', rel));
 const IMPORTER = NM('@_linked/schema/lib/esm/shapes/ImageObject.class.js');
 
-// A packages-local checkout as CN has it: the realpath of
+// A packages-local checkout as a host app has it: the realpath of
 // node_modules/@_linked/server-utils, with a nameless lib/esm/package.json.
-const LOCAL = path.resolve('/cn/packages-local/_linked-server-utils');
+const LOCAL = path.resolve('/host/packages-local/_linked-server-utils');
 const PACKAGE_NAMES: Record<string, string> = {
-  [path.resolve('/cn')]: '@semantu/create-now',
+  [path.resolve('/host')]: 'my-app',
   [LOCAL]: '@_linked/server-utils',
-  [path.resolve('/cn/packages-local/_linked-cli')]: '@_linked/cli',
-  [path.resolve('/cn/packages-local/_linked-fuseki')]: '@_linked/fuseki',
+  [path.resolve('/host/packages-local/_linked-cli')]: '@_linked/cli',
+  [path.resolve('/host/packages-local/_linked-fuseki')]: '@_linked/fuseki',
 };
 
 function fakeReadPackageName() {
@@ -97,7 +97,7 @@ describe('createLinkedFileMatcher', () => {
   it('does not match a file of a non-linked package outside node_modules', () => {
     const {read} = fakeReadPackageName();
     const match = createLinkedFileMatcher(read);
-    expect(match(url(path.resolve('/cn/src/backend.ts')))).toBeNull();
+    expect(match(url(path.resolve('/host/src/backend.ts')))).toBeNull();
     expect(match(url(path.resolve('/elsewhere/x.js')))).toBeNull();
   });
 
@@ -155,7 +155,7 @@ describe('installDualCopyGuard', () => {
       '@_linked/fuseki/shapes/FusekiStore',
       url(
         path.resolve(
-          '/cn/packages-local/_linked-fuseki/lib/esm/shapes/FusekiStore.js',
+          '/host/packages-local/_linked-fuseki/lib/esm/shapes/FusekiStore.js',
         ),
       ),
     );
@@ -170,7 +170,7 @@ describe('installDualCopyGuard', () => {
     );
     g.resolve(
       './utils/x.js',
-      url(path.resolve('/cn/packages-local/_linked-cli/lib/esm/utils/x.js')),
+      url(path.resolve('/host/packages-local/_linked-cli/lib/esm/utils/x.js')),
     );
     expect(g.reports).toEqual([]);
   });

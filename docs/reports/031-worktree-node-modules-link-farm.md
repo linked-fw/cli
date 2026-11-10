@@ -14,11 +14,12 @@ summary: >
 
 `linked worktree add` symlinked `<wt>/node_modules` to the main checkout's. Vite loaded the
 worktree's `packages-local/` checkouts through its workspace table (`doctor resolve`: `overlay`),
-but `tsc` and Node followed the symlink to the main checkout's copies. Measured in a CN worktree
+but `tsc` and Node followed the symlink to the main checkout's copies. Measured in a host app worktree
 with a primitives worktree that adds `@_linked/primitives/components/RelativeTime`:
 `npm run typecheck:gate` → 17 new `TS2307 Cannot find module '@_linked/primitives/components/RelativeTime'`.
 Building the primitives worktree with `linked build` failed with `TS2742 The inferred type of 'Menu'
-cannot be named without a reference to '../../../../../../create_now/node_modules/@radix-ui/react-context/dist'`.
+cannot be named without a reference to '../../../../../../<main>/node_modules/@radix-ui/react-context/dist'`
+(`<main>` being the main checkout).
 
 ## Design
 
@@ -67,14 +68,14 @@ fixes every resolver at once without an install, so:
 
 ## Gate
 
-On the CN worktree `wt/ontology-mgr` (primitives and cli worktrees), after `linked worktree relink`:
+On a host app worktree `wt/ontology-mgr` (primitives and cli worktrees), after `linked worktree relink`:
 
 - `npm run typecheck:gate` → `No new type errors. 0 pre-existing errors still in the baseline.`
 - `doctor resolve` → `@_linked/primitives  ontology-mgr/packages-local/_linked-primitives  ontology-mgr/packages-local/_linked-primitives  yes`
   (no flag), `@_linked/cli  external  ontology-mgr/packages-local/_linked-cli  no`, exit 0.
 - `npx linked build` in the primitives worktree → `✔ Build successful`; `Menubar.d.ts` imports
   `import("@radix-ui/react-context")`, as the main checkout's build does.
-- `npx vitest run src/features/document-studio/components/DocumentHistory.test.tsx` → `Tests  5 passed (5)`.
+- `npx vitest run` on one of the app's component tests → `Tests  5 passed (5)`.
 - Backend restarted on :4310: `/models/ontologies` → `200`, no `Cannot find module` in the log.
 - The main checkout: `git status --short` empty, `node_modules` listing unchanged.
 - `npm run test:unit` → all suites pass.

@@ -78,7 +78,7 @@ describe('buildViteApp', () => {
     const publish = jest.fn();
 
     const manifest = await buildViteApp(
-      {...baseOptions, appRoot, environmentNames: ['cn-staging'], target: 'web'},
+      {...baseOptions, appRoot, environmentNames: ['app-staging'], target: 'web'},
       {
         ...baseDependencies,
         loadEnvironment: async () => {
@@ -300,7 +300,7 @@ describe('compileViteApp (build-app --compile-only)', () => {
     const calls: string[] = [];
     const bases: (string | undefined)[] = [];
     await compileViteApp(
-      {appRoot, environmentNames: ['cn-staging']},
+      {appRoot, environmentNames: ['app-staging']},
       {
         loadEnvironment: async () => {
           calls.push('environment');

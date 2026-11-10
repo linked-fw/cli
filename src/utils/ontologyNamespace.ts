@@ -1,7 +1,7 @@
 import {packageNameToSlug} from './shapeReferences.js';
 
 /**
- * The root every first-party and community ontology publishes under (arch-02): an ontology's
+ * The root every first-party and community ontology publishes under: an ontology's
  * namespace is `https://linked.cm/ont/{ontologySlug}/`, next to the package's shapes at
  * `https://linked.cm/shape/{publicSlug}/`. It replaces the legacy `http://lincd.org/ont/` root.
  */

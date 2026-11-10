@@ -8,7 +8,7 @@ summary: >
   `RemoteDataset` datasets file gives `instanceof RemoteDataset` and
   `instanceof RemoteDatasetUnreachableError` true, and the FusekiStore file keeps
   `instanceof FusekiStore` true; a core that ignores it boots as before. CLI half of backlog 014's
-  fix (CN plan 068 phase 4, step D1b). Minor release.
+  fix (part of a host app's plan). Minor release.
 ---
 
 # 014 — `linked start` installs the `loadStores` loader
@@ -46,33 +46,33 @@ RemoteDatasetUnreachableError`, each against the storage file's own import.
 | core `loadStores` | datasets file | output |
 |---|---|---|
 | 2.33.0 as published (ignores the loader) | RemoteDataset | `[probe] instanceof RemoteDataset false, instanceof FusekiStore false`; `[probe] instanceof RemoteDatasetUnreachableError false (RemoteDatasetUnreachableError)` |
-| with the loader (D1a's change applied to `lib/esm/utils/loadStores.js`) | RemoteDataset | `[probe] instanceof RemoteDataset true, instanceof FusekiStore false`; `[probe] instanceof RemoteDatasetUnreachableError true (RemoteDatasetUnreachableError)` |
+| with the loader (core's half applied to `lib/esm/utils/loadStores.js`) | RemoteDataset | `[probe] instanceof RemoteDataset true, instanceof FusekiStore false`; `[probe] instanceof RemoteDatasetUnreachableError true (RemoteDatasetUnreachableError)` |
 | with the loader | FusekiStore (committed default) | `[probe] instanceof RemoteDataset false, instanceof FusekiStore true`; `[storage] appData: FusekiStore`; `GET /` 200 |
 | 2.34.0 from npm (core's half released) | RemoteDataset | `[probe] instanceof RemoteDataset true, instanceof FusekiStore false`; `[probe] instanceof RemoteDatasetUnreachableError true (RemoteDatasetUnreachableError)` |
 | 2.34.0 from npm | FusekiStore | `[probe] instanceof RemoteDataset false, instanceof FusekiStore true`; `[storage] appData: FusekiStore`; `GET /` 200 |
 
 The first row is today's behaviour and shows the CLI half is harmless with an older core.
 
-## CN boot proof
+## Host app boot proof
 
-A CN worktree of `main` (`4900ce4e3`), `npm ci` (no `packages-local/`), `npm install` of this
-build's tarball, then `CN_TEST_PORT=4079 npx playwright test tests/e2e/signin.spec.ts`:
+A worktree of the host app's `main` (`4900ce4e3`), `npm ci` (no `packages-local/`), `npm install` of
+this build's tarball, then its sign-in e2e (`tests/e2e/signin.spec.ts`) on port 4079:
 
 ```
-[globalSetup] CN is healthy on :4079 after 29.4 s
+[globalSetup] app is healthy on :4079 after 29.4 s
   5 passed (51.7s)
 ```
 
-CN's own storage file imports its stores by name and never calls `loadStores`, so the loader is
-installed but unused there. The log has two `[CN-err] Fatal socket error Error: read/write
+The app's own storage file imports its stores by name and never calls `loadStores`, so the loader
+is installed but unused there. The log has two `[app-err] Fatal socket error Error: read/write
 ECONNRESET` lines during the iframe sign-in redirect (a browser-side socket reset); the tests pass.
 
 ## Not done here
 
 - Other native `import()`s of bundled packages (backlog 015's guard and bundling steps).
-- A CLI e2e asserting `instanceof` with a `RemoteDataset` datasets file (CN plan 068 step D4).
-- App-template's `name` + `url` fallback goes back to `instanceof` once core's half is released
-  (step D5).
+- A CLI e2e asserting `instanceof` with a `RemoteDataset` datasets file (a later step of the host
+  app's plan).
+- App-template's `name` + `url` fallback goes back to `instanceof` once core's half is released.
 
 ## PRs
 

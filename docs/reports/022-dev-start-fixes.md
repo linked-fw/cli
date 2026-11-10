@@ -43,7 +43,7 @@ only for standalone apps (no workspaces).
 - `linked:client-dep-includes` already scans every excluded framework package for its third-party
   client deps, so Radix, vaul and CJS deps still get `optimizeDeps.include` entries.
 
-**Measured** in a CN-created app (two workspaces, vite 6.4.4, `node_modules/.vite` deleted): with
+**Measured** in an app created by a host app (two workspaces, vite 6.4.4, `node_modules/.vite` deleted): with
 cli 1.47.0, `.vite/deps` held `class Person3` and the server logged `ServerCallError: Invalid
 query`; with this build, no `@_linked_*` chunks, `0` "Invalid query" lines, the People list
 rendered, `/` and `/page1` loaded with no console errors.

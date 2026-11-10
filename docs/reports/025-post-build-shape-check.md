@@ -7,14 +7,14 @@ summary: >
   core's `registerInstalledOntologies`, and runs `checkShapeHierarchy({dependencies})`. Every finding
   is printed; an `error` fails the build; `--skip-shape-check "<reason>"` skips it. The build's
   dependency check no longer drops the last missing entry when `react` is not missing. All thirteen
-  framework packages of CN plan 070 build clean with it. Part of CN plan 070 (sub-plan 001, step L2).
+  framework packages of the host app's plan build clean with it. Part of that plan (sub-plan 001).
 ---
 
 # 025 — The post-build shape check
 
 ## Why
 
-Under CN plan 070 the store infers `rdf:type` through `rdfs:subClassOf` and SHACL targeting
+Under the host app's plan the store infers `rdf:type` through `rdfs:subClassOf` and SHACL targeting
 follows it, so shape `extends` and the class hierarchy must agree (plan decisions 13-16). Core's
 `checkShapeHierarchy` (`@_linked/core/shapes/checkShapeHierarchy`) reports where they do not. An
 app only logs its findings; a published package must be clean, so `linked build` fails on its
@@ -52,10 +52,10 @@ shares the child pattern, the asset hook (now exported) and `findShapeModules`.
 ## Deviations from the sub-plan
 
 - Dependencies are followed when their name is `@_linked/*` **or** their `package.json` has
-  `linkedPackage: true`: an app or CN package that depends on another linked package needs that
+  `linkedPackage: true`: an app or app package that depends on another linked package needs that
   package's data as much as a framework one's.
 - The first implementation imported the register modules itself; the master's contract addition
-  (§Installed packages' ontologies, CN 7f5267e55) moved that into core, and the check calls
+  (§Installed packages' ontologies) moved that into core, and the check calls
   `registerInstalledOntologies` (core c3a5ef4) instead.
 
 ## Tests
@@ -81,8 +81,8 @@ importing `n3` and not `react` gets `n3` in the warning (failed before the fix: 
 
 ## Verify
 
-Each package built in its `~/web/wt/070/packages-local/<dir>` integration copy with this branch's
-CLI (`node ~/web/wt/070-L2/packages-local/_linked-cli/lib/esm/launch.js build`), core on c3a5ef4:
+Each package built in its `<integration worktree>/packages-local/<dir>` copy with this branch's
+CLI (`node <step worktree>/packages-local/_linked-cli/lib/esm/launch.js build`), core on c3a5ef4:
 
 ```
 core c3a5ef4: exit 0, 10s, ✔ Checking shape hierarchy, ✔ Build successful, git status: 0 changed

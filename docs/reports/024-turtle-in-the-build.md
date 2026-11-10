@@ -7,16 +7,16 @@ summary: >
   copy fails the build). Measured in every mode an app runs in (release backend, dev SSR standalone
   and workspace, client build, tarball): each module reads the Turtle beside its own file through
   `import.meta.url`. New ontology packages are scaffolded in Turtle (`src/data/<name>.ttl`,
-  `loadData` through core's `loadOntologyFiles`), which also changes Create Now's generated project
+  `loadData` through core's `loadOntologyFiles`), which also changes a host app's generated project
   packages. The CLI e2e runs its Fuseki on the inferring image with a `tdb2` dataset and asserts
-  the dataset infers. Part of CN plan 070 (sub-plan 001, step L1).
+  the dataset infers. Part of a host app's plan (sub-plan 001, step L1).
 ---
 
 # 024 — Turtle in the build
 
 ## Why
 
-Under CN plan 070 a package's ontology data becomes Turtle, `src/data/<file>.ttl`, read at runtime
+Under a host app's plan a package's ontology data becomes Turtle, `src/data/<file>.ttl`, read at runtime
 by `@_linked/core/ontology/loadOntologyFiles(import.meta.url, ['../data/<file>.ttl'])` relative to
 the compiled module. That only works if the file sits at the same relative path in every place the
 module runs from.
@@ -144,9 +144,9 @@ only, nothing for an app without Turtle, fails on a copy error), `ontologyDataRe
   the same call with an exported `dataFiles` constant; the scaffold keeps the literal list so the
   ontology module exports nothing but terms, `ns` and `loadData`.
 
-Create Now builds its project packages through `buildPackageFiles`, so they change with it; its
-`appProjectPackages.test.ts` now expects the `.ttl` file and the array form, and arch-03's package
-tree names `data/<name>.ttl`.
+The host app builds its project packages through `buildPackageFiles`, so they change with it; its
+project-package test now expects the `.ttl` file and the array form, and its architecture docs'
+package tree names `data/<name>.ttl`.
 
 **Verify** (tmp dir, worktree CLI as `$LINKED`; core packed from `store-inference` 944b6d0):
 
@@ -181,7 +181,7 @@ Tests:       130 passed, 130 total        4.92 s
 $ time npm run test:unit
 Test Suites: 80 passed, 80 total
 Tests:       870 passed, 870 total        21.8 s
-CN (~/web/wt/070-L1): $ time npx vitest run src/backend/provisioners/appProjectPackages.test.ts
+host app: $ time npx vitest run <its project-package test>
 Test Files  1 passed (1)
 Tests  25 passed | 1 skipped (26)        5.37 s
 ```

@@ -5,7 +5,7 @@ summary: >
   `linked.backend.files.{ts,js}` alone when it has one, falling back to the whole storage file
   (backlog 018, option 1). The app template moved its file stores into that file (app-template#34),
   so a template app builds with its `RemoteDataset` answering nowhere: before, the build exited 1
-  with "Could not reach the data server". CN and webid.email have no files file and build as
+  with "Could not reach the data server". The host app and webid.email have no files file and build as
   before. A new e2e (`build-app.spec.ts`, in the `Dual-copy e2e` job) holds it. Minor release.
   Replaces backlog 018.
 ---
@@ -18,7 +18,7 @@ summary: >
 `appAssets` store's `accessURL`. It found the store by importing the app's whole
 `linked.backend.storage.ts`, which runs `loadStores` and the template's awaited `appData.init()`.
 With `appData` a `RemoteDataset` and no data server, the build exited 1 before Vite started
-(app-template#27, CN plan 068 step D5). A FusekiStore app tried to create its dataset in whatever
+(app-template#27). A FusekiStore app tried to create its dataset in whatever
 Fuseki `FUSEKI_BASE_URL` named, during a build.
 
 ## The choice
@@ -99,8 +99,8 @@ and with `E2E_CLI=@_linked/cli@1.51.2`:
 
 Apps without a files file take the fallback, so they load what they loaded before:
 
-- CN (worktree of `main` `345e23773`, `npm ci`, this build installed, `npx linked build-all`, CN's
-  `.env`, `FUSEKI_BASE_URL=http://127.0.0.1:9 LINKED_SYNC_SHAPES_ON_BOOT=false`):
+- The host app (worktree of `main` `345e23773`, `npm ci`, this build installed, `npx linked build-all`,
+  its `.env`, `FUSEKI_BASE_URL=http://127.0.0.1:9 LINKED_SYNC_SHAPES_ON_BOOT=false`):
   `NODE_ENV=production npm run build:app -- --allow-dirty` exit 0, `✅ Publishing destination:
   http://localhost:4040/uploads`, `✅ Release manifest ready: 142 artifacts`.
 - webid.email (fresh clone of Semantu/webid-email `75f079b`, `npm ci`, this build installed,
@@ -111,7 +111,7 @@ Apps without a files file take the fallback, so they load what they loaded befor
 
 ## Follow-ups
 
-- CN and webid.email can move their file stores into a `linked.backend.files.js`/`.ts` to build
+- The host app and webid.email can move their file stores into a `linked.backend.files.js`/`.ts` to build
   without Fuseki; not needed today (both build with a dead Fuseki url). Not recorded as backlog.
 - app-template `blank`: the sync merge conflicts on the storage file's imports; resolved by hand
   (app-template readme, "The blank variant").

@@ -213,7 +213,7 @@ counts *in the compiled-output commits*. A three-day window over all deletions g
 because other commits also deleted files. Both numbers are correct answers to different questions.
 
 `sentry` still has a `tsconfig-es5.json` —
-Create Now's `docs/backlog/087-dead-tsconfig-es5-in-s3-and-sentry.md`, now one
+tracked in the host app's backlog, now one
 repo rather than two.
 
 ---
@@ -266,11 +266,11 @@ how specifiers are *resolved*, not how they are emitted. Spot-checked against re
 
 ### R3 — `environmentMatchGlobs` does not exist in vitest 4.1.11
 
-Not deprecated — **absent**. It appears nowhere in the installed package. The obvious fix for CN's
+Not deprecated — **absent**. It appears nowhere in the installed package. The obvious fix for the host app's
 jsdom/`NODE_ENV` trap would have been silently ignored: an unknown key in a vitest config is not
 an error, so the config would have looked correct and done nothing. The real mechanism is
 `test.projects`.
-Create Now's `docs/backlog/084-the-jsdom-node-env-trap-in-backend-tests.md`.
+Tracked in the host app's backlog.
 
 ### R4 — "the sweep would produce a release to watch" — false, and the publish half is unverified
 
@@ -351,7 +351,7 @@ squash.
 Still outstanding:
 
 - **`sentry/tsconfig-es5.json`** still exists — the last one
-  (Create Now's `docs/backlog/087-dead-tsconfig-es5-in-s3-and-sentry.md`).
+  (tracked in the host app's backlog).
 - **`sentry`, `server-utils`, `semantu-cli`** are the three repos not yet on the tsconfig
   standard (§1.2 layer 3).
 - **`server-utils`** has one uncommitted edit (`src/types/ShapeDetails.ts`) and is the only repo

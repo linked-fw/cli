@@ -3,8 +3,8 @@ date: 2026-10-25
 summary: >
   A directory is a workspace root only when one of its `workspaces` globs matches an existing
   package. An app listing `packages-local/*` with no checkout of its own, nested in a parent
-  workspace (webid.email in CN), now resolves the parent's localized `@_linked/*` checkouts as
-  source instead of loading two copies of `@_linked/core`. Patch.
+  workspace (webid.email inside a host app), now resolves the parent's localized `@_linked/*`
+  checkouts as source instead of loading two copies of `@_linked/core`. Patch.
 ---
 
 # 038 — A nested app with an empty `packages-local/*` is not a workspace root
@@ -12,11 +12,12 @@ summary: >
 ## Why
 
 An app made from the app template declares `"workspaces": ["packages-local/*"]` so it can
-localize packages standalone. Run inside CN's workspace (`create_now/packages-local/semantu-webid-email`)
-with no `packages-local/` of its own, its dependencies are hoisted to CN's `node_modules`, whose
-`@_linked/*` entries are symlinks into CN's `packages-local/_linked-*`. `isWorkspaceRoot` treated
+localize packages standalone. Run inside a host app's workspace
+(`<main>/packages-local/semantu-webid-email`) with no `packages-local/` of its own, its dependencies
+are hoisted to the host app's `node_modules`, whose `@_linked/*` entries are symlinks into its
+`packages-local/_linked-*`. `isWorkspaceRoot` treated
 any `package.json` with `workspaces` as a root, so `readInstalledPkg` stopped at the app and never
-reached CN's `node_modules`. The Vite plugin registered no linked package as source while Node
+reached the host app's `node_modules`. The Vite plugin registered no linked package as source while Node
 walked up to the checkouts, and the app booted with "2 copies of @_linked/core's shape registry".
 `linked doctor resolve` from the app printed an empty table; `linked start` watched 1 package.
 
@@ -40,12 +41,12 @@ walked up to the checkouts, and the app booted with "2 copies of @_linked/core's
 - New tests against the old `src/`: `Tests: 18 failed, 3 passed, 21 total`; with the fix all 21 pass.
 - `npm run test:unit` (after `npx linked build`): `Test Suites: 91 passed, 91 total`,
   `Tests: 1066 passed, 1066 total`. `npx tsc -p tsconfig-esm.json --noEmit`: exit 0.
-- `doctor resolve` from `create_now/packages-local/semantu-webid-email`: the installed CLI prints
+- `doctor resolve` from `<main>/packages-local/semantu-webid-email`: the installed CLI prints
   only the header `name  vite  node  bundled  flag`; this branch's built CLI lists 12 `@_linked/*`
   packages, each with `vite` and `node` on the same `_linked-*` checkout and no flag.
 - `discoverWorkspacePackages` (the HMR watch list) from the same directory: 1 package before,
   13 after (the app plus its 12 localized dependencies).
-- `doctor resolve` from the CN root: output identical before and after.
+- `doctor resolve` from the host app's root: output identical before and after.
 
 ## Follow-ups
 
@@ -70,9 +71,9 @@ longer reads; they now use `linked: {kind: 'library'}`. After the rebase, `npm r
 
 A directory counts as a workspace root only when one of its `workspaces` globs matches a package
 that exists. An app that lists `packages-local/*` with no checkout of its own, nested in a parent
-workspace (webid.email inside CN), stopped `readInstalledPkg`'s walk at itself: no `@_linked/*`
-package was registered as source while Node loaded CN's checkouts, so the app booted two copies of
-`@_linked/core`. `isWorkspaceRoot` now requires an existing, non-negated member
+workspace (webid.email inside a host app), stopped `readInstalledPkg`'s walk at itself: no
+`@_linked/*` package was registered as source while Node loaded the host app's checkouts, so the
+app booted two copies of `@_linked/core`. `isWorkspaceRoot` now requires an existing, non-negated member
 (`hasWorkspaceMembers`), and `discoverLocalPackages` picks its root by the same rule.
 `findWorkspaceRoot` already climbed to the parent; `doctor resolve`, the Vite resolver table and
 `start`'s HMR watch list are fixed through `readInstalledPkg`.
@@ -82,10 +83,10 @@ package was registered as source while Node loaded CN's checkouts, so the app bo
 - `tests/unit/nestedWorkspaceRoot.test.ts` against the old `src/`: `Tests: 18 failed, 3 passed, 21 total`; with the fix: 21 passed.
 - `npm run test:unit`: `Test Suites: 91 passed, 91 total`, `Tests: 1066 passed, 1066 total`.
   `npx tsc -p tsconfig-esm.json --noEmit`: exit 0.
-- `linked doctor resolve` from `create_now/packages-local/semantu-webid-email`: before, only the
+- `linked doctor resolve` from `<main>/packages-local/semantu-webid-email`: before, only the
   header row; after, 12 rows such as `@_linked/core  _linked-core  _linked-core  yes` with no flag.
 - HMR watch list from the same app: 1 package before, 13 after.
-- `linked doctor resolve` from the CN root: identical before and after.
+- `linked doctor resolve` from the host app's root: identical before and after.
 
 **Deviations:** `discoverLocalPackages` also changed, so the server's `getLincdPackages` and
 `build-all` agree with the resolver about the root. **Follow-ups:** `doctor resolve` takes its

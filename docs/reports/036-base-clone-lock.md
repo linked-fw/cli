@@ -4,8 +4,8 @@ summary: >
   One lock per base clone: `linked checkout`, `branch fork`, `branch push`, `branch merge` and
   `worktree remove --branch` take a shared base clone's `linked.lock` around their git work on that
   repo, one repo at a time; a waiter is refused after 120 s naming the holder, a dead holder's lock
-  is taken over; a new base clone is cloned beside its place and renamed in. Patch. Step SU of CN
-  master plan 057 (with server report 022).
+  is taken over; a new base clone is cloned beside its place and renamed in. Patch. A step of the
+  host app's master plan (with server report 022).
 ---
 
 # 036 — One lock per base clone
@@ -16,7 +16,7 @@ summary: >
 
 A package's bare base clone (`<root>/.repos/<owner>/<name>.git`) is the git dir of that package's
 worktree in every app checkout that lists it, but callers only serialised runs per app (K-checkout,
-CN backlog 193 §7). Two apps listing one package could fetch, add worktrees or move refs in it at
+and a backlog item of the host app). Two apps listing one package could fetch, add worktrees or move refs in it at
 once and fail on git's ref or `index.lock`. Each base clone now has its own lock.
 
 ### Changes
@@ -41,7 +41,7 @@ once and fail on git's ref or `index.lock`. Each base clone now has its own lock
 - Options `lock?: RepoLockOptions` on `CheckoutOptions`, `CheckoutRemoveOptions`, `ForkOptions`,
   `PushOptions`, `MergeOptions` (tests use short waits).
 - Docs: `docs/integration-branches-and-worktrees.md` §One run per base clone at a time; K-checkout's
-  "callers serialise per app" in sub-plan 002 and in CN plans 057, 180 and 200.
+  "callers serialise per app" in sub-plan 002 and in the host app's plans.
 - Tests `tests/unit/checkout/repo-lock.test.ts` (7): held while running and removed after (also on
   a throw); re-entry; waiting for a holder that releases; refusal after the wait naming the holder;
   a dead holder taken over, another host's never; `checkout`, `fork`, `push`, `merge` and
@@ -57,8 +57,8 @@ once and fail on git's ref or `index.lock`. Each base clone now has its own lock
   Tests:       1135 passed, 1135 total
   ```
 - `npm run build`: compiled, copied, chmod (3 s).
-- CN regular set on the step's CN worktree (rebased on `dev` 417e89222, `CN_TEST_PORT=4359`, under
-  the shared slot lock), one run for the step (server and cli):
+- The host app's regular set on the step's worktree of the app (rebased on `dev` 417e89222, on its
+  own test port, under the shared slot lock), one run for the step (server and cli):
   ```
   test:regular
     typecheck:gate                                   PASS   13s
@@ -67,8 +67,8 @@ once and fail on git's ref or `index.lock`. Each base clone now has its own lock
     playwright (integration + sign-in e2e)           PASS  242s     (355 passed, 16 skipped, 4.0m)
     total                                            PASS  320s
   ```
-- The end-to-end check (server report 022) ran `linked checkout` through CN's project creation
-  against real GitHub: base clones made by rename, the app on `change-1`, both packages detached at
+- The end-to-end check (server report 022) ran `linked checkout` through the host app's project
+  creation against real GitHub: base clones made by rename, the app on `change-1`, both packages detached at
   `origin/main`, then the save's `branch fork` of the ontology package.
 
 ### Deviations
@@ -77,17 +77,17 @@ once and fail on git's ref or `index.lock`. Each base clone now has its own lock
   in the same shared base clones as the four commands named in the step.
 - The lock is held per repo rather than for the whole run (one lock at a time, so no deadlock);
   a caller still serialises the runs of one app checkout, whose worktrees and files are not locked.
-  K-checkout updated in sub-plan 002 and CN 057/180/200.
+  K-checkout updated in sub-plan 002 and the host app's plans.
 
 ### Follow-ups
 
-None new. CN backlog 193 §7's base-clone item is removed.
+None new. The base-clone item is removed from the host app's backlog.
 
 ## Details
 
 - The lock lives in the base clone, so it needs the base clone first; cloning beside and renaming
   makes the clone atomic, so no run ever locks or worktrees a half-made one.
-- Waiting blocks the thread (`Atomics.wait`), which is right for these sync git runs; a CN calling
+- Waiting blocks the thread (`Atomics.wait`), which is right for these sync git runs; a host app calling
   the cli runs it as a child process, so its event loop is not held.
 - A pid reused by an unrelated process makes a stale lock look alive until the wait ends; the
   refusal names the file to delete.

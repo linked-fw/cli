@@ -44,8 +44,8 @@ describe('resolvePackageBaseUri', () => {
       baseUri: 'https://shell.example.org/',
       source: 'environment',
     });
-    expect(resolve('https://acme.id.create.now', env)).toEqual({
-      baseUri: 'https://acme.id.create.now/',
+    expect(resolve('https://example.org', env)).toEqual({
+      baseUri: 'https://example.org/',
       source: '--base-uri',
     });
   });
@@ -69,8 +69,8 @@ describe('resolvePackageBaseUri', () => {
 
 describe('withBaseUri', () => {
   it('adds the root to the linkedPackage call', () => {
-    expect(withBaseUri(`} = linkedPackage('foo-assets');`, 'https://acme.id.create.now/')).toBe(
-      `} = linkedPackage('foo-assets', {baseUri: "https://acme.id.create.now/"});`,
+    expect(withBaseUri(`} = linkedPackage('foo-assets');`, 'https://example.org/')).toBe(
+      `} = linkedPackage('foo-assets', {baseUri: "https://example.org/"});`,
     );
   });
 

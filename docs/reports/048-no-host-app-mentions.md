@@ -41,8 +41,9 @@ hosting app", "an app that commits through the GitHub API", and the example IRI 
 **Deviations from the plan**
 
 - Left as code, not comments: `src/commands/worktree.ts:632-638` (checks for and prints the host's
-  `scripts/backup-cn-state.sh` and a `cn-main` dump) and `src/commands/master.ts:242` and `:494`
-  (the same hint, and "Restart the CN on …"). Changing them changes output, so they need a decision.
+  backup script and the dump of its main dataset, both by names that carry the host's
+  abbreviation) and `src/commands/master.ts:242` and `:494` (the same hint, and a restart message
+  that names the host). Changing them changes output, so they need a decision.
 - Not touched: `docs/reports/` and `docs/plans/` (historical records of finished work),
   `CHANGELOG.md` (published history), and `tests/` (fixtures and comments there also name the host;
   outside this pass's scope).

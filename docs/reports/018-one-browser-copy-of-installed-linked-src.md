@@ -3,7 +3,7 @@ date: 2026-10-18
 summary: >
   In dev the browser loaded shape-ui's `src/hostContext.tsx` twice, plain and as `?v=<hash>`, when
   `@_linked/shape-ui` was installed from npm (it ships `src/`), so its React context existed twice
-  and CN's relation-fields e2e failed once CN stopped registering shapes globally (CN plan 068 S5).
+  and a host app's relation-fields e2e failed once the app stopped registering shapes globally.
   Vite adds `?v` only to `.[cm]?[jt]s` files it resolves in node_modules, and a relative import
   inherits its importer's `?v`, so a `.tsx` got `?v` from a `.ts` importer and none from a `.tsx`
   one. The CLI's `./Sibling.js` rewrite now covers importers under any registered linked `src/`,
@@ -14,9 +14,9 @@ summary: >
 
 ## Why
 
-CN plan 068 step S5 (CN branch `feat/browser-host-catalog`) has CN hand shape-ui a shape catalog
-per (project, branch) instead of registering project shapes globally. CN's
-`tests/e2e/relation-fields.spec.ts` then failed in a CN worktree (packages from npm): `InstanceView`
+A host app's plan (branch `feat/browser-host-catalog`) has the app hand shape-ui a shape catalog
+per (project, branch) instead of registering project shapes globally. The app's
+`tests/e2e/relation-fields.spec.ts` then failed in a worktree (packages from npm): `InstanceView`
 read a host context with no catalog. The browser had loaded `hostContext.tsx` twice. This is case
 20 of the dual-copy bug class (report 017), the first in the browser since cli#272.
 
@@ -88,11 +88,11 @@ Template app as above, after (packed build of this branch): 56 shape-ui `src/` r
 /node_modules/@_linked/shape-ui/src/hostContext.tsx
 ```
 
-CN, worktree, `npm ci`, the packed build installed, `CN_TEST_PORT=4065`:
+The host app, worktree, `npm ci`, the packed build installed, its e2e on port 4065:
 
-- CN `main` (`56317a500`), `signin.spec.ts` + `relation-fields.spec.ts`: `6 passed (38.9s)`.
+- The app's `main` (`56317a500`), `signin.spec.ts` + `relation-fields.spec.ts`: `6 passed (38.9s)`.
   relation-fields passes on main either way, since main still registers shapes globally.
-- CN S5 (`58949c433`), `relation-fields.spec.ts`: with cli 1.51.0 from npm `1 failed`
+- The app's catalog branch (`58949c433`), `relation-fields.spec.ts`: with cli 1.51.0 from npm `1 failed`
   (`expect(page).toHaveURL(expected) failed`); with this build, run twice, `2 passed (28.5s)` and
   `2 passed (28.0s)` (setup + the test).
 

@@ -85,7 +85,7 @@ describe('buildPackageFiles', () => {
   );
 
   test('with an explicit uri_base, as create-package takes it', async () => {
-    const uriBase = 'https://acme.id.create.now/ont/planning';
+    const uriBase = 'https://example.org/ont/planning';
     await createPackage('planning', uriBase, tmp, {
       kind: 'ontology',
       skipInstall: true,
@@ -103,10 +103,10 @@ describe('buildPackageFiles', () => {
     await createPackage('planning', undefined, tmp, {
       kind: 'both',
       location: 'packages',
-      baseUri: 'https://acme.id.create.now',
+      baseUri: 'https://example.org',
       skipInstall: true,
     });
-    const baseUri = 'https://acme.id.create.now/';
+    const baseUri = 'https://example.org/';
     expect(buildPackageFiles('planning-ont', 'ontology', {baseUri})).toEqual(
       files(path.join(tmp, 'packages', 'planning-ont')),
     );

@@ -4,7 +4,7 @@
  * them, and `linked branch land <m>`.
  *
  * Each test gets a container dir holding the owner's app root `app/` on `dev`
- * (an integration branch with target `main`, as Create Now's is) with
+ * (an integration branch with target `main`, as a host app's may be) with
  * `packages-local/_linked-server` and `packages-local/_linked-core` on `dev`,
  * and two app workspace members: `packages/access` (its entry is a build
  * output, built in the owner's checkout only) and `packages/chrome` (no
@@ -77,7 +77,7 @@ function makeApp(): App {
     '.gitignore': 'node_modules\npackages-local/\n.env\n.vite-cache/\n/apps\nlib/\n',
     'src.txt': 'app\n',
     'packages/access/package.json': JSON.stringify({name: '@_linked/access', main: 'lib/esm/index.js'}),
-    'packages/chrome/package.json': JSON.stringify({name: '@create-now/chrome', exports: {'./chrome.css': './src/chrome.css'}}),
+    'packages/chrome/package.json': JSON.stringify({name: '@my-app/chrome', exports: {'./chrome.css': './src/chrome.css'}}),
   });
   fs.writeFileSync(path.join(root, '.env'), `PORT=4040\nSITE_ROOT=http://localhost:4040\nCN_PROJECTS_ROOT=${root}/apps\n`);
   fs.mkdirSync(path.join(root, 'packages', 'access', 'lib', 'esm'), {recursive: true});
@@ -99,11 +99,11 @@ function makeApp(): App {
   fs.mkdirSync(path.join(nm, 'react'), {recursive: true});
   fs.mkdirSync(path.join(nm, '.bin'));
   fs.mkdirSync(path.join(nm, '@_linked'));
-  fs.mkdirSync(path.join(nm, '@create-now'));
+  fs.mkdirSync(path.join(nm, '@my-app'));
   fs.symlinkSync('../../packages-local/_linked-server', path.join(nm, '@_linked', 'server'));
   fs.symlinkSync('../../packages-local/_linked-core', path.join(nm, '@_linked', 'core'));
   fs.symlinkSync('../../packages/access', path.join(nm, '@_linked', 'access'));
-  fs.symlinkSync('../../packages/chrome', path.join(nm, '@create-now', 'chrome'));
+  fs.symlinkSync('../../packages/chrome', path.join(nm, '@my-app', 'chrome'));
   return {container, root, server, core, origin};
 }
 
@@ -163,7 +163,7 @@ describe('linked branch start --worktree', () => {
     assert.equal(real(path.join(dir, 'node_modules', '@_linked', 'server')), real(pkgDir));
     assert.equal(real(path.join(dir, 'node_modules', '@_linked', 'core')), real(app.core));
     // packages/chrome needs no build: the worktree's; packages/access is unbuilt there: the install's.
-    assert.equal(real(path.join(dir, 'node_modules', '@create-now', 'chrome')), real(path.join(dir, 'packages', 'chrome')));
+    assert.equal(real(path.join(dir, 'node_modules', '@my-app', 'chrome')), real(path.join(dir, 'packages', 'chrome')));
     assert.equal(real(path.join(dir, 'node_modules', '@_linked', 'access')), real(path.join(app.root, 'packages', 'access')));
     assert.equal(fs.readlinkSync(path.join(dir, 'packages', 'access', 'node_modules')), path.join(app.root, 'packages', 'access', 'node_modules'));
     assert.equal(fs.readlinkSync(path.join(pkgDir, 'node_modules')), path.join(app.server, 'node_modules'));

@@ -4,8 +4,7 @@ summary: >
   `linked checkout --pin <npm>=<branch>` / `--pins-only`, `linked branch fork --worktree <dir>
   [--from <ref>]` and `linked branch push --worktree <dir>`: a server checks a package out on a
   branch it chooses (not the same-name rule) and keeps a package branch in a worktree of its own,
-  outside every app checkout. Minor. For Create Now plan 225 step OB (ontology working branches),
-  CN report 261.
+  outside every app checkout. Minor. For the host app's plan (ontology working branches).
 ---
 
 # 039 — Checkout pins and worktree forks
@@ -14,7 +13,7 @@ summary: >
 
 ### Summary
 
-Create Now decouples ontology package branches from app branches (CN plan 225, decision G): a
+The host app decouples ontology package branches from app branches (a decision in its plan): a
 person's working branch of an ontology (`{userSlug}/{topic}`) lives in a worktree of its own, and
 app branches use it by a pin. The same-name rule was the cli's (`packageBranch`, used by `linked
 checkout`), so the cli gains:
@@ -57,7 +56,7 @@ checkout`), so the cli gains:
 - The whole unit suite after a build (`linked build`): `Tests: 1165 passed` before the review
   fixes; the two suites that read `lib/` (`shapeHierarchy`, `ontologyDataReachable`) fail without a
   build, as on `dev`.
-- CN's suites run this cli through `node_modules/.bin/linked` (CN report 261).
+- The host app's suites run this cli through `node_modules/.bin/linked` (its own report).
 
 ### Deviations
 
@@ -65,12 +64,12 @@ checkout`), so the cli gains:
   (`--dir`), as `branch fork` does, rather than taking a base clone path.
 - A pin whose branch origin lacks falls back to the default branch (with a message) instead of
   refusing: a merged and deleted working branch is in `main`.
-- From CN's review: `--worktree` prunes deleted worktrees, fast-forwards a stale local branch, and
-  takes the branch from a clean, pushed app checkout's package worktree that holds it.
+- From the host app's review: `--worktree` prunes deleted worktrees, fast-forwards a stale local
+  branch, and takes the branch from a clean, pushed app checkout's package worktree that holds it.
 
 ### Follow-ups
 
-None in this repo. Deleting merged working branches: CN backlog 268.
+None in this repo. Deleting merged working branches: the host app's backlog.
 
 ## Details
 
@@ -78,14 +77,14 @@ The pins mode moves a worktree only when `git for-each-ref --contains HEAD refs/
 names a branch, so no commit becomes unreachable. A held pin is detached at `origin/<pin>`, never
 `git worktree add --force`. The skills in `semantu-agents` do not describe these flags.
 
-## Addendum — after CN's independent review (patch)
+## Addendum — after the host app's independent review (patch)
 
 - **A pin to another branch than the run's is always detached** at `origin/<pin>`: that branch (an
   ontology working branch) is written only in its own worktree, so no app checkout holds it. A pin
   to the run's own branch (a code-sync fork) stays attached. This removes the case where a pinned
   checkout took the branch while its worktree was absent.
-- **`branch fork --worktree` detaches no other checkout any more** (that raced CN's lock of that
-  app); a branch another worktree holds is refused, as before the first review round.
+- **`branch fork --worktree` detaches no other checkout any more** (that raced the host app's lock
+  of that app); a branch another worktree holds is refused, as before the first review round.
 - **`--from` starting with `-` is refused** (exit 2), and `rev-parse` gets `--end-of-options`.
 - Changeset `pinned-checkouts-read-only` (patch). Verification: `tests/unit/checkout` 59 passed;
   the whole unit suite `Tests: 1166 passed, 1166 total` after a build.

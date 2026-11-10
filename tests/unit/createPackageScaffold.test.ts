@@ -104,12 +104,12 @@ describe('createPackage kinds', () => {
   });
 
   test('an explicit uri_base is the ontology namespace, as before', async () => {
-    await createPackage('planning', 'https://acme.id.create.now/ont/planning', tmp, {
+    await createPackage('planning', 'https://example.org/ont/planning', tmp, {
       kind: 'ontology',
       skipInstall: true,
     });
     expect(read(tmp, 'planning-ont', 'src/ontologies/index.ts')).toContain(
-      `namespace: 'https://acme.id.create.now/ont/planning/',`,
+      `namespace: 'https://example.org/ont/planning/',`,
     );
   });
 
@@ -271,7 +271,7 @@ describe('createPackage kinds', () => {
       [...(console.log as jest.Mock).mock.calls, ...warn.mock.calls].map((c) => c.join(' ')).join('\n');
 
     test("comes from the app's .env and is declared in src/package.ts", async () => {
-      fs.writeFileSync(path.join(tmp, '.env'), 'LINKED_BASE_URI=https://acme.id.create.now\n');
+      fs.writeFileSync(path.join(tmp, '.env'), 'LINKED_BASE_URI=https://example.org\n');
       await createPackage('planning', undefined, tmp, {
         kind: 'both',
         location: 'packages',
@@ -280,14 +280,14 @@ describe('createPackage kinds', () => {
       const ont = path.join(tmp, 'packages', 'planning-ont');
       const assets = path.join(tmp, 'packages', 'planning-assets');
       expect(read(assets, 'src/package.ts')).toContain(
-        `linkedPackage('planning-assets', {baseUri: "https://acme.id.create.now/"})`,
+        `linkedPackage('planning-assets', {baseUri: "https://example.org/"})`,
       );
       expect(read(ont, 'src/package.ts')).toContain(
-        `linkedPackage('planning-ont', {baseUri: "https://acme.id.create.now/"})`,
+        `linkedPackage('planning-ont', {baseUri: "https://example.org/"})`,
       );
       // The ontology's terms mint {baseUri}ont/{ontologySlug}/{Term}.
       expect(read(ont, 'src/ontologies/index.ts')).toContain(
-        `namespace: 'https://acme.id.create.now/ont/planning/',`,
+        `namespace: 'https://example.org/ont/planning/',`,
       );
       for (const pkg of [ont, assets]) {
         expect([pkg, fs.readJsonSync(path.join(pkg, 'package.json')).linked.kind]).toEqual([
@@ -295,7 +295,7 @@ describe('createPackage kinds', () => {
           pkg === ont ? 'ontology' : 'assets',
         ]);
       }
-      expect(logged()).toMatch(/https:\/\/acme\.id\.create\.now\/ \(from \.env\)/);
+      expect(logged()).toMatch(/https:\/\/example\.org\/ \(from \.env\)/);
     });
 
     test('--base-uri wins over the env file', async () => {
