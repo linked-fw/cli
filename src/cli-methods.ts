@@ -1,7 +1,10 @@
 import chalk from 'chalk';
 import {makeBinsExecutable} from './utils/bin-modes.js';
 import {tscFlagsFor} from './localize/shared-install.js';
-import {checkOntologyModulesStep} from './utils/generateOntology.js';
+import {
+  checkOntologyModulesStep,
+  writePackageOntologies,
+} from './utils/generateOntology.js';
 import {exec} from 'child_process';
 import depcheck from 'depcheck';
 import {getEnvFile} from 'env-cmd/dist/get-env-vars.js';
@@ -1451,17 +1454,10 @@ export const createOntology = async (
   );
   await replaceVariablesInFiles(targetDataFile);
 
-  // The accessor modules (terms, data, register), as `linked generate-ontology` writes them, and
-  // the `linkedOntologies` entry it reads, so `linked build` checks them against the Turtle.
+  // The `linkedOntologies` entry, then the package's modules as `linked generate-ontology` writes
+  // them (this ontology's terms, the index registering every ontology of the package, the entry's
+  // import of the index), so `linked build` finds them current.
   const packageRoot = path.dirname(sourceFolder);
-  for (const [rel, content] of Object.entries(
-    ontologyScaffoldModules(hyphenName, namespace),
-  )) {
-    fs.outputFileSync(
-      path.join(sourceFolder, rel.replace(/^src\//, '')),
-      content,
-    );
-  }
   const packageJsonPath = path.join(packageRoot, 'package.json');
   const declared = fs.existsSync(packageJsonPath);
   if (declared) {
@@ -1473,6 +1469,17 @@ export const createOntology = async (
         namespace,
       ),
     );
+    await writePackageOntologies(packageRoot);
+  } else {
+    for (const [rel, content] of Object.entries(
+      ontologyScaffoldModules(hyphenName, namespace),
+    )) {
+      fs.outputFileSync(
+        path.join(sourceFolder, rel.replace(/^src\//, '')),
+        content,
+      );
+    }
+    addLineToIndex(`import './ontologies/index.js';`, 'ontologies', packageRoot, true);
   }
   let targetFile = path.join(targetFolder, hyphenName + '.ts');
   log(
@@ -1480,29 +1487,17 @@ export const createOntology = async (
       targetDataFile.replace(basePath, ''),
     )}`,
     declared
-      ? `And its accessor modules in ${chalk.magenta(
+      ? `And its terms module in ${chalk.magenta(
           targetFile.replace(basePath, ''),
         )}, declared in ${chalk.magenta(
           packageJsonPath.replace(basePath, ''),
-        )} "linkedOntologies" (regenerate them from the data with \`linked generate-ontology\`)`
-      : `And its accessor modules in ${chalk.magenta(
+        )} "linkedOntologies" and registered by src/ontologies/index.ts (regenerate them from the data with \`linked generate-ontology\`)`
+      : `And its terms module in ${chalk.magenta(
           targetFile.replace(basePath, ''),
-        )}. No package.json next to ${chalk.magenta(
+        )}, registered by src/ontologies/index.ts. No package.json next to ${chalk.magenta(
           sourceFolder.replace(basePath, ''),
-        )}, so nothing declares them in "linkedOntologies" and \`linked build\` does not check them.`,
+        )}, so nothing declares it in "linkedOntologies" and \`linked build\` does not check it.`,
   );
-
-  //if this is not a lincd app (but a lincd package instead)
-  if (!sourceFolder.includes('frontend')) {
-    //then also add an import to index
-    // Import the register sibling, not the terms module: only the sibling calls
-    // linkedOntology(). See the comment in the generated <name>.register.ts.
-    let indexPath = addLineToIndex(
-      `import './ontologies/${hyphenName}.register.js';`,
-      'ontologies',
-    );
-    log(`Added an import of this file from ${chalk.magenta(indexPath)}`);
-  }
 };
 // The shapes barrel (src/shapes/index.ts) is imported by both the frontend index and
 // the backend entry, so every shape registers on both boot paths (and materializes into

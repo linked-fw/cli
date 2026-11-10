@@ -1,0 +1,1 @@
+import './ontologies/index.js';

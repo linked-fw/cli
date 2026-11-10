@@ -63,7 +63,7 @@ describe('create-shape and friends need a src/package.ts', () => {
     fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linked: {kind: 'ontology'}});
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
-      `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
+      `export const {registerOntologies} = linkedPackage('my-app-ont');\n`,
     );
     fs.outputFileSync(path.join(app, 'src', 'index.ts'), '');
     // The index import is added relative to the working directory.
@@ -75,13 +75,10 @@ describe('create-shape and friends need a src/package.ts', () => {
     expect(read('data/planning.ttl')).toContain(
       '<https://linked.cm/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" .',
     );
-    expect(read('ontologies/planning.data.ts')).toContain(
-      `export const dataFiles = ['../data/planning.ttl'];`,
+    expect(read('ontologies/index.ts')).toContain(
+      `    name: 'planning',\n    namespace: 'https://linked.cm/ont/planning/',\n    terms: planning,\n    data: data(['../data/planning.ttl']),\n    suggestedPrefix: 'planning',`,
     );
-    expect(read('ontologies/planning.register.ts')).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, dataFiles)`,
-    );
-    expect(read('index.ts')).toContain('./ontologies/planning.register.js');
+    expect(read('index.ts')).toBe(`import './ontologies/index.js';\n`);
     expect(fs.readJsonSync(path.join(app, 'package.json')).linkedOntologies).toEqual({
       planning: {namespace: 'https://linked.cm/ont/planning/'},
     });
@@ -90,8 +87,7 @@ describe('create-shape and friends need a src/package.ts', () => {
     for (const rel of [
       'data/planning.ttl',
       'ontologies/planning.ts',
-      'ontologies/planning.data.ts',
-      'ontologies/planning.register.ts',
+      'ontologies/index.ts',
     ]) {
       expect([rel, read(rel)]).not.toEqual([rel, expect.stringContaining('${')]);
     }
@@ -101,7 +97,7 @@ describe('create-shape and friends need a src/package.ts', () => {
     fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linked: {kind: 'ontology'}});
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
-      `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
+      `export const {registerOntologies} = linkedPackage('my-app-ont');\n`,
     );
     jest.spyOn(process, 'cwd').mockReturnValue(app);
     await expect(createOntology('3d', undefined, app)).rejects.toThrow(/start with a lowercase letter/);

@@ -59,17 +59,18 @@ export type PackageFiles = Record<string, string>;
 const FILLED_FILES = ['src/index.ts', 'package.json', 'src/package.ts'];
 
 /**
- * The ontology kind's example files, renamed to the ontology slug. Its accessor modules are not
+ * The ontology kind's example files, renamed to the ontology slug. Its modules are not
  * templates: they are generated ({@link ontologyScaffoldModules}).
  */
 const EXAMPLE_ONTOLOGY_FILES = ['src/data/example-ontology.ttl'];
 const FILLED_ONTOLOGY_FILES = EXAMPLE_ONTOLOGY_FILES;
 
 /**
- * The accessor modules of a new ontology with no terms yet (`src/ontologies/<name>.ts`,
- * `.data.ts`, `.register.ts`), exactly as `linked generate-ontology` writes them for its
- * scaffolded Turtle (`src/data/<name>.ttl`, which declares only the ontology, with its name as
- * its suggested prefix), so the first `linked build` finds them current.
+ * The ontology modules of a new package whose one ontology has no terms yet
+ * (`src/ontologies/<name>.ts` and the index registering it, `src/ontologies/index.ts`), exactly
+ * as `linked generate-ontology` writes them for its scaffolded Turtle (`src/data/<name>.ttl`,
+ * which declares only the ontology, with its name as its suggested prefix), so the first
+ * `linked build` finds them current.
  */
 export function ontologyScaffoldModules(
   name: string,

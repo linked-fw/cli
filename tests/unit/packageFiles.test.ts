@@ -128,8 +128,7 @@ describe('buildPackageFiles', () => {
       'package.json',
       'src/data/planning.ttl',
       'src/index.ts',
-      'src/ontologies/planning.data.ts',
-      'src/ontologies/planning.register.ts',
+      'src/ontologies/index.ts',
       'src/ontologies/planning.ts',
       'src/package.ts',
       'tsconfig-esm.json',
@@ -138,12 +137,12 @@ describe('buildPackageFiles', () => {
     expect(out['src/package.ts']).toContain(
       `linkedPackage('planning-ont', {baseUri: "https://acme.example/"})`,
     );
-    expect(out['src/ontologies/planning.data.ts']).toContain(
-      `createNameSpace('https://acme.example/ont/planning/')`,
+    expect(out['src/package.ts']).toMatch(/^  registerOntologies,$/m);
+    expect(out['src/ontologies/index.ts']).toContain(
+      `    name: 'planning',\n    namespace: 'https://acme.example/ont/planning/',\n    terms: planning,\n    data: data(['../data/planning.ttl']),\n    suggestedPrefix: 'planning',`,
     );
-    expect(out['src/ontologies/planning.register.ts']).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, dataFiles)`,
-    );
+    expect(out['src/ontologies/planning.ts']).toMatch(/^export \{\};$/m);
+    expect(out['src/index.ts']).toMatch(/^import '\.\/ontologies\/index\.js';$/m);
     expect(JSON.parse(out['package.json']).linkedOntologies).toEqual({
       planning: {namespace: 'https://acme.example/ont/planning/'},
     });

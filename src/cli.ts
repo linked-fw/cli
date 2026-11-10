@@ -316,7 +316,7 @@ program
 program
   .command('generate-ontology')
   .description(
-    `Writes src/ontologies/<module>.ts, <module>.data.ts and <module>.register.ts (the module defaults to the name) for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/ (its suggested prefix from the vann data of its owl:Ontology). An entry with "generated": false has its modules written by hand: only its vann data is checked. Run it from the package folder`,
+    `Writes src/ontologies/<module>.ts (the terms; the module defaults to the name) for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/, and src/ontologies/index.ts, which registers every ontology of the package with its suggested prefix (the vann data of its owl:Ontology); the package entry imports it. An entry with "generated": false has its module written by hand: the index registers it and its vann data is checked. Removes the .data.ts and .register.ts files it generated before. Inside an app, also adds the prefixes of new ontologies to its linked.app.json. Run it from the package folder`,
   )
   .option(
     '--check',
@@ -330,31 +330,32 @@ program
         if (parent === dir) throw new Error('No package.json found here or above.');
         dir = parent;
       }
-      const generations = await generatePackageOntologies(dir);
-      if (!generations.length) {
+      const generated = await generatePackageOntologies(dir);
+      if (!generated.ontologies.length) {
         throw new Error(
           `package.json has no "${ONTOLOGIES_KEY}". Declare each ontology by its name as {"<name>": {"namespace": "<IRI>", "data": ["<file>.ttl"]}}.`,
         );
       }
-      for (const g of generations) {
+      for (const g of generated.ontologies) {
         console.log(
           `${g.config.name}: ${g.termCount} terms from ${g.config.data.map((f) => 'src/data/' + f).join(', ')}` +
-            (g.config.generated ? '' : ' (modules written by hand: vann data checked, nothing generated)') +
+            (g.config.generated ? '' : ' (module written by hand: registered by the index, vann data checked)') +
             (g.skipped.length ? ` (${g.skipped.length} subjects under the namespace are not terms: ${g.skipped.slice(0, 3).join(', ')}${g.skipped.length > 3 ? ', …' : ''})` : ''),
         );
       }
       if (options.check) {
-        const stale = await staleOntologyModules(dir, generations);
+        const stale = await staleOntologyModules(dir, generated);
         if (stale.length) {
           throw new Error(
-            `Out of date: ${stale.join(', ')}. Run \`linked generate-ontology\`, or declare an ontology whose modules are written by hand with "generated": false.`,
+            `Out of date: ${stale.join(', ')}. Run \`linked generate-ontology\`, or declare an ontology whose module is written by hand with "generated": false.`,
           );
         }
         console.log('Every ontology module is current.');
         return;
       }
-      const changed = await writePackageOntologies(dir, generations);
+      const changed = await writePackageOntologies(dir, generated);
       console.log(changed.length ? `Wrote ${changed.join(', ')}` : 'Every ontology module is current.');
+      //APP_PREFIXES
     }),
   );
 

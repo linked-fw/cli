@@ -6,9 +6,8 @@
 // have and has repeatedly not had:
 //
 //   - it builds, with `linked build`, and a type error fails that build;
-//   - the ontology REGISTER sibling is emitted, i.e. something actually calls
-//     linkedOntology() (report 058: a self-registering ontology is elided by Rollup as a
-//     circular import and the consuming app dies at boot with `_this is not defined`);
+//   - the ontology index is emitted and the entry imports it, i.e. something actually calls
+//     registerOntologies();
 //   - the tsconfig compiles the whole src folder, not just the entry graph, so a module
 //     nothing imports still emits;
 //   - but tests under src do NOT emit;
@@ -127,24 +126,15 @@ describeFull('create-package (full)', () => {
     TEN_MINUTES,
   );
 
-  test('the ontology register sibling is emitted and imported', () => {
-    const register = path.join(
-      pkg,
-      'lib',
-      'esm',
-      'ontologies',
-      `${ONT}.register.js`,
-    );
-    expect([register, fs.existsSync(register)]).toEqual([register, true]);
-    // ...and the entry imports it, so linkedOntology() actually runs on boot.
+  test('the ontology index is emitted and imported', () => {
+    const index = path.join(pkg, 'lib', 'esm', 'ontologies', 'index.js');
+    expect([index, fs.existsSync(index)]).toEqual([index, true]);
+    // ...and the entry imports it, so registerOntologies() actually runs on boot.
     expect(fs.readFileSync(path.join(pkg, 'lib', 'esm', 'index.js'), 'utf8')).toContain(
-      `./ontologies/${ONT}.register.js`,
+      './ontologies/index.js',
     );
-    expect(fs.readFileSync(register, 'utf8')).toContain('linkedOntology');
-    // The template's example-ontology.register.ts must have been renamed away.
-    expect(
-      fs.existsSync(path.join(pkg, 'src', 'ontologies', 'example-ontology.register.ts')),
-    ).toBe(false);
+    expect(fs.readFileSync(index, 'utf8')).toContain('registerOntologies');
+    expect(fs.readFileSync(index, 'utf8')).toContain(`./${ONT}.js`);
   });
 
   test('a module nothing imports still emits (whole-folder compile)', () => {

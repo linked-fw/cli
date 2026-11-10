@@ -68,8 +68,7 @@ describe('createPackage kinds', () => {
       'package.json',
       'src/data/planning.ttl',
       'src/index.ts',
-      'src/ontologies/planning.data.ts',
-      'src/ontologies/planning.register.ts',
+      'src/ontologies/index.ts',
       'src/ontologies/planning.ts',
       'src/package.ts',
       'tsconfig-esm.json',
@@ -83,19 +82,13 @@ describe('createPackage kinds', () => {
 
     // The package is `planning-ont`; the ontology slug is `planning`.
     expect(read(pkg, 'src/package.ts')).toContain(`linkedPackage('planning-ont')`);
-    expect(read(pkg, 'src/ontologies/planning.data.ts')).toContain(
-      `createNameSpace('https://linked.cm/ont/planning/')`,
-    );
-    expect(read(pkg, 'src/ontologies/planning.register.ts')).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, dataFiles)`,
-    );
-    expect(read(pkg, 'src/ontologies/planning.data.ts')).toContain(
-      `export const dataFiles = ['../data/planning.ttl'];`,
+    expect(read(pkg, 'src/ontologies/index.ts')).toContain(
+      `    name: 'planning',\n    namespace: 'https://linked.cm/ont/planning/',\n    terms: planning,\n    data: data(['../data/planning.ttl']),\n    suggestedPrefix: 'planning',`,
     );
     expect(manifest.linkedOntologies).toEqual({
       planning: {namespace: 'https://linked.cm/ont/planning/'},
     });
-    expect(read(pkg, 'src/index.ts')).toContain(`./ontologies/planning.register.js`);
+    expect(read(pkg, 'src/index.ts')).toContain(`import './ontologies/index.js';`);
     expect(read(pkg, 'src/index.ts')).not.toContain(`import './shapes`);
     expect(read(pkg, 'src/data/planning.ttl')).toContain(
       `@prefix planning: <https://linked.cm/ont/planning/> .`,
@@ -115,8 +108,8 @@ describe('createPackage kinds', () => {
       kind: 'ontology',
       skipInstall: true,
     });
-    expect(read(tmp, 'planning-ont', 'src/ontologies/planning.data.ts')).toContain(
-      `createNameSpace('https://acme.id.create.now/ont/planning/')`,
+    expect(read(tmp, 'planning-ont', 'src/ontologies/index.ts')).toContain(
+      `namespace: 'https://acme.id.create.now/ont/planning/',`,
     );
   });
 
@@ -231,8 +224,8 @@ describe('createPackage kinds', () => {
     expect(exists(tmp, 'planning-ont-ont')).toBe(false);
     expect(exists(tmp, 'planning-assets-assets')).toBe(false);
     expect(JSON.parse(read(tmp, 'planning-ont', 'package.json')).name).toBe('planning-ont');
-    expect(read(tmp, 'planning-ont', 'src/ontologies/planning.data.ts')).toContain(
-      `createNameSpace('https://linked.cm/ont/planning/')`,
+    expect(read(tmp, 'planning-ont', 'src/ontologies/index.ts')).toContain(
+      `namespace: 'https://linked.cm/ont/planning/',`,
     );
     expect(JSON.parse(read(tmp, 'planning-assets', 'package.json')).name).toBe(
       'planning-assets',
@@ -293,8 +286,8 @@ describe('createPackage kinds', () => {
         `linkedPackage('planning-ont', {baseUri: "https://acme.id.create.now/"})`,
       );
       // The ontology's terms mint {baseUri}ont/{ontologySlug}/{Term}.
-      expect(read(ont, 'src/ontologies/planning.data.ts')).toContain(
-        `createNameSpace('https://acme.id.create.now/ont/planning/')`,
+      expect(read(ont, 'src/ontologies/index.ts')).toContain(
+        `namespace: 'https://acme.id.create.now/ont/planning/',`,
       );
       for (const pkg of [ont, assets]) {
         expect([pkg, fs.readJsonSync(path.join(pkg, 'package.json')).linked.kind]).toEqual([
