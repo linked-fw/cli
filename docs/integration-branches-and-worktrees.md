@@ -426,10 +426,10 @@ outside the main checkout. Without `--worktree`, `branch start` is unchanged.
 A worktree or master started with `--dataset <name>` runs on a dataset of its own, which starts
 empty. The cli does not know the app's store, so the app supplies the copy as an npm script in its
 root `package.json` that takes the target dataset as its one argument: `clone-dataset` by
-default, or the script `datasetCloneScript` names in the app's `linked.config.js`:
+default, or the script `datasetCloneScript` names in the app's `linked.app.json`:
 
-```js
-export default defineConfig({datasetCloneScript: 'data:clone'});
+```json
+{"schemaVersion": 1, "datasetCloneScript": "data:clone"}
 ```
 
 `worktree add --dataset` and `branch start --worktree --dataset` then print the command to run

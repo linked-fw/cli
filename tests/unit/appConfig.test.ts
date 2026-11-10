@@ -14,8 +14,11 @@ import {
   newAppConfigText,
   parseAppConfig,
   prefixCandidate,
+  linkedServerConfig,
   readAppConfig,
+  readAppSettings,
   refreshAppPrefixes,
+  serializeAppConfig,
 } from '../../src/utils/appConfig.js';
 import {
   APP_PREFIXES_MODULE,
@@ -52,8 +55,8 @@ describe('the reader', () => {
       'linked.app.json has "schemaVersion": 2, which this @_linked/cli does not know (it reads version 1). Update @_linked/cli.',
     );
     expect(parse({prefixes: {}})).toThrow(/has no "schemaVersion"/);
-    expect(parse({schemaVersion: 1, cssMode: 'tailwind'})).toThrow(
-      /has the key "cssMode", which schema version 1 does not have/,
+    expect(parse({schemaVersion: 1, webpack: {}})).toThrow(
+      /has the key "webpack", which schema version 1 does not have/,
     );
     for (const prefix of ['server-utils', '1x', '_x', 'a.b', '']) {
       expect(
@@ -80,9 +83,29 @@ describe('the reader', () => {
     expect(schema.additionalProperties).toBe(false);
     expect(Object.keys(schema.properties).sort()).toEqual([
       '$schema',
+      'cssMode',
+      'datasetCloneScript',
       'prefixes',
+      'publish',
       'schemaVersion',
+      'server',
+      'syncShapesOnBoot',
     ]);
+    expect(Object.keys(schema.properties.server.properties).sort()).toEqual([
+      'apiOnly',
+      'cachePaths',
+      'cacheTimeout',
+      'rawQueries',
+      'rpcExposure',
+    ]);
+    expect(schema.properties.server.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties.publish.properties).sort()).toEqual([
+      'releasePrefix',
+      'staticAssets',
+    ]);
+    expect(schema.properties.cssMode.enum).toEqual(['tailwind', 'postcss']);
+    expect(schema.properties.server.properties.rpcExposure.enum).toEqual(['warn', 'enforce']);
+    expect(schema.properties.server.properties.rawQueries.enum).toEqual(['off', 'session']);
     expect(schema.properties.prefixes.propertyNames.pattern).toBe(
       '^[A-Za-z][A-Za-z0-9_]*$',
     );
@@ -91,6 +114,103 @@ describe('the reader', () => {
       schemaVersion: 1,
       prefixes: {},
     });
+  });
+});
+
+describe('the settings', () => {
+  const parse = (json: unknown) => () => parseAppConfig(JSON.stringify(json));
+  const SETTINGS = {
+    cssMode: 'tailwind',
+    syncShapesOnBoot: false,
+    datasetCloneScript: 'data:clone',
+    publish: {staticAssets: ['fonts/**'], releasePrefix: 'rel'},
+    server: {
+      rpcExposure: 'enforce',
+      rawQueries: 'off',
+      apiOnly: true,
+      cachePaths: ['/'],
+      cacheTimeout: 1000,
+    },
+  };
+  let app: string;
+  beforeEach(() => {
+    app = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-app-settings-'));
+  });
+  afterEach(() => fs.removeSync(app));
+
+  test('are read, checked, and written back in the schema order', () => {
+    const config = parseAppConfig(
+      JSON.stringify({server: SETTINGS.server, schemaVersion: 1, ...SETTINGS}),
+    );
+    expect(config).toEqual({schemaVersion: 1, prefixes: {}, ...SETTINGS});
+    expect(serializeAppConfig(config)).toBe(
+      JSON.stringify(
+        {$schema: APP_SCHEMA_URL, schemaVersion: 1, prefixes: {}, ...SETTINGS},
+        null,
+        2,
+      ) + '\n',
+    );
+  });
+
+  test('a wrong value or an unknown nested key is refused, naming it', () => {
+    expect(parse({schemaVersion: 1, cssMode: 'sass'})).toThrow(
+      'linked.app.json: "cssMode" must be "tailwind" or "postcss", not "sass".',
+    );
+    expect(parse({schemaVersion: 1, syncShapesOnBoot: 'no'})).toThrow(
+      '"syncShapesOnBoot" must be a boolean',
+    );
+    expect(parse({schemaVersion: 1, server: {rpcExposure: 'on'}})).toThrow(
+      '"server.rpcExposure" must be "warn" or "enforce", not "on".',
+    );
+    expect(parse({schemaVersion: 1, server: {rawQueries: true}})).toThrow(
+      '"server.rawQueries" must be "off" or "session"',
+    );
+    expect(parse({schemaVersion: 1, server: {multiCore: true}})).toThrow(
+      'linked.app.json "server" has the key "multiCore", which schema version 1 does not have',
+    );
+    expect(parse({schemaVersion: 1, server: {cachePaths: '/'}})).toThrow(
+      '"server.cachePaths" must be a list of strings.',
+    );
+    expect(parse({schemaVersion: 1, server: {cacheTimeout: -1}})).toThrow(
+      '"server.cacheTimeout" must be a number of milliseconds',
+    );
+    expect(parse({schemaVersion: 1, publish: {target: 'x'}})).toThrow(
+      '"publish" has the key "target"',
+    );
+    expect(parse({schemaVersion: 1, server: []})).toThrow('"server" must be an object.');
+  });
+
+  test('a leftover linked.config.js or lincd.config.js is refused, saying how to move it', () => {
+    fs.writeJsonSync(path.join(app, 'linked.app.json'), {schemaVersion: 1});
+    expect(readAppSettings(app)).toEqual({schemaVersion: 1, prefixes: {}});
+    for (const file of ['linked.config.js', 'lincd.config.js']) {
+      fs.writeFileSync(path.join(app, file), 'export default {};\n');
+      expect(() => readAppSettings(app)).toThrow(
+        `${path.join(app, file)} is no longer read: an app's settings live in linked.app.json. Move them there and delete ${file}`,
+      );
+      expect(() => linkedServerConfig(app, {})).toThrow(/is no longer read/);
+      fs.removeSync(path.join(app, file));
+    }
+  });
+
+  test("the server's configuration: the settings it reads; LINKED_RPC_EXPOSURE wins", () => {
+    expect(linkedServerConfig(app, {})).toEqual({server: {}});
+    fs.writeJsonSync(path.join(app, 'linked.app.json'), {schemaVersion: 1, ...SETTINGS});
+    expect(linkedServerConfig(app, {})).toEqual({
+      cssMode: 'tailwind',
+      syncShapesOnBoot: false,
+      server: SETTINGS.server,
+    });
+    expect(linkedServerConfig(app, {LINKED_RPC_EXPOSURE: 'warn'}).server).toEqual({
+      ...SETTINGS.server,
+      rpcExposure: 'warn',
+    });
+    expect(linkedServerConfig(app, {LINKED_RPC_EXPOSURE: ''}).server.rpcExposure).toBe('enforce');
+    expect(() => linkedServerConfig(app, {LINKED_RPC_EXPOSURE: 'off'})).toThrow(
+      'LINKED_RPC_EXPOSURE must be "warn" or "enforce", not "off".',
+    );
+    // A new object each time: the caller adds its load hooks to it.
+    expect(linkedServerConfig(app, {}).server).not.toBe(linkedServerConfig(app, {}).server);
   });
 });
 
@@ -290,6 +410,13 @@ describe('an app', () => {
     expect(fs.readFileSync(path.join(app, 'linked.app.json'), 'utf8')).toBe(
       before,
     );
+  });
+
+  test('linked prefixes keeps the settings', async () => {
+    const settings = {cssMode: 'tailwind', server: {rawQueries: 'off'}};
+    fs.writeJsonSync(path.join(app, 'linked.app.json'), {schemaVersion: 1, ...settings});
+    expect((await refreshAppPrefixes(app)).added.length).toBe(3);
+    expect(readAppConfig(app)).toMatchObject(settings);
   });
 
   test('refuses a package, an unknown version, and missing vann data', async () => {

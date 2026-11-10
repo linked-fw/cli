@@ -4,7 +4,9 @@
   "title": "linked.app.json",
   "description": "A linked app's declarative settings, at the app root. Packages never have one.",
   "type": "object",
-  "required": ["schemaVersion"],
+  "required": [
+    "schemaVersion"
+  ],
   "additionalProperties": false,
   "properties": {
     "$schema": {
@@ -24,6 +26,81 @@
       "additionalProperties": {
         "type": "string",
         "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:\\S+$"
+      }
+    },
+    "cssMode": {
+      "description": "CSS processing the server applies for server-side rendering in development: Tailwind CSS v4, or PostCSS (the default).",
+      "enum": [
+        "tailwind",
+        "postcss"
+      ]
+    },
+    "syncShapesOnBoot": {
+      "description": "Materialize the app's registered shapes into its data store as SHACL on boot. false for a server whose default dataset routes data per context, or an app that manages its own shape and dataset lifecycle.",
+      "type": "boolean",
+      "default": true
+    },
+    "datasetCloneScript": {
+      "description": "The npm script that copies the app's data into a dataset named by its one argument (npm run <script> -- <dataset>); linked worktree add --dataset prints it.",
+      "type": "string",
+      "default": "clone-dataset"
+    },
+    "publish": {
+      "description": "What linked build-app ships besides the Vite bundle, and where releases go.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "staticAssets": {
+          "description": "Globs of files under public/ to ship besides the bundle.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "releasePrefix": {
+          "description": "The base key every release is nested under.",
+          "type": "string",
+          "default": "releases"
+        }
+      }
+    },
+    "server": {
+      "description": "The server's settings.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rpcExposure": {
+          "description": "enforce: only provider methods declared callable are reachable over /call, every other one answers 501. warn (the default) runs them with a warning. LINKED_RPC_EXPOSURE, when set, wins over this.",
+          "enum": [
+            "warn",
+            "enforce"
+          ]
+        },
+        "rawQueries": {
+          "description": "Raw SPARQL on /api/select-raw: off for everyone, or session (the default): a signed-in session.",
+          "enum": [
+            "off",
+            "session"
+          ]
+        },
+        "apiOnly": {
+          "description": "Serve only the backend API: no server-side page rendering, page requests get a 404. linked start --api-only sets this.",
+          "type": "boolean",
+          "default": false
+        },
+        "cachePaths": {
+          "description": "Paths whose server-side rendered pages are cached in memory.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cacheTimeout": {
+          "description": "Milliseconds a cached page is served before it is rendered again.",
+          "type": "number",
+          "minimum": 0,
+          "default": 300000
+        }
       }
     }
   }

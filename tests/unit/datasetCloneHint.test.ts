@@ -1,7 +1,7 @@
 /**
  * The clone hint `worktree add --dataset` and `branch start --worktree
- * --dataset` print: the app's `clone-dataset` npm script, or the one its linked
- * config names with `datasetCloneScript`; a warning when the script is missing.
+ * --dataset` print: the app's `clone-dataset` npm script, or the one its
+ * `linked.app.json` names with `datasetCloneScript`; a warning when the script is missing.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -46,7 +46,7 @@ describe('datasetCloneHint', () => {
   test('override naming a missing script: warns, even when clone-dataset exists', () => {
     writePkg({'clone-dataset': 'x'});
     const lines = datasetCloneHint(root, 'wt-a1', 'data:clone');
-    expect(lines[0]).toMatch(/^Warning: datasetCloneScript in the linked config names "data:clone", but .*package\.json has no such script, so wt-a1 starts empty/);
+    expect(lines[0]).toMatch(/^Warning: datasetCloneScript in linked\.app\.json names "data:clone", but .*package\.json has no such script, so wt-a1 starts empty/);
     expect(lines.join('\n')).not.toMatch(/npm run clone-dataset/);
     expect(lines[1]).toContain('npm run data:clone -- wt-a1');
   });
@@ -56,7 +56,7 @@ describe('datasetCloneHint', () => {
     const lines = datasetCloneHint(root, 'wt-a1');
     expect(lines[0]).toBe('Warning: the app has no clone-dataset script, so wt-a1 starts empty unless it is cloned by hand.');
     expect(lines[1]).toContain('add a "clone-dataset" script');
-    expect(lines[1]).toContain('datasetCloneScript in the linked config');
+    expect(lines[1]).toContain('datasetCloneScript in linked.app.json');
   });
 
   test('no package.json: warns', () => {
@@ -65,28 +65,33 @@ describe('datasetCloneHint', () => {
 });
 
 describe('readDatasetCloneScript', () => {
-  test('reads datasetCloneScript from linked.config.js', async () => {
-    fs.writeFileSync(path.join(root, 'linked.config.js'), "export default {datasetCloneScript: 'data:clone'};");
-    expect(await readDatasetCloneScript(root)).toBe('data:clone');
+  const writeApp = (json: Record<string, unknown>) =>
+    fs.writeFileSync(path.join(root, 'linked.app.json'), JSON.stringify({schemaVersion: 1, ...json}));
+
+  test('reads datasetCloneScript from linked.app.json', () => {
+    writeApp({datasetCloneScript: 'data:clone'});
+    expect(readDatasetCloneScript(root)).toBe('data:clone');
   });
 
-  test('undefined without a config, or when the config does not set it', async () => {
-    expect(await readDatasetCloneScript(root)).toBeUndefined();
-    fs.writeFileSync(path.join(root, 'linked.config.js'), 'export default {cssMode: "tailwind"};');
-    expect(await readDatasetCloneScript(root)).toBeUndefined();
+  test('undefined without a linked.app.json, or when it does not set it', () => {
+    expect(readDatasetCloneScript(root)).toBeUndefined();
+    writeApp({cssMode: 'tailwind'});
+    expect(readDatasetCloneScript(root)).toBeUndefined();
   });
 
-  test('a config that fails to load falls back to the default script', async () => {
+  test('an unreadable linked.app.json, or a leftover linked.config.js, falls back to the default script', async () => {
     writePkg({'clone-dataset': 'x'});
-    fs.writeFileSync(path.join(root, 'linked.config.js'), "throw new Error('boom');");
-    expect(await datasetCloneMessages(root, 'wt-a1')).toEqual([
-      `Clone the data into wt-a1 first (from ${root}): npm run clone-dataset -- wt-a1`,
-    ]);
+    fs.writeFileSync(path.join(root, 'linked.app.json'), '{');
+    const expected = [`Clone the data into wt-a1 first (from ${root}): npm run clone-dataset -- wt-a1`];
+    expect(await datasetCloneMessages(root, 'wt-a1')).toEqual(expected);
+    writeApp({datasetCloneScript: 'data:clone'});
+    fs.writeFileSync(path.join(root, 'linked.config.js'), "export default {datasetCloneScript: 'data:clone'};");
+    expect(await datasetCloneMessages(root, 'wt-a1')).toEqual(expected);
   });
 
   test('datasetCloneMessages uses the configured script', async () => {
     writePkg({'data:clone': 'y'});
-    fs.writeFileSync(path.join(root, 'linked.config.js'), "export default {datasetCloneScript: 'data:clone'};");
+    writeApp({datasetCloneScript: 'data:clone'});
     expect(await datasetCloneMessages(root, 'wt-a1')).toEqual([
       `Clone the data into wt-a1 first (from ${root}): npm run data:clone -- wt-a1`,
     ]);

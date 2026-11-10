@@ -50,7 +50,6 @@ import {
   type Master,
 } from '../integration/masters.js';
 import {withMachineLockAsync} from '../integration/repo-lock.js';
-import {importFile} from '../utils/platform.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {sharedInstall} from '../localize/shared-install.js';
@@ -62,7 +61,8 @@ import {
   selectCheckouts,
   worktreesOf,
 } from './branch.js';
-import {DEFAULT_APP_PORT, resolveLinkedConfigPath} from './start.js';
+import {DEFAULT_APP_PORT} from './start.js';
+import {readAppSettings} from '../utils/appConfig.js';
 import {
   farmOverlays,
   linkNodeModules,
@@ -410,7 +410,7 @@ export function appPort(root: string): number {
 
 /**
  * The npm script that clones the app's data into a dataset, when the app's
- * linked config names none with `datasetCloneScript`. It takes the target
+ * `linked.app.json` names none with `datasetCloneScript`. It takes the target
  * dataset as its one argument.
  */
 export const DEFAULT_DATASET_CLONE_SCRIPT = 'clone-dataset';
@@ -418,7 +418,7 @@ export const DEFAULT_DATASET_CLONE_SCRIPT = 'clone-dataset';
 /**
  * The lines to print for cloning the data of the app at `root` into `dataset`
  * (a worktree on a dataset of its own starts on an empty one). `configured` is
- * `datasetCloneScript` from the app's linked config. The command when the
+ * `datasetCloneScript` from the app's `linked.app.json`. The command when the
  * app's `package.json` has the script, else a warning that the dataset starts
  * empty and how to add the script.
  */
@@ -432,36 +432,32 @@ export function datasetCloneHint(root: string, dataset: string, configured?: str
   }
   if (configured) {
     return [
-      `Warning: datasetCloneScript in the linked config names "${configured}", but ${pkg} has no such script, so ${dataset} starts empty unless it is cloned by hand.`,
+      `Warning: datasetCloneScript in linked.app.json names "${configured}", but ${pkg} has no such script, so ${dataset} starts empty unless it is cloned by hand.`,
       `  Add a "${configured}" script that copies the app's data into the dataset its argument names (npm run ${configured} -- ${ds}).`,
     ];
   }
   return [
     `Warning: the app has no ${DEFAULT_DATASET_CLONE_SCRIPT} script, so ${dataset} starts empty unless it is cloned by hand.`,
-    `  To have one: add a "${DEFAULT_DATASET_CLONE_SCRIPT}" script to ${pkg} that copies the app's data into the dataset its argument names (npm run ${DEFAULT_DATASET_CLONE_SCRIPT} -- ${ds}), or name another script with datasetCloneScript in the linked config.`,
+    `  To have one: add a "${DEFAULT_DATASET_CLONE_SCRIPT}" script to ${pkg} that copies the app's data into the dataset its argument names (npm run ${DEFAULT_DATASET_CLONE_SCRIPT} -- ${ds}), or name another script with datasetCloneScript in linked.app.json.`,
   ];
 }
 
 /**
- * `datasetCloneScript` from the linked config of the app at `root`; undefined
- * when there is no config, it does not set the key, or it fails to load (the
- * hint then looks for the default script).
+ * `datasetCloneScript` from the `linked.app.json` of the app at `root`; undefined
+ * when it has none, does not set the key, or cannot be read (the hint then looks
+ * for the default script).
  */
-export async function readDatasetCloneScript(root: string): Promise<string | undefined> {
-  const file = resolveLinkedConfigPath(root);
-  if (!fs.existsSync(file)) return undefined;
+export function readDatasetCloneScript(root: string): string | undefined {
   try {
-    const mod = await importFile(file);
-    const value: unknown = (mod?.default ?? mod)?.datasetCloneScript;
-    return typeof value === 'string' && value ? value : undefined;
+    return readAppSettings(root)?.datasetCloneScript || undefined;
   } catch {
     return undefined;
   }
 }
 
-/** `datasetCloneHint` with the script the app's linked config names. */
+/** `datasetCloneHint` with the script the app's `linked.app.json` names. */
 export async function datasetCloneMessages(root: string, dataset: string): Promise<string[]> {
-  return datasetCloneHint(root, dataset, await readDatasetCloneScript(root));
+  return datasetCloneHint(root, dataset, readDatasetCloneScript(root));
 }
 
 /** `cd <dir> && <env> npm run start:local` (or `npm start` without that script). */

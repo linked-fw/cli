@@ -7,6 +7,7 @@ import {
 } from './utils/generateOntology.js';
 import {
   APP_CONFIG_FILE,
+  linkedServerConfig,
   loadAppPrefixes,
   newAppConfigText,
   refreshAppPrefixes,
@@ -2096,23 +2097,11 @@ export const runMethod = async (
   await ensureEnvironmentLoaded();
 
   if (options.spawn) {
-    let linkedConfig = (
-      await importFile(path.join(process.cwd(), 'linked.config.js'))
-    ).default;
-
-    // Set default loadAppComponent if not provided
-    if (!linkedConfig.server) {
-      linkedConfig.server = {};
-    }
-    if (!linkedConfig.server.loadAppComponent) {
-      linkedConfig.server.loadAppComponent = async () =>
-        (await importFile(path.join(process.cwd(), 'src', 'App'))).default;
-    }
-    // Set default loadRoutes if not provided
-    if (!linkedConfig.server.loadRoutes) {
-      linkedConfig.server.loadRoutes = async () =>
-        await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
-    }
+    const linkedConfig = linkedServerConfig(process.cwd());
+    linkedConfig.server.loadAppComponent = async () =>
+      (await importFile(path.join(process.cwd(), 'src', 'App'))).default;
+    linkedConfig.server.loadRoutes = async () =>
+      await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
 
     const ServerClass = await loadServerClass();
     await loadBackendStorageConfig();
@@ -2209,8 +2198,9 @@ export const startServer = async (
 ) => {
   await ensureEnvironmentLoaded();
 
-  let linkedConfig = (await importFile(path.join(process.cwd(), 'linked.config.js')))
-    .default;
+  // LinkedServer's options from the app's settings (linked.app.json); refuses a leftover
+  // linked.config.js.
+  const linkedConfig = linkedServerConfig(process.cwd());
 
   // function scssLoadcall(source, filename) {
   //   return 'console.log("SCSS CALL: ' + filename + '");\n' + source;
@@ -2234,34 +2224,18 @@ export const startServer = async (
   }
   await loadBackendStorageConfig();
 
-  // Set default loadAppComponent if not provided
-  if (!linkedConfig.server) {
-    linkedConfig.server = {};
-  }
-  if (!linkedConfig.server.loadAppComponent) {
-    let appPromise;
-    if (process.env.NODE_ENV !== 'development') {
-      appPromise = (await importFile(path.join(process.cwd(), 'lib', 'App.js')))
-        .default;
-    } else {
-      appPromise = (await importFile(path.join(process.cwd(), 'src', 'App.tsx')))
-        .default;
-    }
-    linkedConfig.server.loadAppComponent = async () => {
-      return appPromise;
-    };
-  }
-
-  // Set default loadRoutes if not provided
-  if (!linkedConfig.server.loadRoutes) {
-    linkedConfig.server.loadRoutes = async () => {
-      if (process.env.NODE_ENV !== 'development') {
-        return await importFile(path.join(process.cwd(), 'lib', 'routes.js'));
-      } else {
-        return await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
-      }
-    };
-  }
+  // The app component and routes: the compiled ones (lib/), or src/ in development.
+  const compiled = process.env.NODE_ENV !== 'development';
+  const appPromise = (
+    await importFile(
+      path.join(process.cwd(), ...(compiled ? ['lib', 'App.js'] : ['src', 'App.tsx'])),
+    )
+  ).default;
+  linkedConfig.server.loadAppComponent = async () => appPromise;
+  linkedConfig.server.loadRoutes = async () =>
+    await importFile(
+      path.join(process.cwd(), ...(compiled ? ['lib', 'routes.js'] : ['src', 'routes.tsx'])),
+    );
 
   let server = new ServerClass(linkedConfig);
   //Important to use slice, because when using clusers, child processes need to be able to read the same arguments

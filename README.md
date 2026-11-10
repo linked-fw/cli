@@ -277,9 +277,34 @@ An app's declarative settings, JSON, at the app root (apps only; a package never
 {
   "$schema": "https://linked.cm/schema/app/1.json",
   "schemaVersion": 1,
-  "prefixes": {"schema": "http://schema.org/", "rdfs": "http://www.w3.org/2000/01/rdf-schema#"}
+  "prefixes": {"schema": "http://schema.org/", "rdfs": "http://www.w3.org/2000/01/rdf-schema#"},
+  "cssMode": "tailwind",
+  "syncShapesOnBoot": true,
+  "datasetCloneScript": "clone-dataset",
+  "publish": {"staticAssets": ["fonts/**"], "releasePrefix": "releases"},
+  "server": {"rpcExposure": "enforce", "rawQueries": "off", "apiOnly": false, "cachePaths": ["/"], "cacheTimeout": 300000}
 }
 ```
+
+Every key but `schemaVersion` is optional:
+
+| Key | Meaning | Default |
+|---|---|---|
+| `prefixes` | the app's prefix map (below) | `{}` |
+| `cssMode` | CSS for server-side rendering in development: `tailwind` (Tailwind CSS v4) or `postcss` | `postcss` |
+| `syncShapesOnBoot` | write the app's registered shapes into its store as SHACL on boot; `false` for a server whose default dataset routes data per context | `true` |
+| `datasetCloneScript` | the npm script `linked worktree add --dataset` prints for copying the app's data into a dataset | `clone-dataset` |
+| `publish.staticAssets`, `publish.releasePrefix` | see [App release](#app-release--production-runtime) | `[]`, `releases` |
+| `server.rpcExposure` | `enforce`: only provider methods declared callable are reachable over `/call` (others answer 501); `warn` runs them with a warning. **`LINKED_RPC_EXPOSURE`, when set, wins** (a break-glass switch for diagnosing a refused call) | `warn` |
+| `server.rawQueries` | raw SPARQL on `/api/select-raw`: `off`, or `session` (signed in) | `session` (or `LINKED_RAW_QUERIES`) |
+| `server.apiOnly` | serve only the backend API (see [API-only backend](#api-only-backend)) | `false` |
+| `server.cachePaths`, `server.cacheTimeout` | pages whose server-side rendering is cached in memory, and for how many milliseconds | none, `300000` |
+
+**`linked.config.js` is no longer read.** An app that still has one (or `lincd.config.js`) is
+refused when its server starts or it is built, with the JSON to move its settings into. A
+value it computed from the environment becomes the environment variable; `webpack` and
+`server.multiCore` are gone; `server.loadAppComponent` and `server.loadRoutes` were never settings
+(the server loads `src/App` and `src/routes`).
 
 The schema ships with this package, `schema/app/1.json`. A tool refuses a `schemaVersion` it does
 not know and a key the schema does not have. A prefix is a Turtle and SPARQL prefix name that is
@@ -363,7 +388,7 @@ the file.
 **Every release gets its own prefix.** Object keys are
 `releases/<appVersion>-<revision>/<path>`, so publishing a new release cannot overwrite the
 previous one and a rollback means pointing at an older prefix. Set `publish.releasePrefix` in
-`linked.config.js` to change the `releases` base. A manifest may only upload to its own prefix: every
+`linked.app.json` to change the `releases` base. A manifest may only upload to its own prefix: every
 `objectKey` is recomputed from the prefix and the source path before anything is written, so an
 edited or foreign manifest cannot reach into another release.
 
@@ -421,7 +446,7 @@ declared `publish.staticAssets` and the release manifest — gets
 `og-image-1200x630.png` and `sw-v20260101.js` read as hashed, and a year of immutable caching on
 those cannot be undone without renaming the file.)
 
-**Extra static assets.** `publish.staticAssets` in `linked.config.js` lists globs of files under
+**Extra static assets.** `publish.staticAssets` in `linked.app.json` lists globs of files under
 `public/` to ship besides the bundle. Both the pattern and every match must resolve inside
 `public/`, so brace expansion and symlinks cannot pull in files from elsewhere in the repo.
 
@@ -578,7 +603,7 @@ farm in which the worktree's own checkouts win), and land locally with
 linked branch start overhaul --target main core   # app + packages-local/_linked-core on `overhaul`
 linked branch status                              # per repo: branch, target, dirty, ahead/behind, off-branch
 linked worktree add agent1 --with core --port 4041  # ../wt/agent1 with its own core worktree; Vite, tsc and Node load it
-linked worktree add agent2 --dataset wt-agent2    # its own dataset: prints `npm run clone-dataset -- wt-agent2` (or the script linked.config.js names with datasetCloneScript), else warns it starts empty
+linked worktree add agent2 --dataset wt-agent2    # its own dataset: prints `npm run clone-dataset -- wt-agent2` (or the script linked.app.json names with datasetCloneScript), else warns it starts empty
 linked worktree relink                            # in a worktree: rebuild its node_modules link farm (after npm install in the main checkout)
 linked worktree list                              # agent worktrees and whether each branch has landed
 linked worktree remove agent1                     # refuses while a branch has not landed (--force, --delete-unlanded)
@@ -665,16 +690,13 @@ that reach outside the package source root, and for imports into another linked 
 
 ## API-only backend
 
-`linked start --api-only`, or `server.apiOnly: true` in `linked.config.js`, serves only the backend API
+`linked start --api-only`, or `"server": {"apiOnly": true}` in `linked.app.json`, serves only the backend API
 (`/call/...`, `/api/...` and provider routes). There is no server-side page rendering, page requests get a 404,
 and no `vite.config.*` is required. Use it for a backend whose frontend lives elsewhere, such as a React Native
 app:
 
-```js
-// linked.config.js
-export default {
-  server: {apiOnly: true},
-};
+```json
+{"schemaVersion": 1, "server": {"apiOnly": true}}
 ```
 
 API-only mode is never inferred: a web app without a `vite.config.*` and without the flag still fails at startup.

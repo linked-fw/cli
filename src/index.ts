@@ -1,8 +1,14 @@
 export {default as tailwindConfig} from './tailwind.config.js';
 // export {buildMetadata} from './metadata.js';
 export * from './utils.js';
-export {defineConfig} from './defineConfig.js';
-export type {LinkedConfig, LinkedServerConfig} from './interfaces.js';
+export type {
+  AppServerSettings,
+  CssMode,
+  LinkedConfig,
+  LinkedServerConfig,
+  RawQueriesMode,
+  RpcExposureMode,
+} from './interfaces.js';
 
 export {buildPackageByPath} from './commands/build-package.js';
 export {setupPublish} from './commands/setup-publish.js';

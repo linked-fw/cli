@@ -1,125 +1,60 @@
-export interface ModuleConfig {
-  internals?: string[] | '*';
-  entry?: string;
-  filename?: string;
-  declarations?: boolean;
-  internalsources?: string[];
-  externals?: {[npmModule: string]: string};
-  target?: 'es5' | 'es6';
-  es5?: ModuleConfig;
-  es6?: ModuleConfig;
-  dev?: ModuleConfig;
-  prod?: ModuleConfig;
-  debug?: boolean;
-  alias?: {[oldNpmPath: string]: string};
-  provide?: {};
-  environment?: 'nodejs' | 'browser' | 'polymorphic';
-  outputPath?: string;
-  bundlePath?: string;
-  es5Server?: boolean;
-  analyse?: boolean;
-  cssIdentName?: string;
-  beforeBuildCommand?: string;
-  afterBuildCommand?: string;
-  afterBuildCommandProduction?: string;
-  afterFirstBuildCommand?: string;
-  cssGlobalModulePaths?: string;
-  cssMode?: 'tailwind' | 'postcss';
-  cssFileName?: string;
-  //used to overwrite tsConfig settings of the usual build process
-  tsConfigOverwrites?: Object;
-}
-
-export interface AdjustedModuleConfig extends ModuleConfig {
-  watch?: boolean;
-  productionMode?: boolean;
-}
-
 export interface PackageDetails {
   path: string;
   packageName: string;
 }
 
-/**
- * Server-specific configuration
- */
-export interface LinkedServerConfig {
-  /**
-   * Paths to cache for server-side rendering (SSR)
-   * Cached pages will be served from memory for faster response times
-   */
-  cachePaths?: string[];
+/** CSS processing for server-side rendering in development. */
+export type CssMode = 'tailwind' | 'postcss';
 
-  /**
-   * Cache timeout in milliseconds for SSR rendered pages
-   * After this time, cached pages will be re-rendered
-   * @default 300000 (5 minutes)
-   */
-  cacheTimeout?: number;
+/** Which provider methods `/call` reaches: every one (with a warning) or only declared ones. */
+export type RpcExposureMode = 'warn' | 'enforce';
 
-  /**
-   * Enable multi-core server processing (requires @semantu/multicore)
-   * Spawns worker processes to handle requests across multiple CPU cores
-   * @default false
-   */
-  multiCore?: boolean;
+/** Raw SPARQL on `/api/select-raw`: off for everyone, or for a signed-in session. */
+export type RawQueriesMode = 'off' | 'session';
 
+/** The server's settings, as `linked.app.json` holds them under `server`. */
+export interface AppServerSettings {
   /**
-   * Function that loads the app component (for SSR and hot reloading)
-   * Must be a function to support hot module reloading
+   * `enforce`: only provider methods declared callable are reachable over `/call`, every other
+   * one answers 501. `warn` (the server's default) runs them with a warning.
+   * `LINKED_RPC_EXPOSURE`, when set, wins over this.
    */
-  loadAppComponent?: () => any;
-
+  rpcExposure?: RpcExposureMode;
+  /** Raw SPARQL on `/api/select-raw`: `off`, or `session` (the server's default). */
+  rawQueries?: RawQueriesMode;
   /**
-   * Function that loads the app routes configuration (for SSR preloading)
-   * Must be a function to support hot module reloading
-   * Should return a RoutesModule from 'lincd-server'
-   */
-  loadRoutes?: () => Promise<any>;
-
-  /**
-   * Serve only the backend API (`/call/...`, `/api/...` and provider routes):
-   * no server-side page rendering, so page requests get a 404.
-   * `linked start --api-only` sets this.
+   * Serve only the backend API (`/call/...`, `/api/...` and provider routes): no server-side page
+   * rendering, so page requests get a 404. `linked start --api-only` sets this.
    * @default false
    */
   apiOnly?: boolean;
+  /** Paths whose server-side rendered pages are cached in memory. */
+  cachePaths?: string[];
+  /**
+   * Milliseconds a cached page is served before it is rendered again.
+   * @default 300000 (5 minutes)
+   */
+  cacheTimeout?: number;
 }
 
-/**
- * Complete Linked configuration
- */
+/** The server configuration the cli gives `LinkedServer`: the app's settings and its load hooks. */
+export interface LinkedServerConfig extends AppServerSettings {
+  /**
+   * Loads the app component (server-side rendering, hot reloading). Set by the cli: `src/App`
+   * (`lib/App.js` in a compiled server), or the Vite SSR runner's copy.
+   */
+  loadAppComponent?: () => any;
+  /** Loads the app's routes module (server-side preloading). Set by the cli, like the app component. */
+  loadRoutes?: () => Promise<any>;
+}
+
+/** The configuration the cli gives `LinkedServer`, built from the app's `linked.app.json`. */
 export interface LinkedConfig {
+  cssMode?: CssMode;
   /**
-   * CSS processing mode (shared by the Vite build and the server for SSR)
-   * - 'tailwind': Use Tailwind CSS v4 via the @tailwindcss/vite plugin. Still supports CSS Modules for .module.css files
-   * - 'postcss': Use PostCSS with nesting support and CSS Modules for .module.css files
-   * @default 'postcss'
-   */
-  cssMode?: 'tailwind' | 'postcss';
-
-  /**
-   * Server configuration
-   */
-  server?: LinkedServerConfig;
-
-  /**
-   * Materialize this app's registered shapes into its data store as SHACL
-   * (`sh:NodeShape`) on boot — so its app-data holds the shapes its instances
-   * validate/query against. Runs in LinkedServer.start()/initOnly().
+   * Materialize the app's registered shapes into its data store as SHACL on boot.
    * @default true
-   * Set `false` for a server whose default dataset is a context-router (e.g. a host app that routes data per project),
-   * or an app that manages its own shape/dataset lifecycle.
    */
   syncShapesOnBoot?: boolean;
-
-  /**
-   * The npm script in the app's root `package.json` that copies the app's data
-   * into a dataset, given its name as the one argument
-   * (`npm run <script> -- <dataset>`). `linked worktree add --dataset` and
-   * `linked branch start --worktree --dataset` print that command for the new
-   * dataset, and warn that it starts empty when the script does not exist.
-   * @default 'clone-dataset'
-   */
-  datasetCloneScript?: string;
+  server?: LinkedServerConfig;
 }

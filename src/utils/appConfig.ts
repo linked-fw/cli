@@ -15,11 +15,23 @@
  * app has installed has a namespace not in the map, its suggested prefix is added, or `<prefix>_2`,
  * `_3`, … when taken. A tool never changes or removes an entry; that is the app owner's.
  *
+ * The other keys are the app's settings: `cssMode`, `syncShapesOnBoot`, `datasetCloneScript`,
+ * `publish` and `server` ({@link AppConfig}). They replace the `linked.config.js` module, which is
+ * no longer read: an app that still has one is refused ({@link assertNoLegacyConfig}).
+ *
  * The schema ships with this package (`schema/app/1.json`). A tool refuses a `schemaVersion` it
  * does not know, and any key the schema does not have.
  */
 import fs from 'fs';
 import path from 'path';
+import type {AppPublishConfig} from '../app-release/types.js';
+import type {
+  AppServerSettings,
+  CssMode,
+  LinkedConfig,
+  RawQueriesMode,
+  RpcExposureMode,
+} from '../interfaces.js';
 import {
   discoverInstalledLinkedPackages,
   linkedKind,
@@ -55,9 +67,160 @@ export interface AppConfig {
   schemaVersion: typeof APP_SCHEMA_VERSION;
   /** Prefix → namespace IRI. */
   prefixes: Record<string, string>;
+  /**
+   * CSS processing the server applies for server-side rendering in development: `tailwind`
+   * (Tailwind CSS v4) or `postcss` (the default).
+   */
+  cssMode?: CssMode;
+  /**
+   * Materialize the app's registered shapes into its data store as SHACL on boot (default
+   * true). `false` for a server whose default dataset routes data per context, or an app that
+   * manages its own shape and dataset lifecycle.
+   */
+  syncShapesOnBoot?: boolean;
+  /**
+   * The npm script that copies the app's data into a dataset named by its one argument; `linked
+   * worktree add --dataset` prints it (default `clone-dataset`).
+   */
+  datasetCloneScript?: string;
+  /** What `linked build-app` ships besides the Vite bundle, and where releases go. */
+  publish?: AppPublishConfig;
+  /** The server's settings. */
+  server?: AppServerSettings;
 }
 
-const KEYS = new Set(['$schema', 'schemaVersion', 'prefixes']);
+/** The order keys are written in. */
+const KEYS = [
+  '$schema',
+  'schemaVersion',
+  'prefixes',
+  'cssMode',
+  'syncShapesOnBoot',
+  'datasetCloneScript',
+  'publish',
+  'server',
+] as const;
+const SERVER_KEYS = [
+  'rpcExposure',
+  'rawQueries',
+  'apiOnly',
+  'cachePaths',
+  'cacheTimeout',
+] as const;
+const PUBLISH_KEYS = ['staticAssets', 'releasePrefix'] as const;
+
+const CSS_MODES: readonly CssMode[] = ['tailwind', 'postcss'];
+const RPC_EXPOSURE_MODES: readonly RpcExposureMode[] = ['warn', 'enforce'];
+const RAW_QUERIES_MODES: readonly RawQueriesMode[] = ['off', 'session'];
+
+/** A JSON object (not an array, not null). */
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** Refuses a key of `object` (at `at`, e.g. `"server"`) that `keys` does not list. */
+function checkKeys(
+  object: Record<string, unknown>,
+  keys: readonly string[],
+  where: string,
+  at?: string,
+): void {
+  for (const key of Object.keys(object)) {
+    if (!keys.includes(key)) {
+      const name = at ? `"${at}" has the key "${key}"` : `has the key "${key}"`;
+      throw new Error(
+        `${where} ${name}, which schema version ${APP_SCHEMA_VERSION} does not have (${keys.join(', ')}).`,
+      );
+    }
+  }
+}
+
+/** The settings of a parsed file, checked: each one only when present. */
+function readSettings(
+  json: Record<string, unknown>,
+  where: string,
+): Omit<AppConfig, '$schema' | 'schemaVersion' | 'prefixes'> {
+  const oneOf = <T extends string>(
+    value: unknown,
+    allowed: readonly T[],
+    name: string,
+  ): T => {
+    if (!allowed.includes(value as T)) {
+      throw new Error(
+        `${where}: "${name}" must be ${allowed.map((a) => `"${a}"`).join(' or ')}, not ${JSON.stringify(value)}.`,
+      );
+    }
+    return value as T;
+  };
+  const ofType = <T>(value: unknown, type: string, name: string): T => {
+    if (typeof value !== type) {
+      throw new Error(`${where}: "${name}" must be a ${type}.`);
+    }
+    return value as T;
+  };
+  const strings = (value: unknown, name: string): string[] => {
+    if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+      throw new Error(`${where}: "${name}" must be a list of strings.`);
+    }
+    return [...value];
+  };
+  const out: Omit<AppConfig, '$schema' | 'schemaVersion' | 'prefixes'> = {};
+  if (json.cssMode !== undefined) {
+    out.cssMode = oneOf(json.cssMode, CSS_MODES, 'cssMode');
+  }
+  if (json.syncShapesOnBoot !== undefined) {
+    out.syncShapesOnBoot = ofType(json.syncShapesOnBoot, 'boolean', 'syncShapesOnBoot');
+  }
+  if (json.datasetCloneScript !== undefined) {
+    out.datasetCloneScript = ofType(json.datasetCloneScript, 'string', 'datasetCloneScript');
+  }
+  if (json.publish !== undefined) {
+    if (!isObject(json.publish)) {
+      throw new Error(`${where}: "publish" must be an object.`);
+    }
+    checkKeys(json.publish, PUBLISH_KEYS, where, 'publish');
+    const publish: AppPublishConfig = {};
+    if (json.publish.staticAssets !== undefined) {
+      publish.staticAssets = strings(json.publish.staticAssets, 'publish.staticAssets');
+    }
+    if (json.publish.releasePrefix !== undefined) {
+      publish.releasePrefix = ofType(
+        json.publish.releasePrefix,
+        'string',
+        'publish.releasePrefix',
+      );
+    }
+    out.publish = publish;
+  }
+  if (json.server !== undefined) {
+    if (!isObject(json.server)) {
+      throw new Error(`${where}: "server" must be an object.`);
+    }
+    const server = json.server;
+    checkKeys(server, SERVER_KEYS, where, 'server');
+    const settings: AppServerSettings = {};
+    if (server.rpcExposure !== undefined) {
+      settings.rpcExposure = oneOf(server.rpcExposure, RPC_EXPOSURE_MODES, 'server.rpcExposure');
+    }
+    if (server.rawQueries !== undefined) {
+      settings.rawQueries = oneOf(server.rawQueries, RAW_QUERIES_MODES, 'server.rawQueries');
+    }
+    if (server.apiOnly !== undefined) {
+      settings.apiOnly = ofType(server.apiOnly, 'boolean', 'server.apiOnly');
+    }
+    if (server.cachePaths !== undefined) {
+      settings.cachePaths = strings(server.cachePaths, 'server.cachePaths');
+    }
+    if (server.cacheTimeout !== undefined) {
+      const timeout = ofType<number>(server.cacheTimeout, 'number', 'server.cacheTimeout');
+      if (!Number.isFinite(timeout) || timeout < 0) {
+        throw new Error(`${where}: "server.cacheTimeout" must be a number of milliseconds, 0 or more.`);
+      }
+      settings.cacheTimeout = timeout;
+    }
+    out.server = settings;
+  }
+  return out;
+}
 
 /**
  * The parsed and checked text of a `linked.app.json`; `where` names it in errors. Refuses a
@@ -90,13 +253,7 @@ export function parseAppConfig(
       `${where} has "schemaVersion": ${JSON.stringify(json.schemaVersion)}, which this @_linked/cli does not know (it reads version ${APP_SCHEMA_VERSION}). Update @_linked/cli.`,
     );
   }
-  for (const key of Object.keys(json)) {
-    if (!KEYS.has(key)) {
-      throw new Error(
-        `${where} has the key "${key}", which schema version ${APP_SCHEMA_VERSION} does not have (${[...KEYS].join(', ')}).`,
-      );
-    }
-  }
+  checkKeys(json, KEYS, where);
   if (json.$schema !== undefined && typeof json.$schema !== 'string') {
     throw new Error(`${where}: "$schema" must be a string.`);
   }
@@ -122,6 +279,7 @@ export function parseAppConfig(
     ...(json.$schema === undefined ? {} : {$schema: json.$schema as string}),
     schemaVersion: APP_SCHEMA_VERSION,
     prefixes: {...(prefixes as Record<string, string>)},
+    ...readSettings(json, where),
   };
 }
 
@@ -132,19 +290,106 @@ export function readAppConfig(appRoot: string): AppConfig | undefined {
   return parseAppConfig(fs.readFileSync(file, 'utf8'), file);
 }
 
-/** The text of a `linked.app.json`: `$schema`, `schemaVersion`, `prefixes`, two-space JSON. */
+/**
+ * The text of a `linked.app.json`, two-space JSON: `$schema`, `schemaVersion`, `prefixes`, then
+ * every setting the config has, in the schema's order.
+ */
 export function serializeAppConfig(config: AppConfig): string {
-  return (
-    JSON.stringify(
-      {
-        $schema: config.$schema ?? APP_SCHEMA_URL,
-        schemaVersion: config.schemaVersion,
-        prefixes: config.prefixes,
-      },
-      null,
-      2,
-    ) + '\n'
+  const out: Record<string, unknown> = {
+    $schema: config.$schema ?? APP_SCHEMA_URL,
+    schemaVersion: config.schemaVersion,
+    prefixes: config.prefixes,
+  };
+  for (const key of KEYS) {
+    if (!(key in out) && config[key] !== undefined) out[key] = config[key];
+  }
+  return JSON.stringify(out, null, 2) + '\n';
+}
+
+/**
+ * The app's settings module, which this cli no longer reads (current name first, then the legacy
+ * one).
+ */
+export const LEGACY_CONFIG_FILES = ['linked.config.js', 'lincd.config.js'];
+
+/**
+ * Refuses an app that still has a `linked.config.js` (or `lincd.config.js`): its settings would be
+ * silently ignored. The error says how to move them into `linked.app.json`.
+ */
+export function assertNoLegacyConfig(appRoot: string): void {
+  const file = LEGACY_CONFIG_FILES.find((name) =>
+    fs.existsSync(path.join(appRoot, name)),
   );
+  if (!file) return;
+  throw new Error(
+    `${path.join(appRoot, file)} is no longer read: an app's settings live in ${APP_CONFIG_FILE}. Move them there and delete ${file}:
+
+` +
+      `  {
+` +
+      `    "$schema": "${APP_SCHEMA_URL}",
+` +
+      `    "schemaVersion": ${APP_SCHEMA_VERSION},
+` +
+      `    "prefixes": {},
+` +
+      `    "cssMode": "tailwind",
+` +
+      `    "syncShapesOnBoot": true,
+` +
+      `    "datasetCloneScript": "clone-dataset",
+` +
+      `    "publish": {"staticAssets": ["fonts/**"], "releasePrefix": "releases"},
+` +
+      `    "server": {"rpcExposure": "enforce", "rawQueries": "off", "apiOnly": false, "cachePaths": ["/"], "cacheTimeout": 300000}
+` +
+      `  }
+
+` +
+      `Keep only the keys you set. Values are JSON: a value computed from the environment becomes the variable ` +
+      `(LINKED_RPC_EXPOSURE wins over "server.rpcExposure"). \`webpack\` and \`server.multiCore\` are gone; ` +
+      `\`server.loadAppComponent\` and \`server.loadRoutes\` are not settings (the server loads src/App and src/routes). ` +
+      `Run \`linked prefixes\` to fill "prefixes".`,
+  );
+}
+
+/**
+ * The app's settings: its `linked.app.json` (none: no settings). Refuses an app that still has a
+ * `linked.config.js`, and an invalid file.
+ */
+export function readAppSettings(appRoot: string): AppConfig | undefined {
+  assertNoLegacyConfig(appRoot);
+  return readAppConfig(appRoot);
+}
+
+/**
+ * The configuration the cli gives the app's `LinkedServer`, from the app's settings: `cssMode`,
+ * `syncShapesOnBoot` and `server`. `LINKED_RPC_EXPOSURE` in `env`, when set, wins over
+ * `server.rpcExposure` (a value other than `warn` or `enforce` is refused). Returns a new object
+ * each time; the caller adds the server's load hooks to it.
+ */
+export function linkedServerConfig(
+  appRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): LinkedConfig & {server: NonNullable<LinkedConfig['server']>} {
+  const settings = readAppSettings(appRoot);
+  const server: NonNullable<LinkedConfig['server']> = {...settings?.server};
+  const fromEnv = env.LINKED_RPC_EXPOSURE;
+  if (fromEnv !== undefined && fromEnv !== '') {
+    if (!RPC_EXPOSURE_MODES.includes(fromEnv as RpcExposureMode)) {
+      throw new Error(
+        `LINKED_RPC_EXPOSURE must be ${RPC_EXPOSURE_MODES.map((m) => `"${m}"`).join(' or ')}, not ${JSON.stringify(fromEnv)}.`,
+      );
+    }
+    server.rpcExposure = fromEnv as RpcExposureMode;
+  }
+  return {
+    ...(settings?.cssMode === undefined ? {} : {cssMode: settings.cssMode}),
+    ...(settings?.syncShapesOnBoot === undefined
+      ? {}
+      : {syncShapesOnBoot: settings.syncShapesOnBoot}),
+    server,
+  };
 }
 
 /** The text of a new app's `linked.app.json`, with an empty map. */

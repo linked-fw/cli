@@ -16,12 +16,13 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
-import {importFile, isPathInside} from '../utils/platform.js';
+import {isPathInside} from '../utils/platform.js';
 import fsExtra from 'fs-extra';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
 import {isBundled, packageNameOf, type SsrMatcher} from '../utils/ssrBundled.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
+import type {LinkedConfig} from '../interfaces.js';
 import {keepDevServerAlive} from '../plugins/keep-dev-server-alive.js';
 
 export interface StartOptions {
@@ -37,36 +38,16 @@ export interface StartOptions {
 
 export const VITE_CONFIG_FILES = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs'];
 
-/**
- * Names for the app's linked config, in priority order. `lincd.config.js` is
- * the legacy name: apps predating the rename still ship it, and dropping it
- * would silently discard their whole `server` config (cachePaths, `apiOnly`, …).
- */
-export const LINKED_CONFIG_FILES = ['linked.config.js', 'lincd.config.js'];
-
 /** The port an app listens on when neither `PORT` nor its config sets one. */
 export const DEFAULT_APP_PORT = 4040;
 
 /**
- * Absolute path to the app's linked config. Returns the first name that exists;
- * when none does, the current name — the caller still `existsSync`-guards the
- * import, so this is simply the "no config here" path, not a promise of a file.
- */
-export function resolveLinkedConfigPath(cwd: string): string {
-  return (
-    LINKED_CONFIG_FILES.map((name) => path.join(cwd, name)).find((candidate) =>
-      fsExtra.existsSync(candidate),
-    ) ?? path.join(cwd, LINKED_CONFIG_FILES[0])
-  );
-}
-
-/**
  * API-only mode is explicit: `linked start --api-only`, or `server.apiOnly: true`
- * in `linked.config.js`. It is never inferred from missing frontend files, so a
+ * in `linked.app.json`. It is never inferred from missing frontend files, so a
  * web app that lost its `vite.config.ts` still fails loudly instead of silently
  * serving no pages.
  */
-export function isApiOnly(opts: StartOptions, linkedConfig: any): boolean {
+export function isApiOnly(opts: StartOptions, linkedConfig: LinkedConfig): boolean {
   return opts.apiOnly === true || linkedConfig?.server?.apiOnly === true;
 }
 
@@ -450,14 +431,10 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
   const {ensureEnvironmentLoaded} = await import('../lifecycle.js');
   await ensureEnvironmentLoaded();
 
-  // Load user's linked.config.js (legacy hook). It still drives things
-  // like server.cachePaths and the rest of LinkedServer's options.
-  const linkedConfigPath = resolveLinkedConfigPath(cwd);
-  let linkedConfig: any = {};
-  if (fsExtra.existsSync(linkedConfigPath)) {
-    linkedConfig = (await importFile(linkedConfigPath)).default ?? {};
-  }
-  linkedConfig.server = linkedConfig.server || {};
+  // LinkedServer's options from the app's settings (linked.app.json); refuses a
+  // leftover linked.config.js.
+  const {linkedServerConfig} = await import('../utils/appConfig.js');
+  const linkedConfig = linkedServerConfig(cwd);
   const apiOnly = isApiOnly(opts, linkedConfig);
 
   const {createServer: createViteServer} = await import('vite');

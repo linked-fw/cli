@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import {importFile} from '../utils/platform.js';
+import {readAppSettings} from '../utils/appConfig.js';
 import type {IFileStore} from '@_linked/core/interfaces/IFileStore';
 import {resolveAppAssetsStore} from '../app-release/app-assets-store.js';
 import {
@@ -77,19 +77,13 @@ export const assertViteApp = (appRoot = process.cwd()): void => {
   );
 };
 
+/**
+ * `publish` from the app's `linked.app.json`: the extra public files it declares (the Vite bundle
+ * files come from its own manifest) and the release prefix.
+ */
 const loadDefaultPublishConfig = async (
   appRoot: string,
-): Promise<AppPublishConfig> => {
-  // App config declares extra public files; Vite bundle files come from its
-  // own manifest and do not need to be repeated here.
-  const configPath = ['linked.config.js', 'lincd.config.js']
-    .map((fileName) => path.join(appRoot, fileName))
-    .find((candidate) => fs.existsSync(candidate));
-  if (!configPath) return {};
-
-  const loaded = await importFile(configPath);
-  return loaded.default?.publish || {};
-};
+): Promise<AppPublishConfig> => readAppSettings(appRoot)?.publish ?? {};
 
 /** Load the build environment, as every app build does first. */
 const loadBuildEnvironment = async (
