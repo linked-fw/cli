@@ -582,6 +582,53 @@ describe('linked branch land', () => {
     assert.equal(fs.readFileSync(path.join(app.root, 'src.txt'), 'utf8'), 'master\n');
   });
 
+  test('builds the build tool before the packages that build with it, even when they do not list it', async () => {
+    const app = makeApp();
+    // auth sorts before cli and lists no dependency on it, but its build runs `linked build`.
+    const auth = path.join(app.root, 'packages-local', '_linked-auth');
+    initRepo(auth, {'package.json': JSON.stringify({name: '@_linked/auth', dependencies: {'@_linked/core': '*'}}), 'auth.txt': 'auth\n'});
+    const cli = path.join(app.root, 'packages-local', '_linked-cli');
+    initRepo(cli, {'package.json': JSON.stringify({name: '@_linked/cli', dependencies: {'@_linked/core': '*'}}), 'cli.txt': 'cli\n'});
+    for (const [name, dir] of [['auth', '_linked-auth'], ['cli', '_linked-cli']]) {
+      fs.symlinkSync(`../../packages-local/${dir}`, path.join(app.root, 'node_modules', '@_linked', name));
+    }
+    await startMaster(app, 'm1', ['auth', 'cli', 'core', 'server']);
+    const masterDir = path.join(app.container, 'wt', 'm1');
+    for (const [dir, file] of [['_linked-auth', 'auth.txt'], ['_linked-cli', 'cli.txt'], ['_linked-core', 'core.txt'], ['_linked-server', 'server.txt']]) {
+      commit(path.join(masterDir, 'packages-local', dir), file, 'master\n');
+    }
+
+    const {run, builds} = fakeBuilds();
+    const r = await branchLand(app.root, 'm1', {push: false}, run);
+    assert.equal(r.code, 0, r.messages.join('\n'));
+    // core (which cli depends on), then cli alone, then the rest in dependency order.
+    assert.deepEqual(builds, [app.core, cli, auth, app.server]);
+  });
+
+  test('when the build tool fails to build, the packages that build with it are not built', async () => {
+    const app = makeApp();
+    const cli = path.join(app.root, 'packages-local', '_linked-cli');
+    initRepo(cli, {'package.json': JSON.stringify({name: '@_linked/cli'}), 'cli.txt': 'cli\n'});
+    fs.symlinkSync('../../packages-local/_linked-cli', path.join(app.root, 'node_modules', '@_linked', 'cli'));
+    await startMaster(app, 'm1', ['cli', 'server']);
+    const masterDir = path.join(app.container, 'wt', 'm1');
+    commit(path.join(masterDir, 'packages-local', '_linked-cli'), 'cli.txt', 'master\n');
+    commit(path.join(masterDir, 'packages-local', '_linked-server'), 'server.txt', 'master\n');
+
+    const builds: string[] = [];
+    const realRun = makeRun(process.cwd());
+    const run: Run = (cmd, args, opts) => {
+      if (cmd !== 'npx') return realRun(cmd, args, opts);
+      builds.push(opts?.cwd ?? '');
+      return {status: 1, stdout: '', stderr: 'boom'};
+    };
+    const r = await branchLand(app.root, 'm1', {push: false}, run);
+    assert.equal(r.code, 5, r.messages.join('\n'));
+    assert.deepEqual(builds, [cli]);
+    assert.match(r.messages.join('\n'), /_linked-server: not built, because packages-local\/_linked-cli \(its build tool\) failed/);
+    assert.equal(r.repos.find((x) => x.rel === 'packages-local/_linked-server')?.built, false);
+  });
+
   test('a conflict stays in progress in the master and blocks the next run until it is committed', async () => {
     const app = makeApp();
     await startMaster(app);
