@@ -39,7 +39,7 @@ import {currentBranch, getTarget, listRepos, setTarget, type RepoInfo} from '../
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {localBranchExists, refExists, selectCheckouts, worktreesOf} from './branch.js';
-import {orderBuildToolFirst} from '../lifecycle.js';
+import {BUILD_TOOL_PACKAGE} from '../lifecycle.js';
 import {dependencyOrder} from './release.js';
 import {readFarmMarker} from './worktree-node-modules.js';
 import {
@@ -462,25 +462,19 @@ export async function branchLand(
   }
 
   let trouble = false;
-  const toBuild = build ? landBuildOrder(landed.filter((e) => e.rel !== '.')) : {before: [], after: []};
-  for (const entry of toBuild.before) {
-    const r = run('npx', ['linked', 'build'], {cwd: entry.checkout});
-    entry.built = r.status === 0;
-    if (!entry.built) {
-      trouble = true;
-      result.messages.push(`${entry.rel}: npx linked build failed in ${entry.checkout}: ${failed(r).split('\n').slice(-5).join('\n')}`);
-    } else result.messages.push(`${entry.rel}: built.`);
-  }
-  // The rest build with the landed build tool; if it failed they would build with a broken one.
-  const toolFailed = toBuild.tool?.built === false;
-  for (const entry of toBuild.after) {
-    if (toolFailed) {
+  // `landed` is in dependency order, the build tool first (see `dependencyOrder`). The packages
+  // after it build with it, so when it fails to build they are not built (and not pushed).
+  let tool: LandRepo | undefined;
+  for (const entry of landed) {
+    if (!build || entry.rel === '.') continue;
+    if (tool?.built === false) {
       entry.built = false;
-      result.messages.push(`${entry.rel}: not built, because ${toBuild.tool!.rel} (its build tool) failed to build: fix that, then npx linked build in ${entry.checkout}.`);
+      result.messages.push(`${entry.rel}: not built, because ${tool.rel} (its build tool) failed to build: fix that, then npx linked build in ${entry.checkout}.`);
       continue;
     }
     const r = run('npx', ['linked', 'build'], {cwd: entry.checkout});
     entry.built = r.status === 0;
+    if (entry.packageName === BUILD_TOOL_PACKAGE) tool = entry;
     if (!entry.built) {
       trouble = true;
       result.messages.push(`${entry.rel}: npx linked build failed in ${entry.checkout}: ${failed(r).split('\n').slice(-5).join('\n')}`);
@@ -507,32 +501,6 @@ export async function branchLand(
     `Remove the master once done with it: linked worktree remove ${name}.`,
   );
   return result;
-}
-
-/**
- * The order `land` builds the landed packages in, as `build-all` does (see
- * `orderBuildToolFirst`): the build tool's own dependencies, then the build
- * tool (`@_linked/cli`), both in `before`; then everything else in `after`, in
- * dependency order. Every other package's build runs `linked build`, so the
- * build tool counts as a dependency of each of them even when their
- * `package.json` does not list it. `tool` is the build tool when it landed.
- */
-export function landBuildOrder<T extends {rel: string; checkout: string; packageName?: string}>(
-  entries: T[],
-): {before: T[]; tool?: T; after: T[]} {
-  const ordered = dependencyOrder(entries.map((e) => ({...e, dir: e.checkout})));
-  const entryOf = new Map<string, T>();
-  const packages = new Map(
-    ordered.map((o) => {
-      const key = o.packageName ?? `./${o.rel}`;
-      entryOf.set(key, entries.find((e) => e.rel === o.rel)!);
-      return [key, {path: o.checkout, packageName: key}];
-    }),
-  );
-  const order = orderBuildToolFirst(packages);
-  const pick = (names: Iterable<string>): T[] => [...names].map((n) => entryOf.get(n)!);
-  const tool = order.tool ? entryOf.get(order.tool.packageName) : undefined;
-  return {before: [...pick(order.pre.keys()), ...(tool ? [tool] : [])], tool, after: pick(order.rest.keys())};
 }
 
 /** The git dir of the worktree at `dir` (where a merge in progress keeps MERGE_HEAD). */

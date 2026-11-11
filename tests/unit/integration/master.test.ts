@@ -582,11 +582,14 @@ describe('linked branch land', () => {
     assert.equal(fs.readFileSync(path.join(app.root, 'src.txt'), 'utf8'), 'master\n');
   });
 
-  test('builds the build tool before the packages that build with it, even when they do not list it', async () => {
+  test('builds core, then the build tool, then the packages that build with it, through the core/cli cycle', async () => {
     const app = makeApp();
-    // auth sorts before cli and lists no dependency on it, but its build runs `linked build`.
+    // The real shape: cli depends on core, core devDepends on cli (a cycle), and auth, which sorts
+    // before cli, devDepends on both.
+    fs.writeFileSync(path.join(app.core, 'package.json'), JSON.stringify({name: '@_linked/core', devDependencies: {'@_linked/cli': '^1.57.1'}}));
+    git(app.core, 'commit', '-q', '-am', 'core devDepends on cli');
     const auth = path.join(app.root, 'packages-local', '_linked-auth');
-    initRepo(auth, {'package.json': JSON.stringify({name: '@_linked/auth', dependencies: {'@_linked/core': '*'}}), 'auth.txt': 'auth\n'});
+    initRepo(auth, {'package.json': JSON.stringify({name: '@_linked/auth', dependencies: {'@_linked/core': '*'}, devDependencies: {'@_linked/cli': '^1.57.1'}}), 'auth.txt': 'auth\n'});
     const cli = path.join(app.root, 'packages-local', '_linked-cli');
     initRepo(cli, {'package.json': JSON.stringify({name: '@_linked/cli', dependencies: {'@_linked/core': '*'}}), 'cli.txt': 'cli\n'});
     for (const [name, dir] of [['auth', '_linked-auth'], ['cli', '_linked-cli']]) {

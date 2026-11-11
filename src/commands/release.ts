@@ -26,6 +26,7 @@ import {
 } from '../integration/repos.js';
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
+import {BUILD_TOOL_PACKAGE} from '../lifecycle.js';
 import {refExists} from './branch.js';
 
 export const NO_PR_SECTION = 'no PR section';
@@ -180,11 +181,19 @@ function readDeps(dir: string): string[] {
 }
 
 /**
- * Repos in release order: each after the listed repos its `package.json`
- * depends on (dependencies, devDependencies, peerDependencies, and the names of
- * `linked.unpublishedPackages`), ties broken
- * by `rel`, and the app root (`.`) last. Repos in a dependency cycle follow
- * in `rel` order.
+ * Repos in dependency order, the one order release PRs, `checkout` and
+ * `branch land` (its fast-forwards and builds) all share. Each repo comes after
+ * the listed repos its `package.json` depends on (dependencies,
+ * devDependencies, peerDependencies, and the names of
+ * `linked.unpublishedPackages`), ties broken by `rel`, and the app root (`.`)
+ * last.
+ *
+ * The build tool (`@_linked/cli`) is ordered the way `build-all` orders it
+ * (see `orderBuildToolFirst`): every other package's build runs it, and most
+ * list it as a devDependency while it depends on some of them (`@_linked/core`),
+ * a cycle. So edges to the build tool count as satisfied; its own
+ * dependencies (transitively) come first, then the build tool, then the rest.
+ * Repos in any other cycle follow in `rel` order.
  */
 export function dependencyOrder<T extends {rel: string; dir: string; packageName?: string}>(
   repos: T[],
@@ -192,23 +201,44 @@ export function dependencyOrder<T extends {rel: string; dir: string; packageName
   const root = repos.filter((r) => r.rel === '.');
   const rest = repos.filter((r) => r.rel !== '.').sort((a, b) => a.rel.localeCompare(b.rel));
   const byName = new Map(rest.filter((r) => r.packageName).map((r) => [r.packageName!, r]));
+  const tool = byName.get(BUILD_TOOL_PACKAGE);
   const needs = new Map(
     rest.map((r) => [
       r,
-      new Set(readDeps(r.dir).map((n) => byName.get(n)).filter((d): d is T => !!d && d !== r)),
+      new Set(
+        readDeps(r.dir)
+          .map((n) => byName.get(n))
+          .filter((d): d is T => !!d && d !== r && d !== tool),
+      ),
     ]),
   );
-  const ordered: T[] = [];
-  while (ordered.length < rest.length) {
-    const ready = rest.find(
-      (r) => !ordered.includes(r) && [...needs.get(r)!].every((d) => ordered.includes(d)),
-    );
-    if (!ready) {
-      ordered.push(...rest.filter((r) => !ordered.includes(r)));
-      break;
+  // What the build tool needs, transitively.
+  const pre = new Set<T>();
+  const visit = (r: T) => {
+    for (const d of needs.get(r)!) {
+      if (pre.has(d)) continue;
+      pre.add(d);
+      visit(d);
     }
-    ordered.push(ready);
-  }
+  };
+  if (tool) visit(tool);
+
+  const ordered: T[] = [];
+  // `group` in dependency order, after everything already ordered.
+  const place = (group: T[]) => {
+    const left = group.filter((r) => !ordered.includes(r));
+    while (left.length) {
+      const i = left.findIndex((r) => [...needs.get(r)!].every((d) => ordered.includes(d) || !group.includes(d)));
+      if (i < 0) {
+        ordered.push(...left);
+        return;
+      }
+      ordered.push(...left.splice(i, 1));
+    }
+  };
+  place(rest.filter((r) => pre.has(r)));
+  if (tool) ordered.push(tool);
+  place(rest);
   return [...ordered, ...root];
 }
 
