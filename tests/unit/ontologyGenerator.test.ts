@@ -473,6 +473,11 @@ describe('the package configuration', () => {
     [{x: 'https://x.test/'}, /must be an object with a "namespace"/],
     [{x: {namespace: 'not an iri'}}, /namespace must be an IRI/],
     [{x: {namespace: 'https://x.test/ont'}}, /ending in \/, # or :/],
+    // Characters that end an IRI in SPARQL and Turtle (`<…>`) are refused.
+    [{x: {namespace: 'https://x.test/a>b/'}}, /namespace must be an IRI/],
+    [{x: {namespace: 'https://x.test/"/'}}, /namespace must be an IRI/],
+    [{x: {namespace: 'https://x.test/{a}/'}}, /namespace must be an IRI/],
+    [{x: {namespace: 'https://x.test/a\\b/'}}, /namespace must be an IRI/],
     [
       {x: {namespace: 'https://x.test/', data: ['../up.ttl']}},
       /data must list/,

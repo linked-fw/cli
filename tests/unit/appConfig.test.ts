@@ -68,6 +68,11 @@ describe('the reader', () => {
     expect(parse({schemaVersion: 1, prefixes: {x: 'not an iri'}})).toThrow(
       /must map to a namespace IRI/,
     );
+    for (const namespace of ['https://x.test/<a>/', 'https://x.test/"', 'https://x.test/`']) {
+      expect(parse({schemaVersion: 1, prefixes: {x: namespace}})).toThrow(
+        /must map to a namespace IRI/,
+      );
+    }
     expect(parse({schemaVersion: 1, prefixes: []})).toThrow(
       /"prefixes" must be an object/,
     );

@@ -29,8 +29,18 @@ export interface OntologyConfig {
   generated: boolean;
 }
 
-/** What a `linkedOntologies` namespace must be: an IRI ending in a separator. */
-export const ONTOLOGY_NAMESPACE = /^[a-z][a-z0-9+.-]*:\S*[/#:]$/i;
+/**
+ * What a prefix in an app's map points to: an absolute IRI that can be written between `<` and
+ * `>` in SPARQL and Turtle, so a scheme, then no whitespace, no control character and none of
+ * the characters `<`, `>`, `"`, `{`, `}`, `|`, `^`, backtick and backslash.
+ */
+export const NAMESPACE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:[^\x00-\x20<>"{}|^`\\]+$/;
+
+/**
+ * What a `linkedOntologies` namespace must be: a {@link NAMESPACE_IRI} ending in a separator.
+ */
+export const ONTOLOGY_NAMESPACE =
+  /^[A-Za-z][A-Za-z0-9+.-]*:[^\x00-\x20<>"{}|^`\\]*[/#:]$/;
 
 /** The `package.json` key. */
 export const ONTOLOGIES_KEY = 'linkedOntologies';

@@ -36,7 +36,7 @@ import {
   discoverInstalledLinkedPackages,
   linkedKind,
 } from '../installed-packages.js';
-import {readOntologyConfigs} from './ontologyConfig.js';
+import {NAMESPACE_IRI, readOntologyConfigs} from './ontologyConfig.js';
 import {
   OntologyVannError,
   ontologySuggestedPrefix,
@@ -57,9 +57,6 @@ export const APP_SCHEMA_URL = 'https://linked.cm/schema/app/1.json';
  * identifier.
  */
 export const PREFIX_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
-
-/** What a prefix maps to: an absolute IRI. */
-const NAMESPACE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/;
 
 /** A version 1 `linked.app.json`. */
 export interface AppConfig {
