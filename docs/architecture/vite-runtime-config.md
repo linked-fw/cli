@@ -95,7 +95,7 @@ Under `linked start`, Node itself (not the SSR runner) loads:
 
 - `@_linked/cli` from its `lib/esm` (the bin, and every import of it from Vite-loaded code);
 - the app's `vite.config.*` and every `@_linked/*` package it imports, at Vite start-up;
-- `linked.config.js` and env loading, which hold no `@_linked` state;
+- the reading of `linked.app.json` and the env loading, which hold no `@_linked` state;
 - in standalone mode, `@_linked/core` and the packages left external;
 - packages a provider imports natively from a registry install
   (`LinkedServer.indexPackageBackendProviders` uses `ssrLoadModule` for a bundled package).
