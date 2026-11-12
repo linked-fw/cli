@@ -658,13 +658,16 @@ Every `package.json` says what it is in `linked.kind`, merged into any other `li
 
 ```json
 {
-  "linked": {"kind": "ontology"}   // or "assets", "library" (framework code), "app"
+  "linked": {"kind": "ontology"}   // or "assets", "library" (framework code), "tooling", "app"
 }
 ```
 
-A linked package is any kind but `app`: `linked build` builds it, and boot loading, the ontology
-sync, Vite's dependency exclusion and `build-all`'s dependency order find it. An `app` is built with
-`linked build-app`. `linkedKind(json)` from `@_linked/cli/installed-packages` is the one reader
+A linked package is an `ontology`, `assets` or `library` package: `linked build` builds it, and boot
+loading, the ontology sync, Vite's dependency exclusion and `build-all`'s dependency order find it
+(`isLinkedPackageJson`, or `isLinkedPackageKind` for a kind already read). A `tooling` package is a build or dev tool with no shapes, ontology or
+components (this CLI is one): `linked build` builds it like a library, but it is not a linked
+package, so nothing loads, syncs, imports or lists it (`isBuiltByLinkedBuild` covers both). An `app`
+is built with `linked build-app`. `linkedKind(json)` from `@_linked/cli/installed-packages` is the one reader
 (`@_linked/server/utils/linkedDependencies` has a byte-identical twin).
 
 A package can also declare its ontologies under `"linkedOntologies"` (see

@@ -150,7 +150,7 @@ import {
   orderBuildToolFirst,
 } from './lifecycle.js';
 import type {BuildAllPlan} from './lifecycle.js';
-import {isLinkedPackageJson, linkedKind} from './installed-packages.js';
+import {isBuiltByLinkedBuild, linkedKind} from './installed-packages.js';
 import {excerptBuildError} from './build-error-excerpt.js';
 export {
   ensureEnvironmentLoaded,
@@ -3033,13 +3033,13 @@ export const buildPackage = async (
   // Always use the resolved absolute path
   packagePath = currentPath;
 
-  // Guard: `linked build` only makes sense for a linked package. Apps must use
-  // `linked build-app`. Plain packages (no `linked.kind`) have no build pipeline
-  // defined here and should have their own build script.
+  // Guard: `linked build` only makes sense for a linked package or a `tooling`
+  // package. Apps must use `linked build-app`. Plain packages (no `linked.kind`)
+  // have no build pipeline defined here and should have their own build script.
   const pkgJson = JSON.parse(
     fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
   );
-  if (!isLinkedPackageJson(pkgJson)) {
+  if (!isBuiltByLinkedBuild(pkgJson)) {
     if (linkedKind(pkgJson) === 'app') {
       console.error(
         chalk.red(
@@ -3049,7 +3049,7 @@ export const buildPackage = async (
     } else {
       console.error(
         chalk.red(
-          `'${pkgJson.name || packagePath}' has no "linked": {"kind": …} of a package in package.json. 'linked build' only builds linked packages: set linked.kind to "ontology", "assets" or "library", or run a different build command.`,
+          `'${pkgJson.name || packagePath}' has no "linked": {"kind": …} of a package in package.json. 'linked build' only builds linked packages and tooling: set linked.kind to "ontology", "assets", "library" or "tooling", or run a different build command.`,
         ),
       );
     }

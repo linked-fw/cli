@@ -3,14 +3,15 @@ import fs from 'fs';
 import path from 'path';
 import {execp} from '../utils.js';
 import {detectPackageManager} from '../utils/packageManager.js';
-import {isLinkedPackageJson} from '../installed-packages.js';
+import {isBuiltByLinkedBuild} from '../installed-packages.js';
 
 /**
  * Given any file or directory path, walk up to find the nearest package.json
  * and run `linked build` in that package's directory. This is the editor-hook
  * variant of build: the caller knows a file path, we figure out the package.
  *
- * Only rebuilds linked packages (`isLinkedPackageJson`).
+ * Only rebuilds what `linked build` builds: linked packages and `tooling`
+ * (`isBuiltByLinkedBuild`).
  */
 export async function buildPackageByPath(filePath: string): Promise<void> {
   let currentPath = path.isAbsolute(filePath)
@@ -25,12 +26,10 @@ export async function buildPackageByPath(filePath: string): Promise<void> {
     const pkgJsonPath = path.join(currentPath, 'package.json');
     if (fs.existsSync(pkgJsonPath)) {
       const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-      const isLinked = isLinkedPackageJson(pkgJson);
-
-      if (!isLinked) {
+      if (!isBuiltByLinkedBuild(pkgJson)) {
         console.log(
           chalk.yellow(
-            `Package ${pkgJson.name} is not a linked package (no linked.kind of a package). Skipping.`,
+            `Package ${pkgJson.name} is not a linked package or tooling (no linked.kind that 'linked build' builds). Skipping.`,
           ),
         );
         return;

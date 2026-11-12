@@ -237,7 +237,7 @@ export async function loadBackendFileStorage(
 export interface LocalPackage extends PackageDetails {
   /** Where the walk found it. */
   source: 'workspace' | 'local-packages-dir';
-  /** A `linked.kind` other than `app` — see `isLinkedPackageJson`. */
+  /** A `linked.kind` of a linked package (not `app` or `tooling`) — see `isLinkedPackageJson`. */
   isLinkedPackage: boolean;
   /** `linked.kind: "app"` — built by `linked build-app`, not `linked build`. */
   isApp: boolean;
