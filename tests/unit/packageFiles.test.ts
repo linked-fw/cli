@@ -125,6 +125,7 @@ describe('buildPackageFiles', () => {
     expect(Object.keys(out)).toEqual([
       '.gitignore',
       '.npmignore',
+      'README.md',
       'package.json',
       'src/data/planning.ttl',
       'src/index.ts',
@@ -137,7 +138,13 @@ describe('buildPackageFiles', () => {
     expect(out['src/package.ts']).toContain(
       `linkedPackage('planning-ont', {baseUri: "https://acme.example/"})`,
     );
-    expect(out['src/package.ts']).toMatch(/^  registerOntologies,$/m);
+    // Only what an ontology package uses: the generated modules' `registerOntologies`, and its name.
+    expect(out['src/package.ts']).toContain(
+      `export const {registerOntologies, packageName} = linkedPackage(`,
+    );
+    expect(out['src/package.ts']).not.toMatch(/linkedShape|linkedUtil|getPackageShape|registerPackageExport|packageExports/);
+    expect(out['README.md']).toMatch(/^# planning-ont\n/);
+    expect(out['README.md']).toContain('`src/data/planning.ttl`');
     expect(out['src/ontologies/index.ts']).toContain(
       `      name: 'planning',\n      namespace: 'https://acme.example/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,
     );

@@ -10,8 +10,9 @@
  * What a kind gets (`PACKAGE_TEMPLATE_DIRS`): every kind gets the shared files
  * of `defaults/package` (manifest, tsconfigs, dotfiles, `src/package.ts`); an
  * asset package gets the rest of that folder, an ontology package gets
- * `defaults/package-ontology` on top, with the example ontology named after its
- * ontology slug. Dotfiles ship under neutral names (`gitignore.template`) and
+ * `defaults/package-ontology` on top (its own `src/package.ts`, which takes only
+ * what an ontology package uses from `linkedPackage`, and a README), with the
+ * example ontology named after its ontology slug. Dotfiles ship under neutral names (`gitignore.template`) and
  * are returned under their real ones (`.gitignore`).
  */
 import fs from 'fs';
@@ -63,7 +64,7 @@ const FILLED_FILES = ['src/index.ts', 'package.json', 'src/package.ts'];
  * templates: they are generated ({@link ontologyScaffoldModules}).
  */
 const EXAMPLE_ONTOLOGY_FILES = ['src/data/example-ontology.ttl'];
-const FILLED_ONTOLOGY_FILES = EXAMPLE_ONTOLOGY_FILES;
+const FILLED_ONTOLOGY_FILES = [...EXAMPLE_ONTOLOGY_FILES, 'README.md'];
 
 /**
  * The ontology modules of a new package whose one ontology has no terms yet

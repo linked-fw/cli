@@ -65,6 +65,7 @@ describe('createPackage kinds', () => {
     expect(tree(pkg)).toEqual([
       '.gitignore',
       '.npmignore',
+      'README.md',
       'package.json',
       'src/data/planning.ttl',
       'src/index.ts',
