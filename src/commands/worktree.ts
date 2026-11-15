@@ -62,7 +62,7 @@ import {
   worktreesOf,
 } from './branch.js';
 import {DEFAULT_APP_PORT} from './start.js';
-import {readAppSettings} from '../utils/appConfig.js';
+import {type AppWorktreeSettings, readAppSettings} from '../utils/appConfig.js';
 import {
   farmOverlays,
   linkNodeModules,
@@ -384,21 +384,41 @@ function envValue(file: string, key: string): string | null {
   return null;
 }
 
+/** The app's `worktree` settings in `linked.app.json` at `dir`; none when it has none or cannot be read. */
+export function worktreeSettings(dir: string): AppWorktreeSettings {
+  try {
+    return readAppSettings(dir)?.worktree ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The worktree's own projects root for the `.env` value `value` of the app's projects-root var:
+ * a relative value under the worktree `dir`, an absolute one's last segment under it.
+ */
+export function worktreeProjectsRoot(dir: string, value: string): string {
+  const unquoted = value.replace(/^["']|["']$/g, '');
+  return path.isAbsolute(unquoted) ? path.join(dir, path.basename(unquoted)) : path.join(dir, unquoted);
+}
+
 /**
  * The environment the start command sets in worktree `dir`: `PORT`, then
  * `SITE_ROOT` (`http://localhost:<port>`) when the worktree's `.env` sets it
  * (the server writes absolute asset URLs from it, so without it a second
- * server serves the first one's bundles), `CN_PROJECTS_ROOT` (`<dir>/apps`)
- * for a master's preview when the `.env` sets it, and `FUSEKI_DATASET`.
+ * server serves the first one's bundles), the app's projects-root var
+ * (`worktree.projectsRootVar` in its `linked.app.json`) when the `.env` sets it,
+ * pointing into the worktree ({@link worktreeProjectsRoot}), so its checkouts
+ * are its own, and `FUSEKI_DATASET`.
  */
-export function startEnv(dir: string, port: number | undefined, dataset: string | undefined, preview: boolean): string[] {
+export function startEnv(dir: string, port: number | undefined, dataset: string | undefined): string[] {
   const p = port ?? '<port>';
   const envFile = path.join(dir, '.env');
   const env = [`PORT=${p}`];
   if (envValue(envFile, 'SITE_ROOT') !== null) env.push(`SITE_ROOT=http://localhost:${p}`);
-  if (preview && envValue(envFile, 'CN_PROJECTS_ROOT') !== null) {
-    env.push(`CN_PROJECTS_ROOT=${shellQuote(path.join(dir, 'apps'))}`);
-  }
+  const rootVar = worktreeSettings(dir).projectsRootVar;
+  const rootValue = rootVar ? envValue(envFile, rootVar) : null;
+  if (rootVar && rootValue) env.push(`${rootVar}=${shellQuote(worktreeProjectsRoot(dir, rootValue))}`);
   if (dataset) env.push(`FUSEKI_DATASET=${shellQuote(dataset)}`);
   return env;
 }
@@ -679,7 +699,7 @@ export async function worktreeAdd(
     );
   }
 
-  result.startCommand = startCommandFor(dir, startEnv(dir, options.port, options.dataset, false));
+  result.startCommand = startCommandFor(dir, startEnv(dir, options.port, options.dataset));
   result.messages.push('', `Start it: ${result.startCommand}`);
   if (options.port === undefined) {
     result.messages.push(

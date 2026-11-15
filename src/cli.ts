@@ -188,16 +188,56 @@ const BASE_URI_HELP =
 const WHERE_HELP =
   "Inside an app, it goes in packages/ (part of the app's repository) or packages-local/ (its own git repository, linked with `linked localize`); without --location, --remote or --push you are asked, on a terminal.";
 
-/** The three scaffolding commands share the where-flags; `--kind` is create-package's own. */
+const ONTOLOGY_ASKED_HELP =
+  'On a terminal, the title, description and prefix no flag gave are asked (not with --yes); elsewhere their defaults apply.';
+const YES_HELP =
+  'Ask nothing: flags and defaults only, as without a terminal (a missing --kind or --location is then refused).';
+
+/** The three scaffolding commands share the where-flags, `--yes` and the author; `--kind` is create-package's own. */
 const withPackageOptions = (command: Command) =>
   command
     .option('--location <where>', LOCATION_HELP)
     .option('--remote <git-url>', REMOTE_HELP)
     .option('--push', PUSH_HELP)
     .option('--skip-install', SKIP_INSTALL_HELP)
-    .option('--base-uri <uri>', BASE_URI_HELP);
+    .option('--base-uri <uri>', BASE_URI_HELP)
+    .option('-y, --yes', YES_HELP)
+    .option('--author-name <name>', 'package.json author.name. Default: empty, for you to fill in.')
+    .option('--author-email <email>', 'package.json author.email. Default: empty, for you to fill in.')
+    .option(
+      '--author-url <url>',
+      "package.json author.url. Default: an ontology package's --creator, else empty, for you to fill in.",
+    );
 
-withPackageOptions(
+/** An ontology package's metadata, written to its data file (src/data/<name>.ttl). */
+const withOntologyOptions = (command: Command) =>
+  command
+    .option(
+      '--title <title>',
+      `The ontology's dcterms:title. Default: its name in words (lego-planning: "Lego Planning"). ${ONTOLOGY_ASKED_HELP}`,
+    )
+    .option(
+      '--description <text>',
+      "The ontology's dcterms:description; for a new package also its package.json description. Default: none (package.json keeps an empty one, for you to fill in).",
+    )
+    .option(
+      '--prefix <prefix>',
+      "The ontology's preferred prefix (vann:preferredNamespacePrefix), its Turtle prefix and the prefix its modules suggest. Default: its name.",
+    )
+    .option(
+      '--creator <iri>',
+      "The ontology's dcterms:creator: a person's IRI, such as a WebID. Default: none.",
+    )
+    .option(
+      '--maintainer <iri>',
+      "The ontology's schema:maintainer: a person's IRI. Default: the creator.",
+    )
+    .option(
+      '--status <status>',
+      "The ontology's adms:status: Draft, ReadyForReview or Published. Default: Draft.",
+    );
+
+withOntologyOptions(withPackageOptions(
   program
     .command('create-package')
     .action(async (name, uriBase, options) => {
@@ -223,9 +263,9 @@ withPackageOptions(
       '[uri_base]',
       "The namespace of the ontology package's ontology. Leave blank for https://linked.cm/ont/<name>/ (the ontology slug is <name>, without -ont).",
     ),
-);
+));
 
-withPackageOptions(
+withOntologyOptions(withPackageOptions(
   program
     .command('create-ont-package')
     .action(async (name, uriBase, options) => {
@@ -244,7 +284,7 @@ withPackageOptions(
       '[uri_base]',
       'The namespace of the ontology. Leave blank for https://linked.cm/ont/<name>/.',
     ),
-);
+));
 
 withPackageOptions(
   program
@@ -311,10 +351,11 @@ program
     'The name of the component. Will be used for the file name and the export name',
   );
 
-program
+withOntologyOptions(program
   .command('create-ontology')
-  .action((name, uriBase) => {
-    return createOntology(name, uriBase).catch(reportRefusal);
+  .option('-y, --yes', 'Ask nothing: flags and defaults only, as without a terminal.')
+  .action((name, uriBase, options) => {
+    return createOntology(name, uriBase, process.cwd(), options).catch(reportRefusal);
   })
   .description(
     'Creates a new ontology file for your package. Execute this from your package folder.',
@@ -326,7 +367,7 @@ program
   .argument(
     '[uribase]',
     "Optional argument to set the URI base for the URI's of all entities in your ontology. Leave blank to use the URI's provided by lincd.org once you register this package",
-  );
+  ));
 
 program
   .command('prefixes')
@@ -764,7 +805,7 @@ branch
 branch
   .command('start <name> [packages...]')
   .description(
-    'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when: any of them has uncommitted or untracked changes; --target is missing in a repo where <name> has to be created; <name> equals the target; <name> contains "--" (it separates agent branches); or another worktree has <name> checked out. If a switch fails partway, the repos already switched go back: each to its previous branch, a branch the run created is deleted (kept, with its sha printed, when it moved or another branch forked from it), and the target entry is restored. With --worktree: start a master instead, switching nothing -- <name> in a new app worktree (default <parent of the app root>/wt/<name>) with a nested worktree on <name> of each named package (positional or --with), each created from the branch that repo\'s checkout is on (or --target), node_modules a link farm into the main checkout\'s install; records branch.<name>.linked-target, -worktree, -port (first free of 4510, 4520, ... 4590, or --port) and -dataset in each repo, and prints the preview start command (PORT, SITE_ROOT and CN_PROJECTS_ROOT when the .env sets them, FUSEKI_DATASET). Run in the main checkout; refuses, making nothing, when <name> exists in a repo, the directory exists, or the port is another master\'s.',
+    'Run in an app. Put the app root and the named packages-local/ checkouts (@_linked/core, core or _linked-core) on branch <name>, creating it from --target where it does not exist, and record the target. Refuses, switching nothing, when: any of them has uncommitted or untracked changes; --target is missing in a repo where <name> has to be created; <name> equals the target; <name> contains "--" (it separates agent branches); or another worktree has <name> checked out. If a switch fails partway, the repos already switched go back: each to its previous branch, a branch the run created is deleted (kept, with its sha printed, when it moved or another branch forked from it), and the target entry is restored. With --worktree: start a master instead, switching nothing -- <name> in a new app worktree (default <parent of the app root>/wt/<name>) with a nested worktree on <name> of each named package (positional or --with), each created from the branch that repo\'s checkout is on (or --target), node_modules a link farm into the main checkout\'s install; records branch.<name>.linked-target, -worktree, -port (first free of 4510, 4520, ... 4590, or --port) and -dataset in each repo, and prints the preview start command (PORT, SITE_ROOT and the projects-root var worktree.projectsRootVar in linked.app.json names, when the .env sets them, FUSEKI_DATASET). Run in the main checkout; refuses, making nothing, when <name> exists in a repo, the directory exists, or the port is another master\'s.',
   )
   .option('--target <branch>', 'The branch the work lands in, e.g. main or dev. Required without --worktree; with it, the default is the branch each checkout is on.')
   .option('--worktree', "Start a master: <name> in a worktree of its own; the checkouts stay where they are.")

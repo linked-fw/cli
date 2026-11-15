@@ -43,6 +43,23 @@
       "type": "string",
       "default": "clone-dataset"
     },
+    "worktree": {
+      "description": "The app's own env vars that linked worktree add and linked branch start --worktree set in the start commands they print.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectsRootVar": {
+          "description": "The env var holding the directory the app keeps its checkouts in. A worktree's or master's start command sets it to the worktree's own (the .env's relative value under the worktree, else the last segment of its absolute one), only when the .env sets it.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "testPortVar": {
+          "description": "The env var holding the port of the app's test runs; a master's preview message names it with the port after the preview's.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        }
+      }
+    },
     "publish": {
       "description": "What linked build-app ships besides the Vite bundle, and where releases go.",
       "type": "object",

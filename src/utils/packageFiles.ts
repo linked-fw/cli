@@ -10,9 +10,12 @@
  * What a kind gets (`PACKAGE_TEMPLATE_DIRS`): every kind gets the shared files
  * of `defaults/package` (manifest, tsconfigs, dotfiles, `src/package.ts`); an
  * asset package gets the rest of that folder, an ontology package gets
- * `defaults/package-ontology` on top, with the example ontology named after its
- * ontology slug. Dotfiles ship under neutral names (`gitignore.template`) and
- * are returned under their real ones (`.gitignore`).
+ * `defaults/package-ontology` on top (its own `src/package.ts`, which takes only
+ * what an ontology package uses from `linkedPackage`, and a README), and the
+ * files generated for its one ontology, named after its ontology slug: the data
+ * file with the ontology's metadata (`ontologyScaffoldTurtle`) and the modules
+ * `linked generate-ontology` writes for it. Dotfiles ship under neutral names
+ * (`gitignore.template`) and are returned under their real ones (`.gitignore`).
  */
 import fs from 'fs';
 import path from 'path';
@@ -29,6 +32,18 @@ import {withBaseUri} from './packageBaseUri.js';
 import {shippedDotfileName} from './shippedDotfiles.js';
 import {generateOntologyModules, ONTOLOGY_NAME} from './ontologyModules.js';
 import {ONTOLOGIES_KEY, ONTOLOGY_NAMESPACE} from './ontologyConfig.js';
+import {
+  ontologyScaffoldTurtle,
+  resolveOntologyFields,
+  type OntologyScaffoldFields,
+} from './ontologyScaffoldTurtle.js';
+
+/** A `package.json` person (`author`). */
+export interface PackagePerson {
+  name?: string;
+  email?: string;
+  url?: string;
+}
 
 export interface PackageFilesOptions {
   /**
@@ -48,6 +63,23 @@ export interface PackageFilesOptions {
    * an asset package's ontology package.
    */
   dependencies?: Record<string, string>;
+  /**
+   * An ontology package's ontology metadata: title, description, prefix, creator,
+   * maintainer and status, each with a default ({@link OntologyScaffoldFields}).
+   * Its namespace is `uriBase`.
+   */
+  ontology?: OntologyScaffoldFields;
+  /**
+   * `package.json` `description`. Default: the ontology's description, else
+   * the template's empty one, left for the user to fill in.
+   */
+  description?: string;
+  /**
+   * `package.json` `author`: the fields given replace the template's empty
+   * ones (`name`, `email`, `url`), the rest stay empty for the user to fill in.
+   * Default `url`: the ontology's creator.
+   */
+  author?: PackagePerson;
   /** The templates folder. Defaults to this package's `defaults/`. */
   templatesDir?: string;
 }
@@ -59,26 +91,26 @@ export type PackageFiles = Record<string, string>;
 const FILLED_FILES = ['src/index.ts', 'package.json', 'src/package.ts'];
 
 /**
- * The ontology kind's example files, renamed to the ontology slug. Its modules are not
- * templates: they are generated ({@link ontologyScaffoldModules}).
+ * The ontology kind's filled templates. Its data file and modules are not templates: they are
+ * generated ({@link ontologyScaffoldTurtle}, {@link ontologyScaffoldModules}).
  */
-const EXAMPLE_ONTOLOGY_FILES = ['src/data/example-ontology.ttl'];
-const FILLED_ONTOLOGY_FILES = EXAMPLE_ONTOLOGY_FILES;
+const FILLED_ONTOLOGY_FILES = ['README.md'];
 
 /**
  * The ontology modules of a new package whose one ontology has no terms yet
  * (`src/ontologies/<name>.ts` and the index registering it, `src/ontologies/index.ts`), exactly
  * as `linked generate-ontology` writes them for its scaffolded Turtle (`src/data/<name>.ttl`,
- * which declares only the ontology, with its name as its suggested prefix), so the first
- * `linked build` finds them current.
+ * which declares only the ontology, with `prefix` as its preferred prefix, the name by
+ * default), so the first `linked build` finds them current.
  */
 export function ontologyScaffoldModules(
   name: string,
   namespace: string,
+  prefix: string = name,
 ): PackageFiles {
   return generateOntologyModules({
     name,
-    suggestedPrefix: name,
+    suggestedPrefix: prefix,
     namespace,
     dataFiles: [`../data/${name}.ttl`],
     terms: [],
@@ -162,8 +194,11 @@ function camelCase(str: string): string {
 /**
  * The files of a new package of one kind, by package-relative path, sorted.
  *
- *   buildPackageFiles('@acme/planning-ont', 'ontology', {baseUri: 'https://acme.example/'})
- *   // → {'.gitignore': …, 'package.json': …, 'src/ontologies/planning.ts': …, …}
+ *   buildPackageFiles('@acme/planning-ont', 'ontology', {
+ *     baseUri: 'https://example.org/',
+ *     ontology: {title: 'Planning', prefix: 'pl', creator: 'https://example.org/ann#me'},
+ *   })
+ *   // → {'.gitignore': …, 'package.json': …, 'src/data/planning.ttl': …, 'src/ontologies/planning.ts': …, …}
  *
  * `packageName` is used as given: `packageNameFor(name, kind)` adds the kind's
  * suffix the way the command does.
@@ -233,13 +268,25 @@ export function buildPackageFiles(
   for (const [file, source] of sources) {
     let content = fs.readFileSync(source, 'utf8');
     if (filled.has(file)) content = fill(content);
-    files[outputPath(file, kind === 'ontology' ? hyphenName : undefined)] =
-      content;
+    files[outputPath(file)] = content;
   }
 
+  let author: PackagePerson = {...options.author};
+  let description = options.description;
   if (kind === 'ontology') {
     checkScaffoldOntology(hyphenName, variables.uri_base);
-    Object.assign(files, ontologyScaffoldModules(hyphenName, variables.uri_base));
+    const fields = resolveOntologyFields(hyphenName, options.ontology);
+    files[`src/data/${hyphenName}.ttl`] = ontologyScaffoldTurtle(
+      hyphenName,
+      variables.uri_base,
+      fields,
+    );
+    Object.assign(
+      files,
+      ontologyScaffoldModules(hyphenName, variables.uri_base, fields.prefix),
+    );
+    if (!author.url && fields.creator) author = {...author, url: fields.creator};
+    description ??= fields.description;
     files['package.json'] = withOntologyEntry(
       files['package.json'],
       hyphenName,
@@ -252,6 +299,9 @@ export function buildPackageFiles(
   // The package says what it is: `linked.kind` merged into the template's
   // `linked` object, never replacing it.
   const pkg = JSON.parse(files['package.json']);
+  if (description) pkg.description = description;
+  const filledAuthor = filledPerson(pkg.author, author);
+  if (Object.keys(filledAuthor).length) pkg.author = filledAuthor;
   pkg.linked = {...pkg.linked, kind};
   if (dependencies && Object.keys(dependencies).length) {
     pkg.dependencies = {...pkg.dependencies, ...dependencies};
@@ -263,18 +313,27 @@ export function buildPackageFiles(
   );
 }
 
-/** Where a template file lands: dotfiles restored, the example ontology renamed. */
-function outputPath(
-  file: string,
-  ontologyFileName: string | undefined,
-): string {
+/** Where a template file lands: dotfiles restored. */
+function outputPath(file: string): string {
   const parts = file.split('/');
-  let last = shippedDotfileName(parts.pop()!);
-  if (ontologyFileName && EXAMPLE_ONTOLOGY_FILES.includes(file)) {
-    const [, ...extensions] = last.split('.');
-    last = [ontologyFileName, ...extensions].join('.');
-  }
+  const last = shippedDotfileName(parts.pop()!);
   return [...parts, last].join('/');
+}
+
+/**
+ * The template's `author` (`{name, email, url}`, empty for the user to fill in) with the fields
+ * `given` has. A template whose `author` is not an object gets `given`'s fields alone.
+ */
+function filledPerson(template: unknown, given: PackagePerson): PackagePerson {
+  const base: PackagePerson =
+    template && typeof template === 'object' && !Array.isArray(template)
+      ? (template as PackagePerson)
+      : {};
+  const out: PackagePerson = {...base};
+  for (const key of ['name', 'email', 'url'] as const) {
+    if (given[key]) out[key] = given[key];
+  }
+  return out;
 }
 
 /** Every file under a folder, relative and `/`-separated. */

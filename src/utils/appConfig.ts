@@ -16,7 +16,7 @@
  * `_3`, … when taken. A tool never changes or removes an entry; that is the app owner's.
  *
  * The other keys are the app's settings: `cssMode`, `syncShapesOnBoot`, `datasetCloneScript`,
- * `publish` and `server` ({@link AppConfig}). They replace the `linked.config.js` module, which is
+ * `worktree`, `publish` and `server` ({@link AppConfig}). They replace the `linked.config.js` module, which is
  * no longer read: an app that still has one is refused ({@link assertNoLegacyConfig}).
  *
  * The schema ships with this package (`schema/app/1.json`). A tool refuses a `schemaVersion` it
@@ -80,10 +80,25 @@ export interface AppConfig {
    * worktree add --dataset` prints it (default `clone-dataset`).
    */
   datasetCloneScript?: string;
+  /** The app's own env vars the worktree and master commands set in the start commands they print. */
+  worktree?: AppWorktreeSettings;
   /** What `linked build-app` ships besides the Vite bundle, and where releases go. */
   publish?: AppPublishConfig;
   /** The server's settings. */
   server?: AppServerSettings;
+}
+
+/** `worktree` in `linked.app.json`: the names of env vars only the app knows. */
+export interface AppWorktreeSettings {
+  /**
+   * The env var holding the directory the app keeps its checkouts in. A worktree's or a master's
+   * start command sets it to the worktree's own (the `.env`'s relative value under the worktree,
+   * else the last segment of its absolute one), so their checkouts never land in the main
+   * checkout's. Only when the `.env` sets it.
+   */
+  projectsRootVar?: string;
+  /** The env var holding the port of the app's test runs; a master's preview message names it. */
+  testPortVar?: string;
 }
 
 /** The order keys are written in. */
@@ -94,9 +109,13 @@ const KEYS = [
   'cssMode',
   'syncShapesOnBoot',
   'datasetCloneScript',
+  'worktree',
   'publish',
   'server',
 ] as const;
+const WORKTREE_KEYS = ['projectsRootVar', 'testPortVar'] as const;
+/** An env var name. */
+const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SERVER_KEYS = [
   'rpcExposure',
   'rawQueries',
@@ -169,6 +188,22 @@ function readSettings(
   }
   if (json.datasetCloneScript !== undefined) {
     out.datasetCloneScript = ofType(json.datasetCloneScript, 'string', 'datasetCloneScript');
+  }
+  if (json.worktree !== undefined) {
+    if (!isObject(json.worktree)) {
+      throw new Error(`${where}: "worktree" must be an object.`);
+    }
+    checkKeys(json.worktree, WORKTREE_KEYS, where, 'worktree');
+    const worktree: AppWorktreeSettings = {};
+    for (const key of WORKTREE_KEYS) {
+      const value = json.worktree[key];
+      if (value === undefined) continue;
+      if (typeof value !== 'string' || !ENV_VAR_NAME.test(value)) {
+        throw new Error(`${where}: "worktree.${key}" must be an env var name, such as "MY_APP_VAR".`);
+      }
+      worktree[key] = value;
+    }
+    out.worktree = worktree;
   }
   if (json.publish !== undefined) {
     if (!isObject(json.publish)) {

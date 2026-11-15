@@ -95,7 +95,13 @@ describe('the reader', () => {
       'schemaVersion',
       'server',
       'syncShapesOnBoot',
+      'worktree',
     ]);
+    expect(Object.keys(schema.properties.worktree.properties).sort()).toEqual([
+      'projectsRootVar',
+      'testPortVar',
+    ]);
+    expect(schema.properties.worktree.additionalProperties).toBe(false);
     expect(Object.keys(schema.properties.server.properties).sort()).toEqual([
       'apiOnly',
       'cachePaths',
@@ -128,6 +134,7 @@ describe('the settings', () => {
     cssMode: 'tailwind',
     syncShapesOnBoot: false,
     datasetCloneScript: 'data:clone',
+    worktree: {projectsRootVar: 'APP_PROJECTS_ROOT', testPortVar: 'APP_TEST_PORT'},
     publish: {staticAssets: ['fonts/**'], releasePrefix: 'rel'},
     server: {
       rpcExposure: 'enforce',
@@ -183,6 +190,12 @@ describe('the settings', () => {
       '"publish" has the key "target"',
     );
     expect(parse({schemaVersion: 1, server: []})).toThrow('"server" must be an object.');
+    expect(parse({schemaVersion: 1, worktree: {projectsRootVar: 'not a var'}})).toThrow(
+      '"worktree.projectsRootVar" must be an env var name',
+    );
+    expect(parse({schemaVersion: 1, worktree: {dataVar: 'X'}})).toThrow(
+      '"worktree" has the key "dataVar"',
+    );
   });
 
   test('a leftover linked.config.js or lincd.config.js is refused, saying how to move it', () => {

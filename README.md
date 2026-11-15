@@ -65,11 +65,44 @@ what it is in `"linked": {"kind": "ontology"}` or `{"kind": "assets"}`. `create-
 writing an import of a package that does not exist: run them inside `packages/<name>`. An app that
 does have a `src/package.ts` at its root is served as before.
 
+An ontology package's data file (`src/data/<name>.ttl`) states the ontology's metadata, and
+every new package's `package.json` has a `description` and an `author` (`{name, email, url}`),
+empty for you to fill in unless a flag fills them. Every field has a flag and a default:
+
+| Flag | Written as | Default |
+|---|---|---|
+| `--title <title>` | `dcterms:title "…"@en` | the name in words (`lego-planning` → `Lego Planning`) |
+| `--description <text>` | `dcterms:description "…"@en`, and `package.json` `description` | none (`package.json`: empty) |
+| `--prefix <prefix>` | `vann:preferredNamespacePrefix`, the file's Turtle prefix and the generated modules' `suggestedPrefix` | the name |
+| `[uri_base]` | the namespace: `vann:preferredNamespaceUri`, `linkedOntologies` | `{baseUri}ont/<name>/`, else `https://linked.cm/ont/<name>/` |
+| `--creator <iri>` | `dcterms:creator` | none |
+| `--maintainer <iri>` | `schema:maintainer` | the creator |
+| `--status <status>` | `adms:status`: `Draft`, `ReadyForReview` or `Published` (`core:OntologyStatus`) | `Draft` |
+| `--author-name <name>` | `package.json` `author.name` | empty |
+| `--author-email <email>` | `package.json` `author.email` | empty |
+| `--author-url <url>` | `package.json` `author.url` | an ontology package's creator, else empty |
+
+The ontology flags (`--title` … `--status`) are taken by `create-package`, `create-ont-package`
+and `create-ontology` (which writes only the data file and modules); the author flags by the
+three package commands. On a terminal, the title, description and prefix no flag gave are asked
+(Enter keeps the default). `--yes` (`-y`) asks nothing: flags and defaults only, as without a
+terminal, so a missing `--kind` or `--location` is refused rather than asked:
+
+```bash
+linked create-package planning --kind ontology --location packages --yes \
+  --title "Planning" --description "Planning terms" --prefix pl \
+  --creator https://example.org/ann#me --status Draft \
+  --author-name "Ann" --author-email ann@example.org --author-url https://example.org/ann#me
+```
+
 The files a kind gets are also available as data, for a host that commits a package somewhere
 other than the local disk: `buildPackageFiles(packageName, kind, {uriBase?, baseUri?,
-dependencies?})` from `@_linked/cli/utils/packageFiles` returns package-relative path → content,
-dotfiles under their real names. It writes, asks and installs nothing; `create-package` writes
-exactly what it returns.
+dependencies?, ontology?, description?, author?})` from `@_linked/cli/utils/packageFiles` returns
+package-relative path → content, dotfiles under their real names. It writes, asks and installs
+nothing; `create-package` writes exactly what it returns. `ontology` takes the fields above
+(`{title, description, prefix, creator, maintainer, status}`), `description` the
+`package.json` description (default: the ontology's), and `author` the person's fields that
+replace the template's empty ones (`{name?, email?, url?}`).
 
 A package's IRIs are minted under a root: `linkedPackage(name, {baseUri})`, shapes at
 `{baseUri}shape/<package>/<Name>`, an ontology package's terms at `{baseUri}ont/<slug>/<Term>`.
@@ -658,13 +691,16 @@ Every `package.json` says what it is in `linked.kind`, merged into any other `li
 
 ```json
 {
-  "linked": {"kind": "ontology"}   // or "assets", "library" (framework code), "app"
+  "linked": {"kind": "ontology"}   // or "assets", "library" (framework code), "tooling", "app"
 }
 ```
 
-A linked package is any kind but `app`: `linked build` builds it, and boot loading, the ontology
-sync, Vite's dependency exclusion and `build-all`'s dependency order find it. An `app` is built with
-`linked build-app`. `linkedKind(json)` from `@_linked/cli/installed-packages` is the one reader
+A linked package is an `ontology`, `assets` or `library` package: `linked build` builds it, and boot
+loading, the ontology sync, Vite's dependency exclusion and `build-all`'s dependency order find it
+(`isLinkedPackageJson`, or `isLinkedPackageKind` for a kind already read). A `tooling` package is a build or dev tool with no shapes, ontology or
+components (this CLI is one): `linked build` builds it like a library, but it is not a linked
+package, so nothing loads, syncs, imports or lists it (`isBuiltByLinkedBuild` covers both). An `app`
+is built with `linked build-app`. `linkedKind(json)` from `@_linked/cli/installed-packages` is the one reader
 (`@_linked/server/utils/linkedDependencies` has a byte-identical twin).
 
 A package can also declare its ontologies under `"linkedOntologies"` (see
@@ -729,7 +765,7 @@ Templates live in `defaults/`:
 - `defaults/app-with-backend/` — used by `linked create-app`
 - `defaults/app-static/` — minimal static app
 - `defaults/package/` — the asset package of `linked create-package` / `create-asset-package`; its manifest, tsconfigs, dotfiles and `src/package.ts` are shared by every kind
-- `defaults/package-ontology/` — what an ontology package (`create-ont-package`) gets on top of the shared files: the entry importing `./ontologies/index.js` and the example ontology's data (its modules are generated)
+- `defaults/package-ontology/` — what an ontology package (`create-ont-package`) gets on top of the shared files: the entry importing `./ontologies/index.js`, its `src/package.ts` and a README (its data file and modules are generated)
 - `defaults/setup-publish/` — caller workflows + changeset files written by `linked setup-publish` (`main`-only; `--dual-branch` is a deprecated no-op)
 
 ### `linked create-app` template structure

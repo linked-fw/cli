@@ -53,6 +53,7 @@ import {
   startEnv,
   worktreeList,
   worktreeRelink,
+  worktreeSettings,
 } from './worktree.js';
 
 export interface BranchStartWorktreeOptions {
@@ -228,12 +229,13 @@ async function makeMaster(
   const untouched = local.filter((r) => !selected.includes(r)).map((r) => r.rel);
   if (untouched.length) messages.push(`No worktree (the install's copy is used): ${untouched.join(', ')}`);
 
-  result.startCommand = startCommandFor(dir, startEnv(dir, port, options.dataset, true));
+  result.startCommand = startCommandFor(dir, startEnv(dir, port, options.dataset));
+  const testPortVar = worktreeSettings(dir).testPortVar;
   messages.push(
     '',
     `Master ${name}: ${dir}. The owner's checkouts were not switched.`,
     `Preview: ${result.startCommand}`,
-    `Preview link: http://localhost:${port} (its test runs: CN_TEST_PORT=${port + 1}; steps: ports ${stepPorts(port)}).`,
+    `Preview link: http://localhost:${port} (its test runs: ${testPortVar ? `${testPortVar}=` : 'port '}${port + 1}; steps: ports ${stepPorts(port)}).`,
     `Steps: linked worktree add <agent> --from ${name} [--with <packages>] (run anywhere in the app).`,
     `After each landing into ${name}: npx linked build in each changed package worktree under ${path.join(dir, 'packages-local')}, then restart the preview.`,
     `When the owner approves: linked branch land ${name}, from ${root}.`,

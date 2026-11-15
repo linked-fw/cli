@@ -76,10 +76,11 @@ function makeApp(): App {
     'package.json': JSON.stringify({name: 'my-app', workspaces: ['packages/*', 'packages-local/*'], scripts: {'start:local': 'linked start'}}),
     '.gitignore': 'node_modules\npackages-local/\n.env\n.vite-cache/\n/apps\nlib/\n',
     'src.txt': 'app\n',
+    'linked.app.json': JSON.stringify({schemaVersion: 1, worktree: {projectsRootVar: 'APP_PROJECTS_ROOT', testPortVar: 'APP_TEST_PORT'}}),
     'packages/access/package.json': JSON.stringify({name: '@_linked/access', main: 'lib/esm/index.js'}),
     'packages/chrome/package.json': JSON.stringify({name: '@my-app/chrome', exports: {'./chrome.css': './src/chrome.css'}}),
   });
-  fs.writeFileSync(path.join(root, '.env'), `PORT=4040\nSITE_ROOT=http://localhost:4040\nCN_PROJECTS_ROOT=${root}/apps\n`);
+  fs.writeFileSync(path.join(root, '.env'), `PORT=4040\nSITE_ROOT=http://localhost:4040\nAPP_PROJECTS_ROOT=${root}/apps\n`);
   fs.mkdirSync(path.join(root, 'packages', 'access', 'lib', 'esm'), {recursive: true});
   fs.writeFileSync(path.join(root, 'packages', 'access', 'lib', 'esm', 'index.js'), '');
   fs.mkdirSync(path.join(root, 'packages', 'access', 'node_modules', '@types'), {recursive: true});
@@ -170,8 +171,9 @@ describe('linked branch start --worktree', () => {
 
     assert.equal(
       result.startCommand,
-      `cd ${dir} && PORT=4510 SITE_ROOT=http://localhost:4510 CN_PROJECTS_ROOT=${dir}/apps npm run start:local`,
+      `cd ${dir} && PORT=4510 SITE_ROOT=http://localhost:4510 APP_PROJECTS_ROOT=${dir}/apps npm run start:local`,
     );
+    assert.match(result.messages.join('\n'), /its test runs: APP_TEST_PORT=4511;/);
     assert.match(result.messages.join('\n'), /Not built here yet.*@_linked\/access/);
     // The master's worktree counts as clean.
     assert.equal(git(dir, 'status', '--porcelain'), '');
@@ -445,7 +447,8 @@ describe('linked worktree add --from', () => {
     assert.equal(real(path.join(dir, 'node_modules', 'react')), real(path.join(app.root, 'node_modules', 'react')));
     // The nested node_modules link is the install's own directory, not the master's link.
     assert.equal(fs.readlinkSync(path.join(pkgDir, 'node_modules')), path.join(app.server, 'node_modules'));
-    assert.match(result.startCommand ?? '', /PORT=4512 SITE_ROOT=http:\/\/localhost:4512 npm run start:local$/);
+    // A step's checkouts are its own too, not the master's.
+    assert.equal(result.startCommand, `cd ${dir} && PORT=4512 SITE_ROOT=http://localhost:4512 APP_PROJECTS_ROOT=${dir}/apps npm run start:local`);
     assert.match(result.messages.join('\n'), /merge --ff-only from the master's worktree/);
   });
 

@@ -103,7 +103,7 @@ export async function readInstalledPkg(
 
 // linkedKind: twin of @_linked/server src/utils/linkedDependencies.ts, keep byte-identical.
 /** What a `package.json` is, by its `linked.kind`. */
-export type LinkedKind = 'app' | 'ontology' | 'assets' | 'library';
+export type LinkedKind = 'app' | 'ontology' | 'assets' | 'library' | 'tooling';
 
 /** Every value `linked.kind` may take. */
 export const LINKED_KINDS: readonly LinkedKind[] = [
@@ -111,13 +111,16 @@ export const LINKED_KINDS: readonly LinkedKind[] = [
   'ontology',
   'assets',
   'library',
+  'tooling',
 ];
 
 /**
  * THE way to tell what a `package.json` is: its `"linked": {"kind": …}`. `app` is an app (built
  * by `linked build-app`); `ontology`, `assets` and `library` are linked packages (an ontology
- * package may carry shapes for its own terms; `library` is framework code). Undefined for
- * anything else: no `linked` object and a kind that is not one of these.
+ * package may carry shapes for its own terms; `library` is framework code). `tooling` is a
+ * build or dev tool that `linked build` builds like a library but that is NOT a linked package:
+ * it carries no shapes, ontology or components, so nothing loads, syncs, imports or lists it.
+ * Undefined for anything else: no `linked` object and a kind that is not one of these.
  *
  * Until every published package carries `linked.kind`, a `package.json` without one is still
  * read by the retired flags: `linkedApp: true` is an `app`, `linkedPackage: true` a `library`.
@@ -140,15 +143,32 @@ function retiredFlagKind(json: object): LinkedKind | undefined {
 // end of the linkedKind twin.
 
 /**
- * THE definition of a linked package: its own `package.json` has a `linked.kind` other than
- * `app` ({@link linkedKind}). Not its npm scope — a linked package can be published under any
- * scope, and not everything under `@_linked/` is one (a plain tool need not be).
- * `lifecycle.ts` (`build-all`, `getLincdPackages`) and `linked build-package` use this too.
+ * THE definition of a linked package: its own `package.json` has a `linked.kind` of `ontology`,
+ * `assets` or `library` ({@link linkedKind}) — neither an `app` nor `tooling`. Not its npm scope
+ * — a linked package can be published under any scope, and not everything under `@_linked/` is
+ * one (a build or dev tool declares `tooling`). Boot loading, the dev resolver, the ontology sync,
+ * Vite's dependency exclusion and a host's package imports all go by this.
  */
-export const isLinkedPackageJson = (json: unknown): boolean => {
-  const kind = linkedKind(json);
-  return kind !== undefined && kind !== 'app';
-};
+export const isLinkedPackageJson = (json: unknown): boolean =>
+  isLinkedPackageKind(linkedKind(json));
+
+/** The kinds of a linked package. */
+export type LinkedPackageKind = 'ontology' | 'assets' | 'library';
+
+/**
+ * Is `kind` (a `linked.kind` value as read, or a stored one) the kind of a linked package:
+ * `ontology`, `assets` or `library`. For a caller that holds the kind rather than the
+ * `package.json`; {@link isLinkedPackageJson} is this over {@link linkedKind}.
+ */
+export const isLinkedPackageKind = (kind: unknown): kind is LinkedPackageKind =>
+  kind === 'ontology' || kind === 'assets' || kind === 'library';
+
+/**
+ * Does `linked build` build this package: a linked package ({@link isLinkedPackageJson}) or a
+ * `tooling` package, which is built the same way as a `library` but is not a linked package.
+ */
+export const isBuiltByLinkedBuild = (json: unknown): boolean =>
+  isLinkedPackageJson(json) || linkedKind(json) === 'tooling';
 
 /** One entry of `linked.unpublishedPackages`: a package the app uses that is not on npm. */
 export interface UnpublishedPackage {

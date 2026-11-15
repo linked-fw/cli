@@ -83,6 +83,7 @@ import {packagePublishesCjs} from './package-manifest.js';
 import {asNamespace, defaultOntologyNamespace} from './utils/ontologyNamespace.js';
 import {
   decidePackageKind,
+  ontologySlugFor,
   packageNameFor,
   scaffoldKinds,
 } from './utils/packageKind.js';
@@ -96,6 +97,18 @@ import {
   withOntologyEntry,
 } from './utils/packageFiles.js';
 import type {PackageFilesOptions} from './utils/packageFiles.js';
+import {
+  authorFromFlags,
+  ontologyFieldsFromFlags,
+  type PackageMetadataFlags,
+} from './utils/packageMetadata.js';
+import {
+  ONTOLOGY_PREFIX,
+  ontologyScaffoldTurtle,
+  ontologyTitleFor,
+  resolveOntologyFields,
+  type OntologyScaffoldFields,
+} from './utils/ontologyScaffoldTurtle.js';
 import type {ResolvedBaseUri} from './utils/packageBaseUri.js';
 
 // This module's directory. fileURLToPath, not the URL with `file:/` cut off,
@@ -150,7 +163,7 @@ import {
   orderBuildToolFirst,
 } from './lifecycle.js';
 import type {BuildAllPlan} from './lifecycle.js';
-import {isLinkedPackageJson, linkedKind} from './installed-packages.js';
+import {isBuiltByLinkedBuild, linkedKind} from './installed-packages.js';
 import {excerptBuildError} from './build-error-excerpt.js';
 export {
   ensureEnvironmentLoaded,
@@ -1468,11 +1481,14 @@ export const createOntology = async (
   name,
   uriBase?,
   basePath = process.cwd(),
+  options: PackageMetadataFlags & {yes?: boolean} = {},
 ) => {
   if (!name) {
     console.warn("Please provide the ontology's name as the first argument");
     return;
   }
+  // The metadata flags, read before anything is asked or written.
+  let fields = ontologyFieldsFromFlags(options);
 
   let sourceFolder = getSourceFolder(basePath);
   assertInsidePackage(sourceFolder, 'create-ontology');
@@ -1488,6 +1504,10 @@ export const createOntology = async (
   const namespace = asNamespace(uriBase);
   // Refused before anything is written: a name the modules, Turtle or build check cannot use.
   checkScaffoldOntology(hyphenName, namespace);
+  resolveOntologyFields(hyphenName, fields);
+  if (!options.yes && process.stdin.isTTY && process.stdout.isTTY) {
+    fields = await askOntologyFields(hyphenName, fields);
+  }
   log("Creating files for ontology '" + name + "'");
 
   // The ontology's data, Turtle. `loadData` reads it beside the compiled module
@@ -1498,11 +1518,10 @@ export const createOntology = async (
     'data',
     hyphenName + '.ttl',
   );
-  fs.copySync(
-    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.ttl'),
+  fs.outputFileSync(
     targetDataFile,
+    ontologyScaffoldTurtle(hyphenName, namespace, fields),
   );
-  await replaceVariablesInFiles(targetDataFile);
 
   // The `linkedOntologies` entry, then the package's modules as `linked generate-ontology` writes
   // them (this ontology's terms, the index registering every ontology of the package, the entry's
@@ -1522,7 +1541,11 @@ export const createOntology = async (
     await writePackageOntologies(packageRoot);
   } else {
     for (const [rel, content] of Object.entries(
-      ontologyScaffoldModules(hyphenName, namespace),
+      ontologyScaffoldModules(
+        hyphenName,
+        namespace,
+        resolveOntologyFields(hyphenName, fields).prefix,
+      ),
     )) {
       fs.outputFileSync(
         path.join(sourceFolder, rel.replace(/^src\//, '')),
@@ -2493,7 +2516,8 @@ export const createPackage = async (
     console.warn('Please provide a name as the first argument');
     return;
   }
-  const isTTY = !!(process.stdin.isTTY && process.stdout.isTTY);
+  // `--yes` asks nothing: flags and defaults only, as without a terminal.
+  const isTTY = !options.yes && !!(process.stdin.isTTY && process.stdout.isTTY);
 
   // What, then where. Both are settled before anything is written, so a
   // refusal leaves nothing behind and `both` asks each question once.
@@ -2518,13 +2542,32 @@ export const createPackage = async (
   } catch (e) {
     throw new CreatePackageError((e as Error).message);
   }
-  const decision =
-    decided.kind === 'ask' ? await askPackageLocation(name) : decided;
-
   const packages = scaffoldKinds(packageKind).map((kind) => ({
     kind,
     name: packageNameFor(name, kind),
   }));
+  // The metadata flags, read before anything is asked or written.
+  const ontologyPackage = packages.find((p) => p.kind === 'ontology');
+  const ontologySlug = ontologyPackage && ontologySlugFor(ontologyPackage.name);
+  let author: PackageFilesOptions['author'];
+  let ontology: OntologyScaffoldFields | undefined;
+  try {
+    author = authorFromFlags(options);
+    if (ontologySlug) {
+      ontology = ontologyFieldsFromFlags(options);
+      resolveOntologyFields(ontologySlug, ontology);
+    }
+  } catch (e) {
+    throw new CreatePackageError((e as Error).message);
+  }
+
+  const decision =
+    decided.kind === 'ask' ? await askPackageLocation(name) : decided;
+  if (ontologySlug && isTTY) {
+    ontology = await askOntologyFields(ontologySlug, ontology ?? {});
+  }
+  // The package's description: the flag's, else the one asked for the ontology.
+  const description = options.description ?? ontology?.description;
   // Nothing is written until every target is free.
   const targets = await Promise.all(
     packages.map(async ({name: packageName}) => {
@@ -2552,6 +2595,9 @@ export const createPackage = async (
     scaffoldPackage(targetFolder, packageName, kind, {
       uriBase,
       baseUri: root?.baseUri,
+      ...(kind === 'ontology' && ontology ? {ontology} : {}),
+      ...(description !== undefined ? {description} : {}),
+      author,
       dependencies:
         kind === 'assets' && packageKind === 'both'
           ? ontologyDependency(packages, targets, decision)
@@ -2577,8 +2623,7 @@ export const createPackage = async (
 
 /**
  * The pair is one unit: the asset package of `--kind both` depends on the
- * ontology package created with it, at `^` its version — the same entry Create
- * Now's project scaffold writes. `ontology` comes first in `scaffoldKinds`, so
+ * ontology package created with it, at `^` its version. `ontology` comes first in `scaffoldKinds`, so
  * its package.json is already written.
  *
  * Only where npm workspaces link the two (`--location packages`). Anywhere
@@ -2649,6 +2694,34 @@ function scaffoldPackage(
   for (const [file, content] of Object.entries(files)) {
     fs.outputFileSync(path.join(targetFolder, ...file.split('/')), content);
   }
+}
+
+/**
+ * Ask an ontology package's title, description and prefix — only ever on a
+ * terminal, and only those no flag gave. Enter keeps the default shown.
+ */
+async function askOntologyFields(
+  slug: string,
+  given: OntologyScaffoldFields,
+): Promise<OntologyScaffoldFields> {
+  const fields = {...given};
+  if (fields.title === undefined) {
+    const title = ontologyTitleFor(slug);
+    fields.title =
+      (await promptUser(`Title of the ontology [${title}]: `)) || title;
+  }
+  if (fields.description === undefined) {
+    fields.description = await promptUser('Description (optional): ');
+  }
+  while (fields.prefix === undefined) {
+    const prefix = (await promptUser(`Preferred prefix [${slug}]: `)) || slug;
+    if (ONTOLOGY_PREFIX.test(prefix)) fields.prefix = prefix;
+    else
+      console.log(
+        'A prefix starts with a letter, then letters, digits, hyphens or underscores.',
+      );
+  }
+  return fields;
 }
 
 /**
@@ -3033,13 +3106,13 @@ export const buildPackage = async (
   // Always use the resolved absolute path
   packagePath = currentPath;
 
-  // Guard: `linked build` only makes sense for a linked package. Apps must use
-  // `linked build-app`. Plain packages (no `linked.kind`) have no build pipeline
-  // defined here and should have their own build script.
+  // Guard: `linked build` only makes sense for a linked package or a `tooling`
+  // package. Apps must use `linked build-app`. Plain packages (no `linked.kind`)
+  // have no build pipeline defined here and should have their own build script.
   const pkgJson = JSON.parse(
     fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'),
   );
-  if (!isLinkedPackageJson(pkgJson)) {
+  if (!isBuiltByLinkedBuild(pkgJson)) {
     if (linkedKind(pkgJson) === 'app') {
       console.error(
         chalk.red(
@@ -3049,7 +3122,7 @@ export const buildPackage = async (
     } else {
       console.error(
         chalk.red(
-          `'${pkgJson.name || packagePath}' has no "linked": {"kind": …} of a package in package.json. 'linked build' only builds linked packages: set linked.kind to "ontology", "assets" or "library", or run a different build command.`,
+          `'${pkgJson.name || packagePath}' has no "linked": {"kind": …} of a package in package.json. 'linked build' only builds linked packages and tooling: set linked.kind to "ontology", "assets", "library" or "tooling", or run a different build command.`,
         ),
       );
     }

@@ -40,6 +40,25 @@ export interface CreatePackageOptions {
    * app's `LINKED_BASE_URI`; see `./packageBaseUri.js`.
    */
   baseUri?: string;
+  /**
+   * Ask nothing (`--yes`): flags and defaults only, as without a terminal.
+   */
+  yes?: boolean;
+  /**
+   * An ontology package's metadata (`--title`, `--description`, `--prefix`, `--creator`,
+   * `--maintainer`, `--status`) and the `package.json` author (`--author-name`,
+   * `--author-email`, `--author-url`); see `./packageMetadata.js`. `--description` is the
+   * package's description too.
+   */
+  title?: string;
+  description?: string;
+  prefix?: string;
+  creator?: string;
+  maintainer?: string;
+  status?: string;
+  authorName?: string;
+  authorEmail?: string;
+  authorUrl?: string;
 }
 
 /**

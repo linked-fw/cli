@@ -1,6 +1,6 @@
 // `buildPackageFiles` is what `create-package` writes, as data. The command
-// writes exactly these files, so a host committing a package elsewhere (Create
-// Now, through the GitHub API) gets the same package as `linked create-package`.
+// writes exactly these files, so a host committing a package elsewhere (through
+// the GitHub API, say) gets the same package as `linked create-package`.
 //
 // cli-methods pulls in ora, which is ESM-only.
 jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
@@ -125,6 +125,7 @@ describe('buildPackageFiles', () => {
     expect(Object.keys(out)).toEqual([
       '.gitignore',
       '.npmignore',
+      'README.md',
       'package.json',
       'src/data/planning.ttl',
       'src/index.ts',
@@ -137,7 +138,13 @@ describe('buildPackageFiles', () => {
     expect(out['src/package.ts']).toContain(
       `linkedPackage('planning-ont', {baseUri: "https://acme.example/"})`,
     );
-    expect(out['src/package.ts']).toMatch(/^  registerOntologies,$/m);
+    // Only what an ontology package uses: the generated modules' `registerOntologies`, and its name.
+    expect(out['src/package.ts']).toContain(
+      `export const {registerOntologies, packageName} = linkedPackage(`,
+    );
+    expect(out['src/package.ts']).not.toMatch(/linkedShape|linkedUtil|getPackageShape|registerPackageExport|packageExports/);
+    expect(out['README.md']).toMatch(/^# planning-ont\n/);
+    expect(out['README.md']).toContain('`src/data/planning.ttl`');
     expect(out['src/ontologies/index.ts']).toContain(
       `      name: 'planning',\n      namespace: 'https://acme.example/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,
     );
@@ -147,7 +154,7 @@ describe('buildPackageFiles', () => {
       planning: {namespace: 'https://acme.example/ont/planning/'},
     });
     expect(out['src/data/planning.ttl']).toContain(
-      `<https://acme.example/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://acme.example/ont/planning/" .`,
+      `planning:\n    a owl:Ontology ;\n    dcterms:title "Planning"@en ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://acme.example/ont/planning/" ;\n    <http://www.w3.org/ns/adms#status> <https://linked.cm/ont/core/Draft> .`,
     );
     for (const [file, content] of Object.entries(out)) {
       expect([file, content]).not.toEqual([
