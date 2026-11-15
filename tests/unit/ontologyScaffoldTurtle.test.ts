@@ -8,7 +8,7 @@ jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
 import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
-import {createPackage} from '../../src/cli-methods';
+import {createOntology, createPackage} from '../../src/cli-methods';
 import {buildPackageFiles} from '../../src/utils/packageFiles';
 import {staleOntologyModules} from '../../src/utils/generateOntology';
 import {
@@ -16,8 +16,8 @@ import {
   ontologyTitleFor,
 } from '../../src/utils/ontologyScaffoldTurtle';
 import {
+  authorFromFlags,
   ontologyStatusFlag,
-  parsePackagePerson,
 } from '../../src/utils/packageMetadata';
 
 const NS = 'https://example.org/ont/planning/';
@@ -112,15 +112,13 @@ describe('ontologyScaffoldTurtle', () => {
 });
 
 describe('the metadata flags', () => {
-  test('--author takes npm\'s one-line person, or a bare IRI as its url', () => {
-    expect(parsePackagePerson('Ann Lovelace <ann@example.org> (https://example.org/ann)')).toEqual({
-      name: 'Ann Lovelace',
-      email: 'ann@example.org',
-      url: 'https://example.org/ann',
-    });
-    expect(parsePackagePerson('Ann Lovelace')).toEqual({name: 'Ann Lovelace'});
-    expect(parsePackagePerson(ANN)).toEqual({url: ANN});
-    expect(() => parsePackagePerson(' <> ')).toThrow(/names no one/);
+  test('--author-name, --author-email and --author-url make the author; a bad email or url is refused', () => {
+    expect(
+      authorFromFlags({authorName: ' Ann ', authorEmail: 'ann@example.org', authorUrl: ANN}),
+    ).toEqual({name: 'Ann', email: 'ann@example.org', url: ANN});
+    expect(authorFromFlags({})).toEqual({});
+    expect(() => authorFromFlags({authorEmail: 'ann'})).toThrow(/not an email address/);
+    expect(() => authorFromFlags({authorUrl: 'ann example'})).toThrow(/not a URL/);
   });
 
   test('--status is case-insensitive', () => {
@@ -178,28 +176,40 @@ describe('buildPackageFiles with the template fields', () => {
     expect(await staleOntologyModules(tmp)).toEqual([]);
   });
 
-  test('author: given, it follows description; else the creator as its url; else none', () => {
-    const keys = (pkg: string) => Object.keys(JSON.parse(pkg));
-    const given = buildPackageFiles('planning-ont', 'ontology', {
-      ontology,
-      author: {name: 'Ann', email: '', url: ANN},
-    })['package.json'];
-    expect(JSON.parse(given).author).toEqual({name: 'Ann', url: ANN});
-    expect(keys(given).slice(0, 3)).toEqual(['name', 'description', 'author']);
+  test("author and description: the template's empty fields, filled by what is given", () => {
+    const pkgOf = (text: string) => JSON.parse(text);
+    const given = pkgOf(
+      buildPackageFiles('planning-ont', 'ontology', {
+        ontology,
+        author: {name: 'Ann', email: 'ann@example.org'},
+      })['package.json'],
+    );
+    expect(given.author).toEqual({name: 'Ann', email: 'ann@example.org', url: ANN});
+    expect(given.description).toBe('Planning terms');
+    expect(Object.keys(given).slice(0, 3)).toEqual(['name', 'description', 'author']);
 
-    const fromCreator = buildPackageFiles('planning-ont', 'ontology', {ontology})['package.json'];
-    expect(JSON.parse(fromCreator).author).toEqual({url: ANN});
+    const own = pkgOf(
+      buildPackageFiles('planning-ont', 'ontology', {
+        ontology,
+        description: 'The planning package',
+        author: {url: 'https://example.org/ann'},
+      })['package.json'],
+    );
+    expect(own.description).toBe('The planning package');
+    expect(own.author).toEqual({name: '', email: '', url: 'https://example.org/ann'});
 
-    expect(JSON.parse(buildPackageFiles('planning-ont', 'ontology')['package.json'])).not.toHaveProperty('author');
-    expect(JSON.parse(buildPackageFiles('planning-assets', 'assets')['package.json'])).not.toHaveProperty('author');
+    const empty = {name: '', email: '', url: ''};
+    for (const kind of ['ontology', 'assets'] as const) {
+      const pkg = pkgOf(buildPackageFiles(`planning-${kind}`, kind)['package.json']);
+      expect([kind, pkg.description, pkg.author]).toEqual([kind, '', empty]);
+    }
     expect(
-      JSON.parse(buildPackageFiles('planning-assets', 'assets', {author: {name: 'Ann'}})['package.json']).author,
-    ).toEqual({name: 'Ann'});
+      pkgOf(buildPackageFiles('planning-assets', 'assets', {author: {name: 'Ann'}, description: 'Shapes'})['package.json']),
+    ).toMatchObject({description: 'Shapes', author: {name: 'Ann', email: '', url: ''}});
   });
 
-  test('the template leftovers are gone: no empty author, no dc: prefix, dotfiles end in a newline', () => {
+  test('the template leftovers are gone: no dc: prefix, dotfiles end in a newline', () => {
     const out = buildPackageFiles('planning-ont', 'ontology');
-    expect(out['package.json']).not.toContain('"author"');
     expect(out['src/data/planning.ttl']).not.toContain('@prefix dc:');
     expect(out['.npmignore'].endsWith('\n')).toBe(true);
     expect(out['.gitignore'].endsWith('\n')).toBe(true);
@@ -215,11 +225,14 @@ describe('buildPackageFiles with the template fields', () => {
       creator: ANN,
       maintainer: BOB,
       status: 'published',
-      author: 'Ann <ann@example.org>',
+      authorName: 'Ann',
+      authorEmail: 'ann@example.org',
+      yes: true,
     });
     const expected = buildPackageFiles('planning-ont', 'ontology', {
       uriBase: NS,
       ontology: {...ontology, maintainer: BOB, status: 'Published'},
+      description: 'Planning terms',
       author: {name: 'Ann', email: 'ann@example.org'},
     });
     for (const [file, content] of Object.entries(expected)) {
@@ -234,6 +247,44 @@ describe('buildPackageFiles with the template fields', () => {
     await expect(
       createPackage('planning', undefined, tmp, {kind: 'both', skipInstall: true, status: 'final'}),
     ).rejects.toThrow(/--status must be one of/);
+    await expect(
+      createPackage('planning', undefined, tmp, {kind: 'assets', skipInstall: true, authorEmail: 'ann'}),
+    ).rejects.toThrow(/not an email address/);
     expect(fs.readdirSync(tmp)).toEqual([]);
+  });
+
+  test('--yes on a terminal asks nothing: a missing --kind is refused, given flags and defaults are written', async () => {
+    for (const stream of [process.stdin, process.stdout]) {
+      Object.defineProperty(stream, 'isTTY', {value: true, configurable: true});
+    }
+    try {
+      await expect(createPackage('planning', undefined, tmp, {yes: true, skipInstall: true})).rejects.toThrow(
+        /What kind of package\? Pass --kind/,
+      );
+      await createPackage('planning', undefined, tmp, {kind: 'ontology', yes: true, skipInstall: true});
+    } finally {
+      for (const stream of [process.stdin, process.stdout]) {
+        Object.defineProperty(stream, 'isTTY', {value: false, configurable: true});
+      }
+    }
+    expect(fs.readFileSync(path.join(tmp, 'planning-ont', 'src/data/planning.ttl'), 'utf8')).toBe(
+      buildPackageFiles('planning-ont', 'ontology')['src/data/planning.ttl'],
+    );
+  });
+
+  test('create-ontology takes the ontology flags too', async () => {
+    fs.outputJsonSync(path.join(tmp, 'package.json'), {name: 'my-ont', linked: {kind: 'ontology'}});
+    fs.outputFileSync(
+      path.join(tmp, 'src', 'package.ts'),
+      `export const {registerOntologies} = linkedPackage('my-ont');\n`,
+    );
+    fs.outputFileSync(path.join(tmp, 'src', 'index.ts'), '');
+    jest.spyOn(process, 'cwd').mockReturnValue(tmp);
+    await createOntology('planning', NS, tmp, {...ontology, status: 'ReadyForReview', yes: true});
+    expect(fs.readFileSync(path.join(tmp, 'src/data/planning.ttl'), 'utf8')).toBe(
+      ontologyScaffoldTurtle('planning', NS, {...ontology, status: 'ReadyForReview'}),
+    );
+    expect(fs.readFileSync(path.join(tmp, 'src/ontologies/index.ts'), 'utf8')).toContain(`suggestedPrefix: 'pl',`);
+    await expect(createOntology('other', NS, tmp, {status: 'final'})).rejects.toThrow(/--status/);
   });
 });

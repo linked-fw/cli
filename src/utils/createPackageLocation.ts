@@ -41,9 +41,14 @@ export interface CreatePackageOptions {
    */
   baseUri?: string;
   /**
+   * Ask nothing (`--yes`): flags and defaults only, as without a terminal.
+   */
+  yes?: boolean;
+  /**
    * An ontology package's metadata (`--title`, `--description`, `--prefix`, `--creator`,
-   * `--maintainer`, `--status`) and the `package.json` author (`--author`); see
-   * `./packageMetadata.js`.
+   * `--maintainer`, `--status`) and the `package.json` author (`--author-name`,
+   * `--author-email`, `--author-url`); see `./packageMetadata.js`. `--description` is the
+   * package's description too.
    */
   title?: string;
   description?: string;
@@ -51,7 +56,9 @@ export interface CreatePackageOptions {
   creator?: string;
   maintainer?: string;
   status?: string;
-  author?: string;
+  authorName?: string;
+  authorEmail?: string;
+  authorUrl?: string;
 }
 
 /**

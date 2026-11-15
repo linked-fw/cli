@@ -98,8 +98,9 @@ import {
 } from './utils/packageFiles.js';
 import type {PackageFilesOptions} from './utils/packageFiles.js';
 import {
+  authorFromFlags,
   ontologyFieldsFromFlags,
-  parsePackagePerson,
+  type PackageMetadataFlags,
 } from './utils/packageMetadata.js';
 import {
   ONTOLOGY_PREFIX,
@@ -1480,11 +1481,14 @@ export const createOntology = async (
   name,
   uriBase?,
   basePath = process.cwd(),
+  options: PackageMetadataFlags & {yes?: boolean} = {},
 ) => {
   if (!name) {
     console.warn("Please provide the ontology's name as the first argument");
     return;
   }
+  // The metadata flags, read before anything is asked or written.
+  let fields = ontologyFieldsFromFlags(options);
 
   let sourceFolder = getSourceFolder(basePath);
   assertInsidePackage(sourceFolder, 'create-ontology');
@@ -1500,6 +1504,10 @@ export const createOntology = async (
   const namespace = asNamespace(uriBase);
   // Refused before anything is written: a name the modules, Turtle or build check cannot use.
   checkScaffoldOntology(hyphenName, namespace);
+  resolveOntologyFields(hyphenName, fields);
+  if (!options.yes && process.stdin.isTTY && process.stdout.isTTY) {
+    fields = await askOntologyFields(hyphenName, fields);
+  }
   log("Creating files for ontology '" + name + "'");
 
   // The ontology's data, Turtle. `loadData` reads it beside the compiled module
@@ -1512,7 +1520,7 @@ export const createOntology = async (
   );
   fs.outputFileSync(
     targetDataFile,
-    ontologyScaffoldTurtle(hyphenName, namespace),
+    ontologyScaffoldTurtle(hyphenName, namespace, fields),
   );
 
   // The `linkedOntologies` entry, then the package's modules as `linked generate-ontology` writes
@@ -1533,7 +1541,11 @@ export const createOntology = async (
     await writePackageOntologies(packageRoot);
   } else {
     for (const [rel, content] of Object.entries(
-      ontologyScaffoldModules(hyphenName, namespace),
+      ontologyScaffoldModules(
+        hyphenName,
+        namespace,
+        resolveOntologyFields(hyphenName, fields).prefix,
+      ),
     )) {
       fs.outputFileSync(
         path.join(sourceFolder, rel.replace(/^src\//, '')),
@@ -2504,7 +2516,8 @@ export const createPackage = async (
     console.warn('Please provide a name as the first argument');
     return;
   }
-  const isTTY = !!(process.stdin.isTTY && process.stdout.isTTY);
+  // `--yes` asks nothing: flags and defaults only, as without a terminal.
+  const isTTY = !options.yes && !!(process.stdin.isTTY && process.stdout.isTTY);
 
   // What, then where. Both are settled before anything is written, so a
   // refusal leaves nothing behind and `both` asks each question once.
@@ -2539,7 +2552,7 @@ export const createPackage = async (
   let author: PackageFilesOptions['author'];
   let ontology: OntologyScaffoldFields | undefined;
   try {
-    author = options.author ? parsePackagePerson(options.author) : undefined;
+    author = authorFromFlags(options);
     if (ontologySlug) {
       ontology = ontologyFieldsFromFlags(options);
       resolveOntologyFields(ontologySlug, ontology);
@@ -2553,6 +2566,8 @@ export const createPackage = async (
   if (ontologySlug && isTTY) {
     ontology = await askOntologyFields(ontologySlug, ontology ?? {});
   }
+  // The package's description: the flag's, else the one asked for the ontology.
+  const description = options.description ?? ontology?.description;
   // Nothing is written until every target is free.
   const targets = await Promise.all(
     packages.map(async ({name: packageName}) => {
@@ -2581,7 +2596,8 @@ export const createPackage = async (
       uriBase,
       baseUri: root?.baseUri,
       ...(kind === 'ontology' && ontology ? {ontology} : {}),
-      ...(author ? {author} : {}),
+      ...(description !== undefined ? {description} : {}),
+      author,
       dependencies:
         kind === 'assets' && packageKind === 'both'
           ? ontologyDependency(packages, targets, decision)

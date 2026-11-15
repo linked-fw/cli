@@ -70,8 +70,14 @@ export interface PackageFilesOptions {
    */
   ontology?: OntologyScaffoldFields;
   /**
-   * `package.json` `author`. Default: the ontology's creator as `{url}` when
-   * one is given, else no `author`.
+   * `package.json` `description`. Default: the ontology's description, else
+   * the template's empty one, left for the user to fill in.
+   */
+  description?: string;
+  /**
+   * `package.json` `author`: the fields given replace the template's empty
+   * ones (`name`, `email`, `url`), the rest stay empty for the user to fill in.
+   * Default `url`: the ontology's creator.
    */
   author?: PackagePerson;
   /** The templates folder. Defaults to this package's `defaults/`. */
@@ -265,7 +271,8 @@ export function buildPackageFiles(
     files[outputPath(file)] = content;
   }
 
-  let author = options.author;
+  let author: PackagePerson = {...options.author};
+  let description = options.description;
   if (kind === 'ontology') {
     checkScaffoldOntology(hyphenName, variables.uri_base);
     const fields = resolveOntologyFields(hyphenName, options.ontology);
@@ -278,7 +285,8 @@ export function buildPackageFiles(
       files,
       ontologyScaffoldModules(hyphenName, variables.uri_base, fields.prefix),
     );
-    author ??= fields.creator ? {url: fields.creator} : undefined;
+    if (!author.url && fields.creator) author = {...author, url: fields.creator};
+    description ??= fields.description;
     files['package.json'] = withOntologyEntry(
       files['package.json'],
       hyphenName,
@@ -290,8 +298,10 @@ export function buildPackageFiles(
   }
   // The package says what it is: `linked.kind` merged into the template's
   // `linked` object, never replacing it.
-  let pkg = JSON.parse(files['package.json']);
-  if (author) pkg = withAuthor(pkg, author);
+  const pkg = JSON.parse(files['package.json']);
+  if (description) pkg.description = description;
+  const filledAuthor = filledPerson(pkg.author, author);
+  if (Object.keys(filledAuthor).length) pkg.author = filledAuthor;
   pkg.linked = {...pkg.linked, kind};
   if (dependencies && Object.keys(dependencies).length) {
     pkg.dependencies = {...pkg.dependencies, ...dependencies};
@@ -311,26 +321,18 @@ function outputPath(file: string): string {
 }
 
 /**
- * `pkg` with `author` set (its empty fields left out), right after `description`, where npm's
- * own `package.json` puts it.
+ * The template's `author` (`{name, email, url}`, empty for the user to fill in) with the fields
+ * `given` has. A template whose `author` is not an object gets `given`'s fields alone.
  */
-function withAuthor(
-  pkg: Record<string, unknown>,
-  author: PackagePerson,
-): Record<string, unknown> {
-  const person = Object.fromEntries(
-    (['name', 'email', 'url'] as const).flatMap((key) =>
-      author[key] ? [[key, author[key]]] : [],
-    ),
-  );
-  if (!Object.keys(person).length) return pkg;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(pkg)) {
-    if (key === 'author') continue;
-    out[key] = value;
-    if (key === 'description') out.author = person;
+function filledPerson(template: unknown, given: PackagePerson): PackagePerson {
+  const base: PackagePerson =
+    template && typeof template === 'object' && !Array.isArray(template)
+      ? (template as PackagePerson)
+      : {};
+  const out: PackagePerson = {...base};
+  for (const key of ['name', 'email', 'url'] as const) {
+    if (given[key]) out[key] = given[key];
   }
-  if (!('author' in out)) out.author = person;
   return out;
 }
 

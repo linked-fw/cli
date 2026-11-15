@@ -65,31 +65,44 @@ what it is in `"linked": {"kind": "ontology"}` or `{"kind": "assets"}`. `create-
 writing an import of a package that does not exist: run them inside `packages/<name>`. An app that
 does have a `src/package.ts` at its root is served as before.
 
-An ontology package's data file (`src/data/<name>.ttl`) states the ontology's metadata, each
-field with a default:
+An ontology package's data file (`src/data/<name>.ttl`) states the ontology's metadata, and
+every new package's `package.json` has a `description` and an `author` (`{name, email, url}`),
+empty for you to fill in unless a flag fills them. Every field has a flag and a default:
 
 | Flag | Written as | Default |
 |---|---|---|
 | `--title <title>` | `dcterms:title "…"@en` | the name in words (`lego-planning` → `Lego Planning`) |
-| `--description <text>` | `dcterms:description "…"@en` | none |
+| `--description <text>` | `dcterms:description "…"@en`, and `package.json` `description` | none (`package.json`: empty) |
 | `--prefix <prefix>` | `vann:preferredNamespacePrefix`, the file's Turtle prefix and the generated modules' `suggestedPrefix` | the name |
 | `[uri_base]` | the namespace: `vann:preferredNamespaceUri`, `linkedOntologies` | `{baseUri}ont/<name>/`, else `https://linked.cm/ont/<name>/` |
 | `--creator <iri>` | `dcterms:creator` | none |
 | `--maintainer <iri>` | `schema:maintainer` | the creator |
 | `--status <status>` | `adms:status`: `Draft`, `ReadyForReview` or `Published` (`core:OntologyStatus`) | `Draft` |
+| `--author-name <name>` | `package.json` `author.name` | empty |
+| `--author-email <email>` | `package.json` `author.email` | empty |
+| `--author-url <url>` | `package.json` `author.url` | an ontology package's creator, else empty |
 
-On a terminal, the title, description and prefix no flag gave are asked (Enter keeps the
-default); without one the defaults apply, so `--kind` and `--location` are all a script needs.
-`--author "Name <email> (url)"` (every kind) sets `package.json` `author`; without it an ontology
-package with a creator gets `{"url": <creator>}`, and any other package no `author`.
-`create-ontology` writes the same data file with the defaults.
+The ontology flags (`--title` … `--status`) are taken by `create-package`, `create-ont-package`
+and `create-ontology` (which writes only the data file and modules); the author flags by the
+three package commands. On a terminal, the title, description and prefix no flag gave are asked
+(Enter keeps the default). `--yes` (`-y`) asks nothing: flags and defaults only, as without a
+terminal, so a missing `--kind` or `--location` is refused rather than asked:
+
+```bash
+linked create-package planning --kind ontology --location packages --yes \
+  --title "Planning" --description "Planning terms" --prefix pl \
+  --creator https://example.org/ann#me --status Draft \
+  --author-name "Ann" --author-email ann@example.org --author-url https://example.org/ann#me
+```
 
 The files a kind gets are also available as data, for a host that commits a package somewhere
 other than the local disk: `buildPackageFiles(packageName, kind, {uriBase?, baseUri?,
-dependencies?, ontology?, author?})` from `@_linked/cli/utils/packageFiles` returns package-relative path → content,
-dotfiles under their real names. It writes, asks and installs nothing; `create-package` writes
-exactly what it returns. `ontology` takes the fields above (`{title, description, prefix,
-creator, maintainer, status}`) and `author` a person (`{name, email, url}`).
+dependencies?, ontology?, description?, author?})` from `@_linked/cli/utils/packageFiles` returns
+package-relative path → content, dotfiles under their real names. It writes, asks and installs
+nothing; `create-package` writes exactly what it returns. `ontology` takes the fields above
+(`{title, description, prefix, creator, maintainer, status}`), `description` the
+`package.json` description (default: the ontology's), and `author` the person's fields that
+replace the template's empty ones (`{name?, email?, url?}`).
 
 A package's IRIs are minted under a root: `linkedPackage(name, {baseUri})`, shapes at
 `{baseUri}shape/<package>/<Name>`, an ontology package's terms at `{baseUri}ont/<slug>/<Term>`.

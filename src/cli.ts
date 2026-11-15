@@ -188,12 +188,12 @@ const BASE_URI_HELP =
 const WHERE_HELP =
   "Inside an app, it goes in packages/ (part of the app's repository) or packages-local/ (its own git repository, linked with `linked localize`); without --location, --remote or --push you are asked, on a terminal.";
 
-const AUTHOR_HELP =
-  'package.json "author", as npm writes one person: "Name <email> (url)", each part optional. Default: the ontology\'s --creator as its url, else none.';
 const ONTOLOGY_ASKED_HELP =
-  'On a terminal, the title, description and prefix no flag gave are asked; elsewhere their defaults apply.';
+  'On a terminal, the title, description and prefix no flag gave are asked (not with --yes); elsewhere their defaults apply.';
+const YES_HELP =
+  'Ask nothing: flags and defaults only, as without a terminal (a missing --kind or --location is then refused).';
 
-/** The three scaffolding commands share the where-flags and `--author`; `--kind` is create-package's own. */
+/** The three scaffolding commands share the where-flags, `--yes` and the author; `--kind` is create-package's own. */
 const withPackageOptions = (command: Command) =>
   command
     .option('--location <where>', LOCATION_HELP)
@@ -201,7 +201,13 @@ const withPackageOptions = (command: Command) =>
     .option('--push', PUSH_HELP)
     .option('--skip-install', SKIP_INSTALL_HELP)
     .option('--base-uri <uri>', BASE_URI_HELP)
-    .option('--author <person>', AUTHOR_HELP);
+    .option('-y, --yes', YES_HELP)
+    .option('--author-name <name>', 'package.json author.name. Default: empty, for you to fill in.')
+    .option('--author-email <email>', 'package.json author.email. Default: empty, for you to fill in.')
+    .option(
+      '--author-url <url>',
+      "package.json author.url. Default: an ontology package's --creator, else empty, for you to fill in.",
+    );
 
 /** An ontology package's metadata, written to its data file (src/data/<name>.ttl). */
 const withOntologyOptions = (command: Command) =>
@@ -210,7 +216,10 @@ const withOntologyOptions = (command: Command) =>
       '--title <title>',
       `The ontology's dcterms:title. Default: its name in words (lego-planning: "Lego Planning"). ${ONTOLOGY_ASKED_HELP}`,
     )
-    .option('--description <text>', "The ontology's dcterms:description. Default: none.")
+    .option(
+      '--description <text>',
+      "The ontology's dcterms:description; for a new package also its package.json description. Default: none (package.json keeps an empty one, for you to fill in).",
+    )
     .option(
       '--prefix <prefix>',
       "The ontology's preferred prefix (vann:preferredNamespacePrefix), its Turtle prefix and the prefix its modules suggest. Default: its name.",
@@ -342,10 +351,11 @@ program
     'The name of the component. Will be used for the file name and the export name',
   );
 
-program
+withOntologyOptions(program
   .command('create-ontology')
-  .action((name, uriBase) => {
-    return createOntology(name, uriBase).catch(reportRefusal);
+  .option('-y, --yes', 'Ask nothing: flags and defaults only, as without a terminal.')
+  .action((name, uriBase, options) => {
+    return createOntology(name, uriBase, process.cwd(), options).catch(reportRefusal);
   })
   .description(
     'Creates a new ontology file for your package. Execute this from your package folder.',
@@ -357,7 +367,7 @@ program
   .argument(
     '[uribase]',
     "Optional argument to set the URI base for the URI's of all entities in your ontology. Leave blank to use the URI's provided by lincd.org once you register this package",
-  );
+  ));
 
 program
   .command('prefixes')

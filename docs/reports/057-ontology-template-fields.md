@@ -86,3 +86,32 @@ host only fills values in.
 
 - `create-ontology` takes none of the new flags; it writes the defaults. Recorded here; add them
   if a caller needs them.
+
+## Addendum (2026-11-15): review round
+
+After review:
+
+- **The template's empty fields stay.** `defaults/package/package.json` has its
+  `"author": {"name": "", "email": "", "url": ""}` again, beside the empty `description`, for every
+  kind: suggestions for the user to fill in. `buildPackageFiles` fills what it is given:
+  `description` (new option; default: the ontology's description), and `author`, whose given
+  fields replace the empty ones (default `url`: the ontology's creator). `withAuthor` became
+  `filledPerson`.
+- **Every field has a flag; `--yes` asks nothing.** `--author "Name <email> (url)"` is replaced by
+  `--author-name`, `--author-email` and `--author-url` (checked: an email, a URL), on the three
+  package commands. `--yes` (`-y`) on those and on `create-ontology` treats the run as having no
+  terminal: flags and defaults only, a missing `--kind` or `--location` refused. `create-ontology`
+  now takes the ontology flags too and asks the title, description and prefix on a terminal.
+  `--description` is also the new package's `package.json` description.
+- README: the flags table gains the author flags and the `package.json` fields, with an example
+  of a fully flagged, non-interactive `create-package`.
+- Tests (`tests/unit/ontologyScaffoldTurtle.test.ts`): the author flags and their refusals,
+  `description` and `author` filled into the template's empty fields for both kinds, `--yes` on a
+  terminal refusing a missing `--kind` and writing the defaults, `create-ontology` with flags.
+
+**Verification**
+
+- `npx jest --config jest.config.cjs` on the touched suites (`ontologyScaffoldTurtle`,
+  `packageFiles`, `createPackageScaffold`, `createInsidePackage`, `createPackageLocation`,
+  `packageKind`; 4.7 s): `Test Suites: 6 passed, 6 total` / `Tests: 76 passed, 76 total`.
+- `tsc -p tsconfig-esm.json --noEmit`: clean; `npm run build`: clean.

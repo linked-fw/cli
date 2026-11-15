@@ -1,7 +1,8 @@
 /**
- * The metadata flags of `linked create-package`, read into what `buildPackageFiles` takes:
- * `--author` as a `package.json` person, `--status` as an ontology status, and the ontology
- * fields together. Pure: nothing is asked or written.
+ * The metadata flags of `linked create-package`, `create-ont-package` and `create-ontology`, read
+ * into what `buildPackageFiles` takes: `--author-name`, `--author-email` and `--author-url` as a
+ * `package.json` person, `--status` as an ontology status, and the ontology fields together.
+ * Pure: nothing is asked or written.
  */
 import type {PackagePerson} from './packageFiles.js';
 import {
@@ -17,51 +18,36 @@ export interface PackageMetadataFlags {
   creator?: string;
   maintainer?: string;
   status?: string;
-  author?: string;
+  authorName?: string;
+  authorEmail?: string;
+  authorUrl?: string;
 }
 
-/**
- * npm's one-line person, `Name <email> (url)`, each part optional:
- *
- *   parsePackagePerson('Ann Lovelace <ann@example.org> (https://example.org/ann)')
- *   // → {name: 'Ann Lovelace', email: 'ann@example.org', url: 'https://example.org/ann'}
- *
- * A bare IRI (`https://example.org/ann#me`) is the url.
- */
-export function parsePackagePerson(value: string): PackagePerson {
-  const text = value.trim();
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(text) && !text.includes('<')) {
-    return {url: text};
+/** `package.json` `author` from `--author-name`, `--author-email` and `--author-url`. */
+export function authorFromFlags(flags: PackageMetadataFlags): PackagePerson {
+  const author: PackagePerson = {};
+  if (flags.authorName?.trim()) author.name = flags.authorName.trim();
+  if (flags.authorEmail?.trim()) {
+    const email = flags.authorEmail.trim();
+    if (!/^[^\s@<>()]+@[^\s@<>()]+$/.test(email)) {
+      throw new Error(`--author-email ${JSON.stringify(flags.authorEmail)} is not an email address.`);
+    }
+    author.email = email;
   }
-  const email = /<([^>]*)>/.exec(text)?.[1]?.trim();
-  const url = /\(([^)]*)\)/.exec(text)?.[1]?.trim();
-  const name = text
-    .replace(/<[^>]*>/, '')
-    .replace(/\([^)]*\)/, '')
-    .trim();
-  const person: PackagePerson = {};
-  if (name) person.name = name;
-  if (email) person.email = email;
-  if (url) person.url = url;
-  if (!Object.keys(person).length) {
-    throw new Error(
-      `--author ${JSON.stringify(value)} names no one: use "Name <email> (url)".`,
-    );
+  if (flags.authorUrl?.trim()) {
+    const url = flags.authorUrl.trim();
+    if (!/^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(url)) {
+      throw new Error(`--author-url ${JSON.stringify(flags.authorUrl)} is not a URL.`);
+    }
+    author.url = url;
   }
-  return person;
+  return author;
 }
 
-/** `--status`, case-insensitive (`draft`, `ReadyForReview`, `published`). */
-export function ontologyStatusFlag(
-  value: string,
-): OntologyScaffoldFields['status'] {
+/** `--status`, case-insensitive (`draft`, `ready-for-review`, `Published`). */
+export function ontologyStatusFlag(value: string): OntologyScaffoldFields['status'] {
   const status = ONTOLOGY_STATUSES.find(
-    (s) =>
-      s.toLowerCase() ===
-      value
-        .trim()
-        .toLowerCase()
-        .replace(/[-_\s]/g, ''),
+    (s) => s.toLowerCase() === value.trim().toLowerCase().replace(/[-_\s]/g, ''),
   );
   if (!status) {
     throw new Error(
@@ -81,7 +67,6 @@ export function ontologyFieldsFromFlags(
   if (flags.prefix !== undefined) fields.prefix = flags.prefix;
   if (flags.creator !== undefined) fields.creator = flags.creator;
   if (flags.maintainer !== undefined) fields.maintainer = flags.maintainer;
-  if (flags.status !== undefined)
-    fields.status = ontologyStatusFlag(flags.status);
+  if (flags.status !== undefined) fields.status = ontologyStatusFlag(flags.status);
   return fields;
 }
