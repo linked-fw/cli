@@ -281,8 +281,24 @@ It creates:
 ```
 
 then prints the start command, e.g. `cd ../wt/agent1 && PORT=4041 npm run start:local`, with
-`SITE_ROOT=http://localhost:<port>` when the linked `.env` sets `SITE_ROOT`
-(`npm start` when the app has no `start:local`). Private keys (`*.pem`, `*.key`, untracked) are
+`SITE_ROOT=http://localhost:<port>` when the linked `.env` sets `SITE_ROOT` and the app's
+projects-root var pointing into the worktree (see App env vars)
+(`npm start` when the app has no `start:local`).
+
+#### App env vars
+
+The cli knows no app's own env var names. An app whose server keeps checkouts in a directory of
+its own (a projects root) or whose tests read a port declares those vars in `linked.app.json`:
+
+```json
+{"schemaVersion": 1, "worktree": {"projectsRootVar": "MY_PROJECTS_ROOT", "testPortVar": "MY_TEST_PORT"}}
+```
+
+When the `.env` sets `projectsRootVar`, every start command `worktree add` and `branch start
+--worktree` print sets it to the worktree's own directory: a relative value (`apps`) under the
+worktree, an absolute one's last segment under it. So no worktree's server writes into the main
+checkout's directory. A master's preview message names `testPortVar` with the port of its test
+runs (the preview's plus one). An app that declares neither gets neither. Private keys (`*.pem`, `*.key`, untracked) are
 never linked; the output names them with the `ln -s` line to run when the app needs one.
 
 A `--with` checkout that is not on the base joins the work: it is switched to the base, created
@@ -411,13 +427,13 @@ app's masters hold is refused, naming the holder (`Port 4520 is master hub-impor
 command:
 
 ```
-cd ../wt/m1 && PORT=4510 SITE_ROOT=http://localhost:4510 CN_PROJECTS_ROOT=../wt/m1/apps npm run start:local
+cd ../wt/m1 && PORT=4510 SITE_ROOT=http://localhost:4510 MY_PROJECTS_ROOT=../wt/m1/apps npm run start:local
 ```
 
 `SITE_ROOT` is set when the linked `.env` sets it (the server writes absolute asset URLs from it,
 so without it a second server serves the first one's bundles; every `worktree add` start command
-sets it too), `CN_PROJECTS_ROOT` when the `.env` sets it (so the preview's app clones are its
-own), `FUSEKI_DATASET` with `--dataset` (plus the clone hint, see Cloning a dataset). Refuses, making nothing, when `<m>` exists in a repo,
+sets it too), the app's projects-root var when it declares one and the `.env` sets it (see
+App env vars), `FUSEKI_DATASET` with `--dataset` (plus the clone hint, see Cloning a dataset). Refuses, making nothing, when `<m>` exists in a repo,
 contains `--`, equals a target, the directory exists, the port is another master's, or it runs
 outside the main checkout. Without `--worktree`, `branch start` is unchanged.
 

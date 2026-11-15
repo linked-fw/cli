@@ -379,6 +379,31 @@ describe('linked worktree add', () => {
     assert.equal(result.startCommand, `cd '${dir}' && PORT=4062 npm run start:local`);
   });
 
+  test("the start command points the app's projects-root var into the worktree", async () => {
+    const app = makeApp();
+    fs.writeFileSync(
+      path.join(app.root, 'linked.app.json'),
+      JSON.stringify({schemaVersion: 1, worktree: {projectsRootVar: 'APP_PROJECTS_ROOT'}}),
+    );
+    git(app.root, 'add', 'linked.app.json');
+    git(app.root, 'commit', '-q', '-m', 'app config');
+    fs.writeFileSync(path.join(app.root, '.env'), 'PORT=4040\nSITE_ROOT=http://localhost:4040\nAPP_PROJECTS_ROOT=apps\n');
+    const result = await worktreeAdd(app.root, 'a1', {port: 4062});
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assert.equal(
+      result.startCommand,
+      `cd ${app.dir} && PORT=4062 SITE_ROOT=http://localhost:4062 APP_PROJECTS_ROOT=${app.dir}/apps npm run start:local`,
+    );
+  });
+
+  test('an undeclared projects-root var is not set, whatever the .env holds', async () => {
+    const app = makeApp();
+    fs.writeFileSync(path.join(app.root, '.env'), 'PORT=4040\nAPP_PROJECTS_ROOT=apps\n');
+    const result = await worktreeAdd(app.root, 'a1', {port: 4062});
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    assert.equal(result.startCommand, `cd ${app.dir} && PORT=4062 npm run start:local`);
+  });
+
   test('without an integration branch the base is the root branch', async () => {
     const app = makeApp();
     git(app.root, 'switch', '-q', 'main');
