@@ -65,11 +65,31 @@ what it is in `"linked": {"kind": "ontology"}` or `{"kind": "assets"}`. `create-
 writing an import of a package that does not exist: run them inside `packages/<name>`. An app that
 does have a `src/package.ts` at its root is served as before.
 
+An ontology package's data file (`src/data/<name>.ttl`) states the ontology's metadata, each
+field with a default:
+
+| Flag | Written as | Default |
+|---|---|---|
+| `--title <title>` | `dcterms:title "…"@en` | the name in words (`lego-planning` → `Lego Planning`) |
+| `--description <text>` | `dcterms:description "…"@en` | none |
+| `--prefix <prefix>` | `vann:preferredNamespacePrefix`, the file's Turtle prefix and the generated modules' `suggestedPrefix` | the name |
+| `[uri_base]` | the namespace: `vann:preferredNamespaceUri`, `linkedOntologies` | `{baseUri}ont/<name>/`, else `https://linked.cm/ont/<name>/` |
+| `--creator <iri>` | `dcterms:creator` | none |
+| `--maintainer <iri>` | `schema:maintainer` | the creator |
+| `--status <status>` | `adms:status`: `Draft`, `ReadyForReview` or `Published` (`core:OntologyStatus`) | `Draft` |
+
+On a terminal, the title, description and prefix no flag gave are asked (Enter keeps the
+default); without one the defaults apply, so `--kind` and `--location` are all a script needs.
+`--author "Name <email> (url)"` (every kind) sets `package.json` `author`; without it an ontology
+package with a creator gets `{"url": <creator>}`, and any other package no `author`.
+`create-ontology` writes the same data file with the defaults.
+
 The files a kind gets are also available as data, for a host that commits a package somewhere
 other than the local disk: `buildPackageFiles(packageName, kind, {uriBase?, baseUri?,
-dependencies?})` from `@_linked/cli/utils/packageFiles` returns package-relative path → content,
+dependencies?, ontology?, author?})` from `@_linked/cli/utils/packageFiles` returns package-relative path → content,
 dotfiles under their real names. It writes, asks and installs nothing; `create-package` writes
-exactly what it returns.
+exactly what it returns. `ontology` takes the fields above (`{title, description, prefix,
+creator, maintainer, status}`) and `author` a person (`{name, email, url}`).
 
 A package's IRIs are minted under a root: `linkedPackage(name, {baseUri})`, shapes at
 `{baseUri}shape/<package>/<Name>`, an ontology package's terms at `{baseUri}ont/<slug>/<Term>`.
@@ -732,7 +752,7 @@ Templates live in `defaults/`:
 - `defaults/app-with-backend/` — used by `linked create-app`
 - `defaults/app-static/` — minimal static app
 - `defaults/package/` — the asset package of `linked create-package` / `create-asset-package`; its manifest, tsconfigs, dotfiles and `src/package.ts` are shared by every kind
-- `defaults/package-ontology/` — what an ontology package (`create-ont-package`) gets on top of the shared files: the entry importing `./ontologies/index.js` and the example ontology's data (its modules are generated)
+- `defaults/package-ontology/` — what an ontology package (`create-ont-package`) gets on top of the shared files: the entry importing `./ontologies/index.js`, its `src/package.ts` and a README (its data file and modules are generated)
 - `defaults/setup-publish/` — caller workflows + changeset files written by `linked setup-publish` (`main`-only; `--dual-branch` is a deprecated no-op)
 
 ### `linked create-app` template structure

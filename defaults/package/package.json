@@ -1,11 +1,6 @@
 {
   "name": "${package_name}",
   "description": "",
-  "author": {
-    "name": "",
-    "email": "",
-    "url": ""
-  },
   "repository": {
     "type": "git",
     "url": ""

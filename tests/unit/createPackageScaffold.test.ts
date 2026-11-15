@@ -95,7 +95,7 @@ describe('createPackage kinds', () => {
       `@prefix planning: <https://linked.cm/ont/planning/> .`,
     );
     expect(read(pkg, 'src/data/planning.ttl')).toContain(
-      `<https://linked.cm/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" .`,
+      `planning:\n    a owl:Ontology ;\n    dcterms:title "Planning"@en ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" ;\n    <http://www.w3.org/ns/adms#status> <https://linked.cm/ont/core/Draft> .`,
     );
 
     // No `${...}` placeholder survives.

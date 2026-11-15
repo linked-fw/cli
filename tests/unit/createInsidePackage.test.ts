@@ -73,7 +73,7 @@ describe('create-shape and friends need a src/package.ts', () => {
     const read = (rel: string) => fs.readFileSync(path.join(app, 'src', rel), 'utf8');
     expect(fs.readdirSync(path.join(app, 'src', 'data'))).toEqual(['planning.ttl']);
     expect(read('data/planning.ttl')).toContain(
-      '<https://linked.cm/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" .',
+      'planning:\n    a owl:Ontology ;\n    dcterms:title "Planning"@en ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" ;\n    <http://www.w3.org/ns/adms#status> <https://linked.cm/ont/core/Draft> .',
     );
     expect(read('ontologies/index.ts')).toContain(
       `      name: 'planning',\n      namespace: 'https://linked.cm/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,

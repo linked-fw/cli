@@ -40,6 +40,18 @@ export interface CreatePackageOptions {
    * app's `LINKED_BASE_URI`; see `./packageBaseUri.js`.
    */
   baseUri?: string;
+  /**
+   * An ontology package's metadata (`--title`, `--description`, `--prefix`, `--creator`,
+   * `--maintainer`, `--status`) and the `package.json` author (`--author`); see
+   * `./packageMetadata.js`.
+   */
+  title?: string;
+  description?: string;
+  prefix?: string;
+  creator?: string;
+  maintainer?: string;
+  status?: string;
+  author?: string;
 }
 
 /**

@@ -83,6 +83,7 @@ import {packagePublishesCjs} from './package-manifest.js';
 import {asNamespace, defaultOntologyNamespace} from './utils/ontologyNamespace.js';
 import {
   decidePackageKind,
+  ontologySlugFor,
   packageNameFor,
   scaffoldKinds,
 } from './utils/packageKind.js';
@@ -96,6 +97,17 @@ import {
   withOntologyEntry,
 } from './utils/packageFiles.js';
 import type {PackageFilesOptions} from './utils/packageFiles.js';
+import {
+  ontologyFieldsFromFlags,
+  parsePackagePerson,
+} from './utils/packageMetadata.js';
+import {
+  ONTOLOGY_PREFIX,
+  ontologyScaffoldTurtle,
+  ontologyTitleFor,
+  resolveOntologyFields,
+  type OntologyScaffoldFields,
+} from './utils/ontologyScaffoldTurtle.js';
 import type {ResolvedBaseUri} from './utils/packageBaseUri.js';
 
 // This module's directory. fileURLToPath, not the URL with `file:/` cut off,
@@ -1498,11 +1510,10 @@ export const createOntology = async (
     'data',
     hyphenName + '.ttl',
   );
-  fs.copySync(
-    defaultsDir('package-ontology', 'src', 'data', 'example-ontology.ttl'),
+  fs.outputFileSync(
     targetDataFile,
+    ontologyScaffoldTurtle(hyphenName, namespace),
   );
-  await replaceVariablesInFiles(targetDataFile);
 
   // The `linkedOntologies` entry, then the package's modules as `linked generate-ontology` writes
   // them (this ontology's terms, the index registering every ontology of the package, the entry's
@@ -2518,13 +2529,30 @@ export const createPackage = async (
   } catch (e) {
     throw new CreatePackageError((e as Error).message);
   }
-  const decision =
-    decided.kind === 'ask' ? await askPackageLocation(name) : decided;
-
   const packages = scaffoldKinds(packageKind).map((kind) => ({
     kind,
     name: packageNameFor(name, kind),
   }));
+  // The metadata flags, read before anything is asked or written.
+  const ontologyPackage = packages.find((p) => p.kind === 'ontology');
+  const ontologySlug = ontologyPackage && ontologySlugFor(ontologyPackage.name);
+  let author: PackageFilesOptions['author'];
+  let ontology: OntologyScaffoldFields | undefined;
+  try {
+    author = options.author ? parsePackagePerson(options.author) : undefined;
+    if (ontologySlug) {
+      ontology = ontologyFieldsFromFlags(options);
+      resolveOntologyFields(ontologySlug, ontology);
+    }
+  } catch (e) {
+    throw new CreatePackageError((e as Error).message);
+  }
+
+  const decision =
+    decided.kind === 'ask' ? await askPackageLocation(name) : decided;
+  if (ontologySlug && isTTY) {
+    ontology = await askOntologyFields(ontologySlug, ontology ?? {});
+  }
   // Nothing is written until every target is free.
   const targets = await Promise.all(
     packages.map(async ({name: packageName}) => {
@@ -2552,6 +2580,8 @@ export const createPackage = async (
     scaffoldPackage(targetFolder, packageName, kind, {
       uriBase,
       baseUri: root?.baseUri,
+      ...(kind === 'ontology' && ontology ? {ontology} : {}),
+      ...(author ? {author} : {}),
       dependencies:
         kind === 'assets' && packageKind === 'both'
           ? ontologyDependency(packages, targets, decision)
@@ -2577,8 +2607,7 @@ export const createPackage = async (
 
 /**
  * The pair is one unit: the asset package of `--kind both` depends on the
- * ontology package created with it, at `^` its version — the same entry Create
- * Now's project scaffold writes. `ontology` comes first in `scaffoldKinds`, so
+ * ontology package created with it, at `^` its version. `ontology` comes first in `scaffoldKinds`, so
  * its package.json is already written.
  *
  * Only where npm workspaces link the two (`--location packages`). Anywhere
@@ -2649,6 +2678,34 @@ function scaffoldPackage(
   for (const [file, content] of Object.entries(files)) {
     fs.outputFileSync(path.join(targetFolder, ...file.split('/')), content);
   }
+}
+
+/**
+ * Ask an ontology package's title, description and prefix — only ever on a
+ * terminal, and only those no flag gave. Enter keeps the default shown.
+ */
+async function askOntologyFields(
+  slug: string,
+  given: OntologyScaffoldFields,
+): Promise<OntologyScaffoldFields> {
+  const fields = {...given};
+  if (fields.title === undefined) {
+    const title = ontologyTitleFor(slug);
+    fields.title =
+      (await promptUser(`Title of the ontology [${title}]: `)) || title;
+  }
+  if (fields.description === undefined) {
+    fields.description = await promptUser('Description (optional): ');
+  }
+  while (fields.prefix === undefined) {
+    const prefix = (await promptUser(`Preferred prefix [${slug}]: `)) || slug;
+    if (ONTOLOGY_PREFIX.test(prefix)) fields.prefix = prefix;
+    else
+      console.log(
+        'A prefix starts with a letter, then letters, digits, hyphens or underscores.',
+      );
+  }
+  return fields;
 }
 
 /**

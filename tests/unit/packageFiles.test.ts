@@ -1,6 +1,6 @@
 // `buildPackageFiles` is what `create-package` writes, as data. The command
-// writes exactly these files, so a host committing a package elsewhere (Create
-// Now, through the GitHub API) gets the same package as `linked create-package`.
+// writes exactly these files, so a host committing a package elsewhere (through
+// the GitHub API, say) gets the same package as `linked create-package`.
 //
 // cli-methods pulls in ora, which is ESM-only.
 jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
@@ -154,7 +154,7 @@ describe('buildPackageFiles', () => {
       planning: {namespace: 'https://acme.example/ont/planning/'},
     });
     expect(out['src/data/planning.ttl']).toContain(
-      `<https://acme.example/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://acme.example/ont/planning/" .`,
+      `planning:\n    a owl:Ontology ;\n    dcterms:title "Planning"@en ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://acme.example/ont/planning/" ;\n    <http://www.w3.org/ns/adms#status> <https://linked.cm/ont/core/Draft> .`,
     );
     for (const [file, content] of Object.entries(out)) {
       expect([file, content]).not.toEqual([

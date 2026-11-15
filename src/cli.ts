@@ -188,16 +188,47 @@ const BASE_URI_HELP =
 const WHERE_HELP =
   "Inside an app, it goes in packages/ (part of the app's repository) or packages-local/ (its own git repository, linked with `linked localize`); without --location, --remote or --push you are asked, on a terminal.";
 
-/** The three scaffolding commands share the where-flags; `--kind` is create-package's own. */
+const AUTHOR_HELP =
+  'package.json "author", as npm writes one person: "Name <email> (url)", each part optional. Default: the ontology\'s --creator as its url, else none.';
+const ONTOLOGY_ASKED_HELP =
+  'On a terminal, the title, description and prefix no flag gave are asked; elsewhere their defaults apply.';
+
+/** The three scaffolding commands share the where-flags and `--author`; `--kind` is create-package's own. */
 const withPackageOptions = (command: Command) =>
   command
     .option('--location <where>', LOCATION_HELP)
     .option('--remote <git-url>', REMOTE_HELP)
     .option('--push', PUSH_HELP)
     .option('--skip-install', SKIP_INSTALL_HELP)
-    .option('--base-uri <uri>', BASE_URI_HELP);
+    .option('--base-uri <uri>', BASE_URI_HELP)
+    .option('--author <person>', AUTHOR_HELP);
 
-withPackageOptions(
+/** An ontology package's metadata, written to its data file (src/data/<name>.ttl). */
+const withOntologyOptions = (command: Command) =>
+  command
+    .option(
+      '--title <title>',
+      `The ontology's dcterms:title. Default: its name in words (lego-planning: "Lego Planning"). ${ONTOLOGY_ASKED_HELP}`,
+    )
+    .option('--description <text>', "The ontology's dcterms:description. Default: none.")
+    .option(
+      '--prefix <prefix>',
+      "The ontology's preferred prefix (vann:preferredNamespacePrefix), its Turtle prefix and the prefix its modules suggest. Default: its name.",
+    )
+    .option(
+      '--creator <iri>',
+      "The ontology's dcterms:creator: a person's IRI, such as a WebID. Default: none.",
+    )
+    .option(
+      '--maintainer <iri>',
+      "The ontology's schema:maintainer: a person's IRI. Default: the creator.",
+    )
+    .option(
+      '--status <status>',
+      "The ontology's adms:status: Draft, ReadyForReview or Published. Default: Draft.",
+    );
+
+withOntologyOptions(withPackageOptions(
   program
     .command('create-package')
     .action(async (name, uriBase, options) => {
@@ -223,9 +254,9 @@ withPackageOptions(
       '[uri_base]',
       "The namespace of the ontology package's ontology. Leave blank for https://linked.cm/ont/<name>/ (the ontology slug is <name>, without -ont).",
     ),
-);
+));
 
-withPackageOptions(
+withOntologyOptions(withPackageOptions(
   program
     .command('create-ont-package')
     .action(async (name, uriBase, options) => {
@@ -244,7 +275,7 @@ withPackageOptions(
       '[uri_base]',
       'The namespace of the ontology. Leave blank for https://linked.cm/ont/<name>/.',
     ),
-);
+));
 
 withPackageOptions(
   program
