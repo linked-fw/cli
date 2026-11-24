@@ -1,6 +1,6 @@
 {
   "name": "@_linked/cli",
-  "version": "1.61.0",
+  "version": "2.0.0",
   "packageManager": "npm@12.2.0",
   "description": "Command line tools for the @_linked/* packages and apps",
   "main": "lib/esm/index.js",
@@ -75,7 +75,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@_linked/core": "^2.39.0",
+    "@_linked/core": "^3.0.0",
     "@tailwindcss/vite": "^4.1.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
