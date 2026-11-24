@@ -1,5 +1,100 @@
 # Changelog
 
+## 2.0.0
+
+### Major Changes
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`b9a65cb`](https://github.com/linked-fw/cli/commit/b9a65cb718fd0f36b8c9bf4d2ba9f9ad8b258948) Thanks [@flyon](https://github.com/flyon)! - `linked.app.json` holds every setting of an app; `linked.config.js` is no longer read.
+
+  **Breaking.**
+
+  - An app with a `linked.config.js` (or `lincd.config.js`) is refused when its server starts (`linked start`, `linked serve-app`, a compiled server) and when it is built (`linked build-app`); the error shows the JSON to move its settings into. Move them into `linked.app.json` and delete the file.
+  - Schema version 1 gains `cssMode` (`tailwind` | `postcss`), `syncShapesOnBoot`, `datasetCloneScript`, `publish` (`staticAssets`, `releasePrefix`) and `server` (`rpcExposure`, `rawQueries`, `apiOnly`, `cachePaths`, `cacheTimeout`). Each is checked; an unknown key, also inside `server` or `publish`, is refused. `linked prefixes` keeps them when it adds prefixes.
+  - `LINKED_RPC_EXPOSURE`, when set, wins over `server.rpcExposure`; a value other than `warn` or `enforce` is refused at start.
+  - `defineConfig` (`@_linked/cli/defineConfig` and the package entry) is removed: nothing reads a settings module any more.
+  - Types: `ModuleConfig`, `AdjustedModuleConfig` (the old webpack build's) and `LinkedServerConfig.multiCore` are removed; `LinkedConfig` is the configuration the cli gives `LinkedServer` (`cssMode`, `syncShapesOnBoot`, `server`), and loses `datasetCloneScript`. New: `AppServerSettings`, `CssMode`, `RpcExposureMode`, `RawQueriesMode`. `server.loadAppComponent` and `server.loadRoutes` are set by the cli only.
+  - `resolveLinkedConfigPath` and `LINKED_CONFIG_FILES` (`@_linked/cli/commands/start`) are removed; `readDatasetCloneScript` is synchronous.
+
+  **Fixed.** `linked generate-ontology` replaces a side-effect import of a `src/ontologies/<name>.register.js` that no longer exists (a register module deleted by hand) with the import of the ontology index, as it does for the register modules it removes itself.
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`497bb30`](https://github.com/linked-fw/cli/commit/497bb305cd1947eb9c5fcf7795ce5ca070adaba4) Thanks [@flyon](https://github.com/flyon)! - One ontology index per package, and an app's own prefix map in `linked.app.json`.
+
+  **Ontology modules (breaking).** `linked generate-ontology` writes, per package:
+
+  - `src/ontologies/<module>.ts` for each generated ontology: only its terms, each `export const Term = {id: '<namespace>Term'};` (the value `createNameSpace(namespace)('Term')` returns). It imports nothing; use `createNameSpace` from `@_linked/core/utils/NameSpace` where code needs a namespace function.
+  - `src/ontologies/index.ts`: imports every ontology module of the package (those with `"generated": false` too) and registers them all with one `registerOntologies([{name, namespace, terms, data, suggestedPrefix}], import.meta.url)` call. `registerOntologies` comes from the package's `src/package.ts` (`linkedPackage(...)`), so it needs the `@_linked/core` major that provides it.
+  - The package entry (`src/index.ts[x]`) imports `./ontologies/index.js`; side-effect imports of a removed `<module>.register.js` become an import of the index.
+  - `<module>.data.ts` and `<module>.register.ts` are no longer generated: the command removes the ones it wrote before. Their exports (`ns`, `dataFiles`, `loadData`, `_ontologyResource`) are gone; import `createNameSpace` from core instead of `ns`.
+  - `linked build`'s ontology check also fails when the entry does not import the index or such a file is left. Run `linked generate-ontology` and commit the result.
+  - A module written by hand (`"generated": false`) no longer registers itself: the index does.
+  - `create-package --kind ontology` and `create-ontology` write this layout; the package template's `src/package.ts` exports `registerOntologies` instead of `linkedOntology`.
+  - The build's shape check expects a package's ontologies to register through `ontologies/index.js` (or `src/ontologies/index.ts` before it is built).
+  - `@_linked/cli/utils/ontologyModules`: `generateOntologyModules(specs, handWritten?)` returns every module of a package (terms modules and `src/ontologies/index.ts`); new `generateOntologyIndexModule`; `generateOntologyDataModule` and `generateOntologyRegisterModule` are removed; `OntologyModuleSpec.ontology` is removed. `generatePackageOntologies` returns `{ontologies, files, edits, remove}`.
+
+  **`linked.app.json` (new).** An app's declarative settings at its root: `{"$schema": "https://linked.cm/schema/app/1.json", "schemaVersion": 1, "prefixes": {"<prefix>": "<namespace>"}}`. The schema ships as `schema/app/1.json`; an unknown `schemaVersion` or key is refused; a prefix is `^[A-Za-z][A-Za-z0-9_]*$`.
+
+  - `linked prefixes` adds a prefix for every installed ontology whose namespace the map lacks: its suggested prefix (from its vann data), or `<prefix>_2`, `_3`, … when taken. It never changes or removes an entry, and creates the file when the app has none. `linked generate-ontology` runs it for the app the package belongs to (same git repository).
+  - The map is loaded into core (`Prefix.load`) at server start (`linked start` and a compiled server) and in the browser bundle (the `linked:app-prefixes` Vite plugin of `createViteConfig`; the client entry imports it first). An app with no `linked.app.json` loads nothing; a core without `Prefix.load` is warned about and left as it is.
+  - `linked create-app` writes `linked.app.json` and fills it after the install; the React Native template's API service has one.
+
+### Minor Changes
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`2b915b0`](https://github.com/linked-fw/cli/commit/2b915b03ffdebf668064bcdd042981173594ba96) Thanks [@flyon](https://github.com/flyon)! - `linked worktree add --dataset <name>` and `linked branch start <m> --worktree --dataset <name>` now print how to fill the new dataset from the app's own clone script instead of fixed script paths:
+
+  - The app adds an npm script `clone-dataset` to its root `package.json` that copies its data into the dataset named by its one argument. The hint is then `Clone the data into <name> first (from <root>): npm run clone-dataset -- <name>`.
+  - To use another script name, set `datasetCloneScript` in `linked.config.js`: `defineConfig({datasetCloneScript: 'data:clone'})` (new optional `LinkedConfig` key).
+  - Without the script (or when `datasetCloneScript` names a script `package.json` lacks), a warning says the dataset starts empty unless it is cloned by hand, and how to add the script.
+
+  New exports from the worktree command module: `datasetCloneHint`, `datasetCloneMessages`, `readDatasetCloneScript`, `DEFAULT_DATASET_CLONE_SCRIPT`, `appPort`; `DEFAULT_APP_PORT` (4040) from the start command.
+
+  Wording: `worktree add` without `--port` names the app's own port (its `.env` `PORT`, else 4040) as the main checkout's, and `branch land` says "Restart the app on …". See `docs/integration-branches-and-worktrees.md`, "Cloning a dataset".
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`190a044`](https://github.com/linked-fw/cli/commit/190a044add3a30fff42f756e97a8b11f830f81a8) Thanks [@flyon](https://github.com/flyon)! - A `linkedOntologies` entry names its module and may keep its modules written by hand.
+
+  - `"module"` (optional, the same pattern as a name, default the name) is the modules' file name in `src/ontologies/`: a generated ontology's files are `<module>.ts`, `<module>.data.ts` and `<module>.register.ts`, imported as `<package>/ontologies/<module>`. The registration still uses the name: `linkedOntology(terms, ns, '<name>', …)`. Two entries with one module are refused.
+  - `"generated": false` (default `true`) declares an ontology whose modules hold more than the generator writes. `linked generate-ontology` writes nothing for it and `linked build` skips its staleness check, but its data must carry the same vann triples, and the build refuses it without them:
+
+    ```json
+    "linkedOntologies": {
+      "core": {"namespace": "https://example.org/core/", "module": "linked-core", "generated": false}
+    }
+    ```
+
+  - New pure module `@_linked/cli/utils/ontologyConfig`: `readOntologyConfigs(pkgJson)` returns `{name, namespace, module, generated, data}` per ontology, sorted by name. `OntologyConfig`, `ONTOLOGIES_KEY`, `ONTOLOGY_NAMESPACE` and `readOntologyConfigs` move there from `@_linked/cli/utils/generateOntology`.
+  - `OntologyModuleSpec.module` (optional) names the generated files.
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`a79ed98`](https://github.com/linked-fw/cli/commit/a79ed987c30956825bc4ee1907e7441635431d7c) Thanks [@flyon](https://github.com/flyon)! - Ontologies are keyed by their name within the package, and their suggested prefix is data.
+
+  - `package.json` `"linkedOntologies"` is keyed by the ontology's **name** (lowercase letters and digits, single `-` or `_` between them). The name names the modules (`src/ontologies/<name>.ts`, `.data.ts`, `.register.ts`) and is the third argument of the generated `linkedOntology(terms, ns, '<name>', loadData, dataFiles)`. It is no longer a prefix.
+  - `linked generate-ontology` reads the suggested prefix from the `vann:preferredNamespacePrefix` of the ontology's `owl:Ontology` node and writes `Prefix.add('<that prefix>', '<namespace>')` in `<name>.data.ts`.
+  - **A package without vann data now fails its build** (and `linked generate-ontology`): every ontology's `owl:Ontology` node must carry exactly one `vann:preferredNamespacePrefix` and one `vann:preferredNamespaceUri` equal to its configured `namespace`. The message names the package, the ontology and its files, and shows the triples to add. To fix it, add to one of the ontology's data files (for a published vocabulary shipped unedited, a `src/data/<name>-added.ttl` listed in its `data`):
+
+    ```turtle
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix vann: <http://purl.org/vocab/vann/> .
+
+    <http://example.org/ont/> a owl:Ontology ;
+        vann:preferredNamespacePrefix "ex" ;
+        vann:preferredNamespaceUri "http://example.org/ont/" .
+    ```
+
+    Write the prefix the package registers today, so its Turtle output does not change, then run `linked generate-ontology`.
+
+  - `create-package --kind ontology` and `create-ontology <name>` write both triples (the name as the prefix).
+  - API of `@_linked/cli/utils/ontologyModules` and `ontologyTerms`: `OntologyModuleSpec.prefix` is replaced by `name` and `suggestedPrefix`; `ONTOLOGY_PREFIX` by `ONTOLOGY_NAME` (lowercase only) and `SUGGESTED_PREFIX`; `OntologyConfig.prefix` by `name`; `OntologyNameCollisionError.prefix` by `ontologyName`. `ontologyTermsFromQuads` also returns `preferredPrefixes` and `preferredNamespaces`; new `ontologySuggestedPrefix(result, namespace)` and `OntologyVannError`.
+
+### Patch Changes
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`d1514ce`](https://github.com/linked-fw/cli/commit/d1514ceecdd03429a07866ea8fea40e268c6d0c1) Thanks [@flyon](https://github.com/flyon)! - Comments and the architecture notes name `linked.app.json`, not the removed `linked.config.js`.
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`48c3c6d`](https://github.com/linked-fw/cli/commit/48c3c6d22817dc8a771a38a0d4910d08d8208d41) Thanks [@flyon](https://github.com/flyon)! - Removes a stale commented-out TODO about `linked.config.json` from `debugInfo`.
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`fc6432c`](https://github.com/linked-fw/cli/commit/fc6432cecaa21e4e3e1e68598f3ff3713bc04c2f) Thanks [@flyon](https://github.com/flyon)! - Comments and docs describe the host app generically.
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`c810539`](https://github.com/linked-fw/cli/commit/c8105391684a8d31eac6e0778beef5a8c22cfbf4) Thanks [@flyon](https://github.com/flyon)! - One dependency order for release PRs, `checkout` and `branch land`, with the build tool ordered as `linked build-all` orders it: the build tool's own dependencies, then the build tool (`@_linked/cli`), then everything else. The packages that devDepend on the build tool while it depends on one of them (`@_linked/core`) formed a cycle, which fell back to name order and could put a package before the build tool. `branch land` therefore built such a package with the old build tool. When the build tool fails to build in `branch land`, the packages after it are not built (and so not pushed).
+
+- [#349](https://github.com/linked-fw/cli/pull/349) [`53d0398`](https://github.com/linked-fw/cli/commit/53d03984af6e617a1684f52119dce87eb3cb4228) Thanks [@flyon](https://github.com/flyon)! - `linkedOntologies` namespaces and the namespaces of `linked.app.json` prefixes refuse the characters that cannot appear in a SPARQL or Turtle IRI (`<`, `>`, `"`, `{`, `}`, `|`, `^`, backtick, backslash, whitespace and control characters). `NAMESPACE_IRI` is exported from `utils/ontologyConfig`.
+
 ## 1.61.0
 
 ### Minor Changes
