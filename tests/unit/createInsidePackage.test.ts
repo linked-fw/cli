@@ -1,7 +1,7 @@
 // `create-shape`, `create-component`, `create-set-component` and `create-ontology`
 // write a file that imports `../package.js`. Where there is no src/package.ts (a
 // new app root registers no package) they refuse instead of writing a broken
-// import. An app that does have one, as CN does, is served as before.
+// import. An app that does have one, as some hosts do, is served as before.
 //
 // cli-methods pulls in ora, which is ESM-only.
 jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
@@ -48,12 +48,12 @@ describe('create-shape and friends need a src/package.ts', () => {
     });
   }
 
-  // CN is itself an app that keeps its shapes at its root, with a real
+  // A host app can keep its shapes at its root, with a real
   // src/package.ts: an app manifest alone is no reason to refuse.
-  test('an app WITH src/package.ts is allowed (CN keeps its shapes at its root)', async () => {
+  test('an app WITH src/package.ts is allowed (a host app keeping its shapes at its root)', async () => {
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
-      `export const {linkedShape} = linkedPackage('create-now');\n`,
+      `export const {linkedShape} = linkedPackage('my-app');\n`,
     );
     await createShape('Thing', app);
     expect(fs.existsSync(path.join(app, 'src', 'shapes', 'thing.ts'))).toBe(true);
@@ -63,7 +63,7 @@ describe('create-shape and friends need a src/package.ts', () => {
     fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linked: {kind: 'ontology'}});
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
-      `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
+      `export const {registerOntologies} = linkedPackage('my-app-ont');\n`,
     );
     fs.outputFileSync(path.join(app, 'src', 'index.ts'), '');
     // The index import is added relative to the working directory.
@@ -73,15 +73,12 @@ describe('create-shape and friends need a src/package.ts', () => {
     const read = (rel: string) => fs.readFileSync(path.join(app, 'src', rel), 'utf8');
     expect(fs.readdirSync(path.join(app, 'src', 'data'))).toEqual(['planning.ttl']);
     expect(read('data/planning.ttl')).toContain(
-      '<https://linked.cm/ont/planning/> a owl:Ontology .',
+      '<https://linked.cm/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" .',
     );
-    expect(read('ontologies/planning.data.ts')).toContain(
-      `export const dataFiles = ['../data/planning.ttl'];`,
+    expect(read('ontologies/index.ts')).toContain(
+      `      name: 'planning',\n      namespace: 'https://linked.cm/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,
     );
-    expect(read('ontologies/planning.register.ts')).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, dataFiles)`,
-    );
-    expect(read('index.ts')).toContain('./ontologies/planning.register.js');
+    expect(read('index.ts')).toBe(`import './ontologies/index.js';\n`);
     expect(fs.readJsonSync(path.join(app, 'package.json')).linkedOntologies).toEqual({
       planning: {namespace: 'https://linked.cm/ont/planning/'},
     });
@@ -90,8 +87,7 @@ describe('create-shape and friends need a src/package.ts', () => {
     for (const rel of [
       'data/planning.ttl',
       'ontologies/planning.ts',
-      'ontologies/planning.data.ts',
-      'ontologies/planning.register.ts',
+      'ontologies/index.ts',
     ]) {
       expect([rel, read(rel)]).not.toEqual([rel, expect.stringContaining('${')]);
     }
@@ -101,10 +97,10 @@ describe('create-shape and friends need a src/package.ts', () => {
     fs.outputJsonSync(path.join(app, 'package.json'), {name: 'my-app-ont', linked: {kind: 'ontology'}});
     fs.outputFileSync(
       path.join(app, 'src', 'package.ts'),
-      `export const {linkedOntology} = linkedPackage('my-app-ont');\n`,
+      `export const {registerOntologies} = linkedPackage('my-app-ont');\n`,
     );
     jest.spyOn(process, 'cwd').mockReturnValue(app);
-    await expect(createOntology('3d', undefined, app)).rejects.toThrow(/start with a letter/);
+    await expect(createOntology('3d', undefined, app)).rejects.toThrow(/start with a lowercase letter/);
     expect(fs.existsSync(path.join(app, 'src', 'data'))).toBe(false);
     expect(fs.readJsonSync(path.join(app, 'package.json')).linkedOntologies).toBeUndefined();
   });

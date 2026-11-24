@@ -1,7 +1,7 @@
 /**
  * The files `linked create-package --kind ontology|assets` produces, as data:
  * package-relative path → content. `createPackage` writes them; a host that
- * commits a package elsewhere (Create Now, through the GitHub API) uses the
+ * commits a package elsewhere (an app that commits through the GitHub API) uses the
  * same function, so there is one definition of what a new package holds.
  *
  * Pure apart from reading the templates in this package's own `defaults/`:
@@ -27,8 +27,8 @@ import {
 } from './packageKind.js';
 import {withBaseUri} from './packageBaseUri.js';
 import {shippedDotfileName} from './shippedDotfiles.js';
-import {generateOntologyModules, ONTOLOGY_PREFIX} from './ontologyModules.js';
-import {ONTOLOGIES_KEY, ONTOLOGY_NAMESPACE} from './generateOntology.js';
+import {generateOntologyModules, ONTOLOGY_NAME} from './ontologyModules.js';
+import {ONTOLOGIES_KEY, ONTOLOGY_NAMESPACE} from './ontologyConfig.js';
 
 export interface PackageFilesOptions {
   /**
@@ -59,44 +59,46 @@ export type PackageFiles = Record<string, string>;
 const FILLED_FILES = ['src/index.ts', 'package.json', 'src/package.ts'];
 
 /**
- * The ontology kind's example files, renamed to the ontology slug. Its accessor modules are not
+ * The ontology kind's example files, renamed to the ontology slug. Its modules are not
  * templates: they are generated ({@link ontologyScaffoldModules}).
  */
 const EXAMPLE_ONTOLOGY_FILES = ['src/data/example-ontology.ttl'];
 const FILLED_ONTOLOGY_FILES = EXAMPLE_ONTOLOGY_FILES;
 
 /**
- * The accessor modules of a new ontology with no terms yet (`src/ontologies/<prefix>.ts`,
- * `.data.ts`, `.register.ts`), exactly as `linked generate-ontology` writes them for its
- * scaffolded Turtle (`src/data/<prefix>.ttl`, which declares only the ontology), so the first
+ * The ontology modules of a new package whose one ontology has no terms yet
+ * (`src/ontologies/<name>.ts` and the index registering it, `src/ontologies/index.ts`), exactly
+ * as `linked generate-ontology` writes them for its scaffolded Turtle (`src/data/<name>.ttl`,
+ * which declares only the ontology, with its name as its suggested prefix), so the first
  * `linked build` finds them current.
  */
 export function ontologyScaffoldModules(
-  prefix: string,
+  name: string,
   namespace: string,
 ): PackageFiles {
   return generateOntologyModules({
-    prefix,
+    name,
+    suggestedPrefix: name,
     namespace,
-    dataFiles: [`../data/${prefix}.ttl`],
+    dataFiles: [`../data/${name}.ttl`],
     terms: [],
   });
 }
 
 /**
  * `package.json` text with the ontology's `linkedOntologies` entry added (`data` left to its
- * default, `["<prefix>.ttl"]`).
+ * default, `["<name>.ttl"]`).
  */
 export function withOntologyEntry(
   packageJson: string,
-  prefix: string,
+  name: string,
   namespace: string,
 ): string {
   const pkg = JSON.parse(packageJson);
   const entries = pkg[ONTOLOGIES_KEY] ?? {};
   // An existing entry (its own `data` list, say) is the package's; it is kept.
-  if (entries[prefix]) return packageJson;
-  pkg[ONTOLOGIES_KEY] = {...entries, [prefix]: {namespace}};
+  if (entries[name]) return packageJson;
+  pkg[ONTOLOGIES_KEY] = {...entries, [name]: {namespace}};
   // The file's own indentation and line endings are kept.
   const indent = /^[ \t]+(?=")/m.exec(packageJson)?.[0] ?? '  ';
   const eol = packageJson.includes('\r\n') ? '\r\n' : '\n';
@@ -104,14 +106,14 @@ export function withOntologyEntry(
 }
 
 /**
- * Refuses an ontology the scaffold cannot write: a slug that cannot name the modules or be a
- * Turtle prefix (it must start with a letter: `@prefix 3d:` is not Turtle), or a namespace that
- * is not an IRI ending in `/`, `#` or `:` (what `linkedOntologies` accepts).
+ * Refuses an ontology the scaffold cannot write: a name that cannot name the modules or be its
+ * suggested Turtle prefix (it must start with a letter: `@prefix 3d:` is not Turtle), or a
+ * namespace that is not an IRI ending in `/`, `#` or `:` (what `linkedOntologies` accepts).
  */
-export function checkScaffoldOntology(prefix: string, namespace: string): void {
-  if (!ONTOLOGY_PREFIX.test(prefix) || !/^[a-z]/i.test(prefix)) {
+export function checkScaffoldOntology(name: string, namespace: string): void {
+  if (!ONTOLOGY_NAME.test(name) || !/^[a-z]/.test(name)) {
     throw new Error(
-      `${JSON.stringify(prefix)} cannot name an ontology: start with a letter, then letters and digits, with single hyphens or underscores between them.`,
+      `${JSON.stringify(name)} cannot name an ontology: start with a lowercase letter, then lowercase letters and digits, with single hyphens or underscores between them.`,
     );
   }
   if (!ONTOLOGY_NAMESPACE.test(namespace)) {
@@ -175,7 +177,7 @@ export function buildPackageFiles(
   const {baseUri, dependencies} = options;
 
   // An ontology package `foo-ont` holds the ontology `foo`: that slug names its
-  // files and its prefix, and its terms mint `{root}ont/foo/{Term}`.
+  // name, files and suggested prefix, and its terms mint `{root}ont/foo/{Term}`.
   const ontologySlug =
     kind === 'ontology' ? ontologySlugFor(packageName) : undefined;
   const uriBase =

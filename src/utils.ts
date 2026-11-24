@@ -642,17 +642,6 @@ export function debug(config, ...messages) {
 }
 
 export function debugInfo(...messages) {
-  // messages.forEach((message) => {
-  //   console.log(chalk.cyan('Info: ') + message);
-  // });
-  //@TODO: let packages also use linked.config.json? instead of gruntfile...
-  // that way we can read "analyse" here and see if we need to log debug info
-  // if(!gruntConfig)
-  // {
-  //   gruntConfig = getGruntConfig();
-  //   console.log(gruntConfig);
-  //   process.exit();
-  // }
   if (gruntConfig && gruntConfig.analyse === true) {
     messages.forEach((message) => {
       console.log(chalk.cyan('Info: ') + message);

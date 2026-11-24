@@ -264,8 +264,8 @@ when it has none (then agents land straight into that branch).
 |---|---|
 | `--with <pkgs>` | comma-separated `packages-local/` checkouts the agent changes (`@_linked/core`, `core` or `_linked-core`) |
 | `--app-detached` | check the app out detached at the base tip, for work that changes only packages; needs `--with` |
-| `--port <n>` | the port in the printed start command (default `<port>`; the main checkout uses 4040) |
-| `--dataset <name>` | adds `FUSEKI_DATASET=<name>` to the printed start command, and the clone commands when the app has them |
+| `--port <n>` | the port in the printed start command (default `<port>`; the hint names the main checkout's port: its `.env` `PORT`, else 4040) |
+| `--dataset <name>` | adds `FUSEKI_DATASET=<name>` to the printed start command, and how to clone the app's data into it (see Cloning a dataset) |
 | `--dir <path>` | where to put it; default `<parent of the app root>/wt/<agent>`; refused anywhere inside the app root |
 | `--from <m>` | a step of master `<m>` (see Masters); implied when run in the master's worktree |
 
@@ -396,7 +396,7 @@ and `branch.<m>.linked-worktree` (that repo's worktree), and in the app repo
 of a repo, so the records are read from anywhere in the app.
 
 The preview port is the first of 4510, 4520, … 4590 no master on this machine holds (outside a
-CN's live-app band 4000-4399, inside the 4000-4999 a local webid.email signs clients in from;
+host app's live-app band 4000-4399, inside the 4000-4999 a local webid.email signs clients in from;
 `port + 1` is for the master's test runs, `port + 2` to `port + 9` for its steps), or `--port`.
 "On this machine" means this app's masters (its git config) and the **port registry**
 `~/.linked/master-ports.json` (`$LINKED_HOME` overrides `~/.linked`), which maps each port to
@@ -417,9 +417,31 @@ cd ../wt/m1 && PORT=4510 SITE_ROOT=http://localhost:4510 CN_PROJECTS_ROOT=../wt/
 `SITE_ROOT` is set when the linked `.env` sets it (the server writes absolute asset URLs from it,
 so without it a second server serves the first one's bundles; every `worktree add` start command
 sets it too), `CN_PROJECTS_ROOT` when the `.env` sets it (so the preview's app clones are its
-own), `FUSEKI_DATASET` with `--dataset`. Refuses, making nothing, when `<m>` exists in a repo,
+own), `FUSEKI_DATASET` with `--dataset` (plus the clone hint, see Cloning a dataset). Refuses, making nothing, when `<m>` exists in a repo,
 contains `--`, equals a target, the directory exists, the port is another master's, or it runs
 outside the main checkout. Without `--worktree`, `branch start` is unchanged.
+
+### Cloning a dataset
+
+A worktree or master started with `--dataset <name>` runs on a dataset of its own, which starts
+empty. The cli does not know the app's store, so the app supplies the copy as an npm script in its
+root `package.json` that takes the target dataset as its one argument: `clone-dataset` by
+default, or the script `datasetCloneScript` names in the app's `linked.app.json`:
+
+```json
+{"schemaVersion": 1, "datasetCloneScript": "data:clone"}
+```
+
+`worktree add --dataset` and `branch start --worktree --dataset` then print the command to run
+before starting it:
+
+```
+Clone the data into wt-a1 first (from /path/to/app): npm run clone-dataset -- wt-a1
+```
+
+Without the script (or when `datasetCloneScript` names one `package.json` lacks) they print a
+warning instead: the dataset starts empty unless it is cloned by hand, and how to add the script.
+The script should refuse to overwrite the app's own datasets.
 
 ### Steps: `linked worktree add <agent> --from <m>`
 
@@ -504,7 +526,7 @@ target}], relinked: [<dir>], messages}`.
 ## `linked checkout <branch>`
 
 A branch checkout of an app and the packages it lists in `linked.unpublishedPackages`, made for a
-server that keeps one checkout per project branch (Create Now) — not for a developer's app (one
+server that keeps one checkout per project branch (a hosting app) — not for a developer's app (one
 clone with [`linked localize --listed`](localize.md#commands)) nor an agent's worktree (`linked
 worktree add`, which shares the main checkout's install).
 
@@ -565,8 +587,8 @@ Re-runs in either pins mode: a detached pinned worktree fast-forwards to `origin
 a clean worktree whose head origin has moves to
 its new target when the pins change (`switched`: to another pin, or back to `origin/<default>`); one
 with uncommitted changes or commits origin lacks is `kept`. In pins mode `--add` reads a package's
-name on its default branch. Without a pin (flag or key) and `--pins-only` nothing of this applies. Create Now
-passes `--pins-only` and no `--pin`: the app branch's keys are its pins.
+name on its default branch. Without a pin (flag or key) and `--pins-only` nothing of this applies. A hosting app
+may pass `--pins-only` and no `--pin`: the app branch's keys are its pins.
 
 **The list, transitively.** From the app worktree's committed `package.json`, breadth first:
 each listed package's worktree is made, then its own `package.json` (on its branch, or its
@@ -593,7 +615,7 @@ pushed.
 its npm name is what its `package.json` declares on `<branch>` (else on its default branch), its
 worktree is `packages-local/<dir>` by the same branch rule, under its base clone's lock, and the
 result marks it `"added": true`. It never makes the install run and is never built, so adding it
-leaves the app's `package.json` and lock as committed (Create Now edits a workspace ontology the app
+leaves the app's `package.json` and lock as committed (a hosting app can edit a workspace ontology the app
 does not use this way). It is still in the `packages-local/*` glob: an install a later run makes
 for a listed package links it like every checkout there, and the app's lock-at-rest hook puts the
 committed lockfile back. Its npm name must be one (a name that would leave `packages-local/` is
@@ -718,7 +740,7 @@ Exits 1 when any row is `two-copies`, 0 otherwise. `--json` prints the rows
   package gets the main checkout's copy in Node and `tsc` (Vite gives it the worktree's).
 - **Dependency changes** need a worktree with its own install (see Shared install).
 - **Data is shared.** Worktrees use the same data store unless started with a dataset of their
-  own (`--dataset`).
+  own (`--dataset`, filled by the app's clone script: see Cloning a dataset).
 - **`linked checkout` does not lock.** Concurrent runs on one base clone are the caller's to
   serialise.
 - **`linked worktree remove --branch` reads a squash merge as not landed**; use `--force`.

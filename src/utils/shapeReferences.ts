@@ -89,7 +89,7 @@ export const KNOWN_UNRESOLVED: {
   valueShape: string;
 }[] = [];
 
-/** arch-02: the `{slug}` in `{baseUri}shape/{slug}/{Name}`. Mirrors core's `packageNameToSlug`. */
+/** The `{slug}` in `{baseUri}shape/{slug}/{Name}`. Mirrors core's `packageNameToSlug`. */
 export const packageNameToSlug = (packageName: string): string =>
   packageName
     .replace(/^@[^/]+\//, '')

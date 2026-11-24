@@ -14,7 +14,7 @@ const path = require('path');
 // `@_linked/core` cannot be found with require.resolve(): it is ESM-only, so its
 // export map has no `require` condition and not even `./package.json` is
 // exported. And it is not necessarily in ./node_modules — when this repo is
-// checked out inside the create_now yarn workspace, the dependency is hoisted to
+// checked out inside a host app's yarn workspace, the dependency is hoisted to
 // the workspace root. So walk the node_modules chain the way node does, and
 // derive the on-disk layout from the package's own export map rather than
 // assuming `lib/esm`.

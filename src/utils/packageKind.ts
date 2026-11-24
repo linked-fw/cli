@@ -1,7 +1,7 @@
 /**
  * What `linked create-package` scaffolds, decided without touching anything.
  *
- * A linked package is one of two kinds (create-now arch-03 §Package types):
+ * A linked package is one of two kinds:
  *
  * - an **ontology package**, `<name>-ont`: exactly one ontology and nothing
  *   else. Its ontology slug is `<name>` (no `-ont`), so its terms mint
@@ -85,7 +85,7 @@ export function packageNameFor(name: string, kind: ScaffoldKind): string {
 /**
  * The ontology slug of an ontology package: the bare name without `-ont`.
  * `@acme/foo-ont` → `foo`. It is the `{ontologySlug}` in
- * `{root}ont/{ontologySlug}/{Term}` and the ontology's file name and prefix.
+ * `{root}ont/{ontologySlug}/{Term}`, and the ontology's name (its file name) and suggested prefix.
  */
 export function ontologySlugFor(packageName: string): string {
   const bare = bareName(packageName);

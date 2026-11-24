@@ -95,7 +95,7 @@ describe('release publisher', () => {
       target: 'web',
       publishable: true,
       builtAt: '2026-09-17T00:00:00.000Z',
-      environmentNames: ['cn-staging'],
+      environmentNames: ['app-staging'],
       destination: {
         accessURL: ACCESS_URL,
         releasePrefix: PREFIX,

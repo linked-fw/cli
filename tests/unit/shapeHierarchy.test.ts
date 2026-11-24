@@ -22,25 +22,22 @@ const DEP = 'http://example.org/dep#';
 
 const pkgModule = (name: string, mirrors?: string) =>
   `import { linkedPackage } from '@_linked/core/utils/Package';
-export const { linkedShape, linkedOntology, packageName } = linkedPackage('${name}'${
+export const { linkedShape, registerOntologies, packageName } = linkedPackage('${name}'${
     mirrors ? `, { mirrors: '${mirrors}' }` : ''
   });
 `;
 
-const ontologyModule = (ns: string, prefix: string) =>
-  `import { createNameSpace } from '@_linked/core/utils/NameSpace';
-import { loadOntologyFiles } from '@_linked/core/ontology/loadOntologyFiles';
-export const dataFiles = ['../data/${prefix}.ttl'];
-export const loadData = () => loadOntologyFiles(import.meta.url, dataFiles);
-export var ns = createNameSpace('${ns}');
-export var _self = ns('');
-`;
+// A terms module (no terms: the data's own are the point here) and the index registering it, as
+// `linked generate-ontology` writes them.
+const ontologyModule = () => `export {};\n`;
 
-const registerModule = (prefix: string) =>
+const registerModule = (ns: string, prefix: string) =>
   `import * as terms from './${prefix}.js';
-import { dataFiles, loadData, ns } from './${prefix}.js';
-import { linkedOntology } from '../package.js';
-linkedOntology(terms, ns, '${prefix}', loadData, dataFiles);
+import { registerOntologies } from '../package.js';
+registerOntologies(
+  [{name: '${prefix}', namespace: '${ns}', terms, data: ['../data/${prefix}.ttl'], suggestedPrefix: '${prefix}'}],
+  import.meta.url,
+);
 `;
 
 const turtle = (ns: string, prefix: string, body: string) =>
@@ -134,8 +131,8 @@ const fixture = ({
       .join('\n') + '\n',
   );
   if (data !== undefined) {
-    write('lib/esm/ontologies/fx.js', ontologyModule(FX, 'fx'));
-    write('lib/esm/ontologies/fx.register.js', registerModule('fx'));
+    write('lib/esm/ontologies/fx.js', ontologyModule());
+    write('lib/esm/ontologies/index.js', registerModule(FX, 'fx'));
     write('lib/esm/data/fx.ttl', turtle(FX, 'fx', data));
   }
 };
@@ -163,17 +160,14 @@ const dependency = ({register = true, sourceOnly = false} = {}) => {
   write(`${root}/lib/esm/shapes/Animal.js`, shapeClass('Animal', {cls: `${DEP}Animal`}));
   if (sourceOnly) {
     write(`${root}/src/package.ts`, pkgModule('@_linked/fixture-dep'));
-    write(
-      `${root}/src/ontologies/dep.ts`,
-      ontologyModule(DEP, 'dep').replace('export var ns', 'export var ns: (term: string) => {id: string}'),
-    );
-    write(`${root}/src/ontologies/dep.register.ts`, registerModule('dep'));
+    write(`${root}/src/ontologies/dep.ts`, ontologyModule());
+    write(`${root}/src/ontologies/index.ts`, registerModule(DEP, 'dep'));
     write(`${root}/src/data/dep.ttl`, turtle(DEP, 'dep', 'dep:Dog rdfs:subClassOf dep:Animal .\n'));
     return;
   }
-  write(`${root}/lib/esm/ontologies/dep.js`, ontologyModule(DEP, 'dep'));
+  write(`${root}/lib/esm/ontologies/dep.js`, ontologyModule());
   if (register) {
-    write(`${root}/lib/esm/ontologies/dep.register.js`, registerModule('dep'));
+    write(`${root}/lib/esm/ontologies/index.js`, registerModule(DEP, 'dep'));
   }
   write(
     `${root}/lib/esm/data/dep.ttl`,
@@ -441,7 +435,7 @@ describe('skipping', () => {
 
   test('a register module that throws fails the step and quotes the warning', async () => {
     fixture({shapes: {Animal: animal}, data: ''});
-    write('lib/esm/ontologies/fx.register.js', "throw new Error('register boom');\n");
+    write('lib/esm/ontologies/index.js', "throw new Error('register boom');\n");
     const result = (await checkShapeHierarchyStep(dir)) as {error: string};
     expect(result.error).toMatch(/the ontology register modules of @test\/fixture threw/);
     expect(result.error).toMatch(/register boom/);

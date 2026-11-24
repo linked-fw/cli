@@ -39,15 +39,16 @@ import {currentBranch, getTarget, listRepos, setTarget, type RepoInfo} from '../
 import {findAppRoot} from '../localize/app-root.js';
 import {makeRun, type Run} from '../localize/run.js';
 import {localBranchExists, refExists, selectCheckouts, worktreesOf} from './branch.js';
+import {BUILD_TOOL_PACKAGE} from '../lifecycle.js';
 import {dependencyOrder} from './release.js';
 import {readFarmMarker} from './worktree-node-modules.js';
 import {
   addPackageWorktree,
   createWorktreeSet,
+  datasetCloneMessages,
   defaultWorktreeDir,
   mainCheckoutOf,
   realish,
-  shellQuote,
   startCommandFor,
   startEnv,
   worktreeList,
@@ -237,11 +238,7 @@ async function makeMaster(
     `After each landing into ${name}: npx linked build in each changed package worktree under ${path.join(dir, 'packages-local')}, then restart the preview.`,
     `When the owner approves: linked branch land ${name}, from ${root}.`,
   );
-  if (options.dataset) {
-    messages.push(
-      `Clone the data into ${options.dataset} first (from ${root}): scripts/backup-cn-state.sh --yes, then scripts/restore-fuseki-dataset.sh <the cn-main dump> ${shellQuote(options.dataset)} --yes`,
-    );
-  }
+  if (options.dataset) messages.push(...(await datasetCloneMessages(root, options.dataset)));
   result.code = 0;
   return result;
 }
@@ -465,10 +462,19 @@ export async function branchLand(
   }
 
   let trouble = false;
+  // `landed` is in dependency order, the build tool first (see `dependencyOrder`). The packages
+  // after it build with it, so when it fails to build they are not built (and not pushed).
+  let tool: LandRepo | undefined;
   for (const entry of landed) {
     if (!build || entry.rel === '.') continue;
+    if (tool?.built === false) {
+      entry.built = false;
+      result.messages.push(`${entry.rel}: not built, because ${tool.rel} (its build tool) failed to build: fix that, then npx linked build in ${entry.checkout}.`);
+      continue;
+    }
     const r = run('npx', ['linked', 'build'], {cwd: entry.checkout});
     entry.built = r.status === 0;
+    if (entry.packageName === BUILD_TOOL_PACKAGE) tool = entry;
     if (!entry.built) {
       trouble = true;
       result.messages.push(`${entry.rel}: npx linked build failed in ${entry.checkout}: ${failed(r).split('\n').slice(-5).join('\n')}`);
@@ -491,7 +497,7 @@ export async function branchLand(
   result.code = trouble ? 5 : 0;
   result.messages.push(
     '',
-    landed.length ? `Landed ${name}${trouble ? ', with the failures above' : ''}. Restart the CN on ${root} so it runs the landed code.` : `Nothing to land: every target has ${name}.`,
+    landed.length ? `Landed ${name}${trouble ? ', with the failures above' : ''}. Restart the app on ${root} so it runs the landed code.` : `Nothing to land: every target has ${name}.`,
     `Remove the master once done with it: linked worktree remove ${name}.`,
   );
   return result;

@@ -35,7 +35,7 @@ now, so this is a change to the published type surface and belongs in a coordina
 in a drive-by sweep.
 
 Nobody has measured whether anything actually imports `<pkg>/types`. That measurement — a search
-across the fleet and CN for `from '@_linked/*/types'` — is the first step, and may turn this into
+across the fleet and the apps built on it for `from '@_linked/*/types'` — is the first step, and may turn this into
 a trivially safe removal.
 
 ## Scoping note

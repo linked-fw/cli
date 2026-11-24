@@ -1,7 +1,7 @@
 /**
  * Credentials for the git calls that reach a remote, through the environment only.
  *
- * A caller that needs a token (CN, with a short-lived GitHub App installation token) puts it in
+ * A caller that needs a token (e.g. a host app with a short-lived GitHub App installation token) puts it in
  * `LINKED_GIT_TOKEN`; the cli never takes it on the command line and never writes it anywhere.
  * Every `git clone | fetch | push | ls-remote` the cli runs gets `remoteEnv(env)`:
  *

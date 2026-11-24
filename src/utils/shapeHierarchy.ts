@@ -17,13 +17,13 @@ import {isLinkedPackageJson} from '../installed-packages.js';
  *
  * Everything has to be registered in one process: the package's shapes, its ontology data and the
  * ontology data of its dependencies (a package's `shapes/index` imports its dependencies' shapes
- * but not their data, which registers through each package's `ontologies/*.register.js`). Core's
+ * but not their data, which registers through each package's `ontologies/index.js`). Core's
  * `registerInstalledOntologies` registers the data of the package and of every linked dependency,
  * as an app's boot does. So, unlike the shape-reference check, this runs one child `node` for the
  * whole package.
  *
- * A linked dependency that is not built yet (or whose `lib/` predates its ontology) has its register
- * modules only in `src/ontologies/*.register.ts`. Those are loaded through the cli's TypeScript
+ * A linked dependency that is not built yet (or whose `lib/` predates its ontology) has its ontology
+ * index only in `src/ontologies/index.ts`. It is loaded through the cli's TypeScript
  * loader, so the order in which packages are built does not decide what the check sees.
  */
 
@@ -66,21 +66,36 @@ export type ShapeCheckOutcome =
   | {error: string};
 
 const CORE = '@_linked/core';
-const CHECK_MODULE = path.join('lib', 'esm', 'shapes', 'checkShapeHierarchy.js');
-const REGISTER_MODULE = path.join('lib', 'esm', 'ontology', 'registerInstalled.js');
+const CHECK_MODULE = path.join(
+  'lib',
+  'esm',
+  'shapes',
+  'checkShapeHierarchy.js',
+);
+const REGISTER_MODULE = path.join(
+  'lib',
+  'esm',
+  'ontology',
+  'registerInstalled.js',
+);
 const DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies'];
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, 'utf8'));
 
 const dependencyNames = (pkgJson: any): string[] => [
-  ...new Set(DEPENDENCY_FIELDS.flatMap((field) => Object.keys(pkgJson[field] || {}))),
+  ...new Set(
+    DEPENDENCY_FIELDS.flatMap((field) => Object.keys(pkgJson[field] || {})),
+  ),
 ];
 
 /**
  * The directory `name` resolves to from `fromDir`, by Node's `node_modules` walk, as a real path.
  * Not `require.resolve`: a package's export map need not expose `package.json`.
  */
-export const resolvePackageDir = (name: string, fromDir: string): string | undefined => {
+export const resolvePackageDir = (
+  name: string,
+  fromDir: string,
+): string | undefined => {
   let dir = fromDir;
   for (;;) {
     const candidate = path.join(dir, 'node_modules', name);
@@ -93,17 +108,13 @@ export const resolvePackageDir = (name: string, fromDir: string): string | undef
   }
 };
 
-/** Whether a package's build holds ontology register modules (`lib/esm/ontologies/*.register.js`). */
-const hasRegisterModules = (packageDir: string): boolean => {
-  const dir = path.join(packageDir, 'lib', 'esm', 'ontologies');
-  return fs.existsSync(dir) && fs.readdirSync(dir).some((file) => /\.register\.js$/.test(file));
-};
+/** Whether a package's build holds its ontology index (`lib/esm/ontologies/index.js`). */
+const hasRegisterModules = (packageDir: string): boolean =>
+  fs.existsSync(path.join(packageDir, 'lib', 'esm', 'ontologies', 'index.js'));
 
-/** Whether an unbuilt package has register modules in source (`src/ontologies/*.register.ts`). */
-const hasSourceRegisterModules = (packageDir: string): boolean => {
-  const dir = path.join(packageDir, 'src', 'ontologies');
-  return fs.existsSync(dir) && fs.readdirSync(dir).some((file) => /\.register\.ts$/.test(file));
-};
+/** Whether an unbuilt package has its ontology index in source (`src/ontologies/index.ts`). */
+const hasSourceRegisterModules = (packageDir: string): boolean =>
+  fs.existsSync(path.join(packageDir, 'src', 'ontologies', 'index.ts'));
 
 /**
  * The cli's TypeScript loader (`loaders/ts-loader.mjs`): beside this module's folder in the build
@@ -126,7 +137,6 @@ const runtimePackageName = (libEsm: string): string | undefined => {
     .match(/linkedPackage\(\s*['"]([^'"]+)['"]/)?.[1];
 };
 
-
 /**
  * What the check of the built package at `packagePath` loads, or why it does not run: a package
  * with no shape modules, or without a `@_linked/core` dependency, has nothing to check; a core
@@ -145,11 +155,16 @@ export const collectShapeCheckInputs = (
   if (!isCore && !ownDeps.includes(CORE)) return {skip: true};
   const coreDir = isCore ? packagePath : resolvePackageDir(CORE, packagePath);
   if (!coreDir) {
-    return {skip: true, reason: `${CORE} is a dependency but could not be resolved from ${packagePath}`};
+    return {
+      skip: true,
+      reason: `${CORE} is a dependency but could not be resolved from ${packagePath}`,
+    };
   }
   const core = path.join(coreDir, CHECK_MODULE);
   const registerInstalled = path.join(coreDir, REGISTER_MODULE);
-  const lacking = [core, registerInstalled].find((file) => !fs.existsSync(file));
+  const lacking = [core, registerInstalled].find(
+    (file) => !fs.existsSync(file),
+  );
   if (lacking) {
     return {
       skip: true,
@@ -191,14 +206,22 @@ export const collectShapeCheckInputs = (
   }
 
   const dirs = [...new Set(packageDirs)];
-  const sourceOnly = dirs.filter((dir) => !hasRegisterModules(dir) && hasSourceRegisterModules(dir));
+  const sourceOnly = dirs.filter(
+    (dir) => !hasRegisterModules(dir) && hasSourceRegisterModules(dir),
+  );
   const tsLoader = sourceOnly.length > 0 ? tsLoaderPath() : undefined;
   return {
     modules: modules.map((file) => pathToFileURL(file).href),
     packageDirs: dirs,
     expectRegistered: dirs
-      .filter((dir) => hasRegisterModules(dir) || (tsLoader && sourceOnly.includes(dir)))
-      .map((dir) => readJson(path.join(dir, 'package.json')).name ?? path.basename(dir)),
+      .filter(
+        (dir) =>
+          hasRegisterModules(dir) || (tsLoader && sourceOnly.includes(dir)),
+      )
+      .map(
+        (dir) =>
+          readJson(path.join(dir, 'package.json')).name ?? path.basename(dir),
+      ),
     ...(tsLoader ? {tsLoader: pathToFileURL(tsLoader).href} : {}),
     dependencies,
     core: pathToFileURL(core).href,
@@ -324,12 +347,16 @@ export const checkShapeHierarchyStep = async (
   if (skip !== undefined) return `skipped: ${skip}`;
   const outcome = await runShapeHierarchyCheck(packagePath, {timeoutMs});
   if ('error' in outcome) return {error: outcome.error};
-  if ('skip' in outcome) return outcome.reason ? `skipped: ${outcome.reason}` : true;
+  if ('skip' in outcome)
+    return outcome.reason ? `skipped: ${outcome.reason}` : true;
   const {findings} = outcome;
   if (findings.length === 0) return true;
   const errors = findings.filter((f) => f.severity === 'error').length;
   const warnings = findings.length - errors;
-  const summary = [errors && plural(errors, 'error'), warnings && plural(warnings, 'warning')]
+  const summary = [
+    errors && plural(errors, 'error'),
+    warnings && plural(warnings, 'warning'),
+  ]
     .filter(Boolean)
     .join(', ');
   const text = `${summary}:\n${findings.map(formatFinding).join('\n')}`;

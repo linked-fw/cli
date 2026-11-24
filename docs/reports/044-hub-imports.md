@@ -120,7 +120,7 @@ Three pieces:
 
 ## Details
 
-### Contract: masters CLI surface (KC in the hosting application's plan 282)
+### Contract: masters CLI surface (KC in the hosting application's plan)
 
 - **Port lock.** `linked branch start <m> --worktree …` chooses and records its preview port
   holding one machine-wide lock, `<LINKED_HOME>/locks/master-ports/linked.lock` (`LINKED_HOME`

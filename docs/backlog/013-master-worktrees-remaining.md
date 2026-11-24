@@ -37,20 +37,20 @@ relinks every worktree after an install. What still blocks running them side by 
   worktree's farm links `.bin/linked` to that same unbuilt CLI. The first build there runs the main
   checkout's bin (`<main>/node_modules/.bin/linked build`); `worktree add`/`branch start` could
   print that, or fall back to it.
-- **`worktree remove <agent>` does not find a master's step by its agent name** (step SY of CN
-  plan 282). Run from the app's main checkout:
+- **`worktree remove <agent>` does not find a master's step by its agent name** (step SY of a
+  master). Run from the app's main checkout:
   `npx linked worktree remove sy` →
-  ``No worktree of /Users/rene/web/create_now for sy: none on dev--sy, nor at /Users/rene/web/wt/sy.
+  ``No worktree of <main> for sy: none on dev--sy, nor at /Users/rene/web/wt/sy.
   Pass its directory with --dir; `linked worktree list` shows the worktrees.``
   while `linked worktree list` showed `step sy  /Users/rene/web/wt/hub-imports--sy`. It worked with
   `npx linked worktree remove sy --dir /Users/rene/web/wt/hub-imports--sy` (and then kept the landed
   `hub-imports--sy` branches: `@_linked/core: kept hub-imports--sy (not dev--sy).`). `remove` should
   look up `<m>--<agent>` steps as `list` does.
-- **A step with its own framework package loads two copies of it.** The link farm points CN's
+- **A step with its own framework package loads two copies of it.** The link farm points the app's
   `@_linked/core` at the step's checkout, while the main install's other `@_linked/*` packages
-  (`@_linked/fuseki`, `@_linked/access`, …) resolve core from the main checkout. CN's
+  (`@_linked/fuseki`, `@_linked/access`, …) resolve core from the main checkout. The app's
   `npm run typecheck:gate` in step SY's worktree reported 117 errors, every one between
-  `…/hub-imports--sy/packages-local/_linked-core/…` and `…/create_now/packages-local/_linked-core/…`
+  `…/hub-imports--sy/packages-local/_linked-core/…` and `…/<main>/packages-local/_linked-core/…`
   types (e.g. `FusekiStore` not assignable to `IDataset`); with `paths` mapping `@_linked/core` to
   the step's build, `tsc` gave 0 errors. The farm could link every package that depends on a
   `--with` package so it resolves the step's copy, or `worktree add` could print the `paths`
@@ -58,7 +58,7 @@ relinks every worktree after an install. What still blocks running them side by 
 - **A master with core, server or react needs every localized dependent in it too.** Master
   `hub-imports` started `--with core,server,react,cli`; its farm linked those to its checkouts while
   the other localized packages (auth, fuseki, server-utils, schema, …) resolved core from the main
-  checkout: two cores, and CN's `npm run typecheck:gate` there reported ~117 errors. Fixed by hand
+  checkout: two cores, and the app's `npm run typecheck:gate` there reported ~117 errors. Fixed by hand
   with `branch add-package hub-imports` of the 19 localized packages that depend on them
   (transitively), `linked build-all` in the master (26 packages, 6 min), `worktree relink`: `doctor
   resolve` then showed every `@_linked/*` but css in the master, and the gate gave `No new type

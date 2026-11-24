@@ -11,7 +11,7 @@ import type {PackageDetails} from '../../src/interfaces';
 // Every other package's `build` script runs `linked build`, which is the
 // `lib/` of @_linked/cli. When @_linked/cli is localized, `build-all` used to
 // build it in parallel with the rest: its `rimraf ./lib` pulled that `lib/`
-// out from under their builds (measured in Create Now on 2026-10-12: 6 failed
+// out from under their builds (measured in a host app on 2026-10-12: 6 failed
 // with ENOENT …/_linked-cli/lib/esm/installed-packages.js and 15 more were
 // not built, of 26). And whatever was built before it ran a stale cli. These
 // tests pin that the cli is built alone, after only what it depends on itself

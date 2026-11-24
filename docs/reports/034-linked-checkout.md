@@ -6,10 +6,10 @@ summary: >
   `linked branch merge --into <default> [--mode push|update]`, `linked worktree remove --branch`,
   `linked localize --listed`, the `unpublishedPackages(json)` reader and transitive walk, list
   edges in `dependencyOrder`, and credentials only through `LINKED_GIT_TOKEN` (askpass, helpers
-  and hooks off, never on disk, never in an install). Step CO of CN master plan 057. Minor.
+  and hooks off, never on disk, never in an install). A step of the host app's plan. Minor.
 ---
 
-# 034 — `linked checkout`, `branch fork`, `branch merge` (CO)
+# 034 — `linked checkout`, `branch fork`, `branch merge`
 
 ## PR
 
@@ -52,9 +52,9 @@ checkout up once landed. A private repo's token comes only from the environment.
 - Docs: `README.md`, `docs/integration-branches-and-worktrees.md` (§`linked branch fork`,
   §`linked branch merge`, §`linked worktree remove --branch`, §`linked checkout`,
   §Limitations), `docs/localize.md` (§Commands, §Unpublished packages, §Docker and CI, §What it
-  never does, §Exit codes). Sub-plan 002: K-checkout and K-unpublished final, CO ticked. CN (same
-  landing): arch-03 §Local development, `docs/how-to/develop-a-linked-package-locally.md`,
-  K-checkout and K-unpublished in plans 057 and 180.
+  never does, §Exit codes). Sub-plan 002: K-checkout and K-unpublished final, this step ticked.
+  The host app (same landing): its architecture docs, its how-to on developing a linked package
+  locally, and K-checkout and K-unpublished in its plans.
 - Changeset `.changeset/linked-checkout.md` (minor). semantu-agents PR
   https://github.com/Semantu/agents/pull/29 (workflow, wrapup).
 
@@ -65,8 +65,8 @@ checkout up once landed. A private repo's token comes only from the environment.
 - `npm run test:unit`: before `Tests: 1081 passed` (with a built `lib/`); after
   `Test Suites: 97 passed, 97 total` / `Tests: 1126 passed, 1126 total`, 44 s wall.
 - `npm run test:template`: `Test Suites: 2 passed, 2 total` / `Tests: 22 passed, 22 total`, 79 s.
-- CN `npm run typecheck:gate`: `No new type errors. 0 pre-existing errors still in the baseline.`
-  (15 s). CN's regular set not run: CN changed only docs.
+- The host app's typecheck gate: `No new type errors. 0 pre-existing errors still in the baseline.`
+  (15 s). Its regular set not run: the app changed only docs.
 - `npm run build`; `node lib/esm/launch.js checkout --help`, `branch fork --help`,
   `branch merge --help`, `worktree remove --help` show the flags recorded in K-checkout.
 - No token on disk: every e2e case ends with `assertNoToken(root)`, which reads every `config` /
@@ -124,12 +124,12 @@ checkout up once landed. A private repo's token comes only from the environment.
   refuses, even with `--force`, while `packages-local/` holds anything that is not a package
   worktree of the checkout; `origin/HEAD` set on every run; a new app branch a failed run left
   unpushed (no recorded upstream) is pushed by the re-run.
-- K-checkout and K-unpublished were updated in 002, 057 and 180 in this landing.
+- K-checkout and K-unpublished were updated in sub-plan 002 and the host app's plans in this landing.
 
 ### Follow-ups
 
-- `linked checkout` takes no lock; a squash merge reads as not landed; CO's by-hand check with
-  a real installation token was not run — all three homed in CN sub-plan 180 §BC (Known files
+- `linked checkout` takes no lock; a squash merge reads as not landed; the by-hand check with
+  a real installation token was not run — all three homed in the host app's plan (Known files
   and pitfalls), and the first two in K-checkout.
 
 ## Details

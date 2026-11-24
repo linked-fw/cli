@@ -8,7 +8,7 @@ packages: [cli, server]
 
 # Drop the retired-flag fallback
 
-The release of CN plans 057/070 had to bridge two CLIs:
+The release of the `linked.kind` flags and store inference had to bridge two CLIs:
 
 - The published CLI (1.57.x) builds a package only with `linkedPackage: true`, and CI and the
   publish workflow build every package with the published CLI. So this package's own

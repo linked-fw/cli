@@ -24,7 +24,7 @@ describe('resolveBuildTarget', () => {
     ).toThrow('Cannot build target "web" while APP_ENV=capacitor');
   });
 
-  test.each(['production', 'staging', 'true', '1', 'cn-production'])(
+  test.each(['production', 'staging', 'true', '1', 'app-production'])(
     'APP_ENV=%s builds web and does not hijack the target',
     (appEnv) => {
       expect(resolveBuildTarget({appEnv})).toBe('web');

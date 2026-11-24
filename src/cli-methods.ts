@@ -1,13 +1,23 @@
 import chalk from 'chalk';
 import {makeBinsExecutable} from './utils/bin-modes.js';
 import {tscFlagsFor} from './localize/shared-install.js';
-import {checkOntologyModulesStep} from './utils/generateOntology.js';
+import {
+  checkOntologyModulesStep,
+  writePackageOntologies,
+} from './utils/generateOntology.js';
+import {
+  APP_CONFIG_FILE,
+  linkedServerConfig,
+  loadAppPrefixes,
+  newAppConfigText,
+  refreshAppPrefixes,
+} from './utils/appConfig.js';
 import {exec} from 'child_process';
 import depcheck from 'depcheck';
 import {getEnvFile} from 'env-cmd/dist/get-env-vars.js';
 import fs from 'fs-extra';
 import path from 'path';
-import {fileURLToPath} from 'url';
+import {fileURLToPath, pathToFileURL} from 'url';
 import {createInterface} from 'readline';
 import {
   debugInfo,
@@ -49,7 +59,10 @@ import {
   type ShapeReferenceReport,
 } from './utils/shapeReferences.js';
 import {checkShapesIndex, checkShapesSideEffects} from './utils/shapesIndex.js';
-import {checkShapeHierarchyStep} from './utils/shapeHierarchy.js';
+import {
+  checkShapeHierarchyStep,
+  resolvePackageDir,
+} from './utils/shapeHierarchy.js';
 import {writeShapesTurtleStep} from './utils/shapesTurtle.js';
 import {writeComponentsTurtleStep} from './utils/componentsTurtle.js';
 
@@ -107,7 +120,7 @@ function defaultsDir(...parts: string[]): string {
  * to import. A new app root has none (it is an app, `linked.kind: "app"`, not a linked package), so
  * there the import would be broken: refuse instead. Only the file decides: a
  * app that keeps its shapes at its root with its own `src/package.ts`, as
- * create-now does, is served as before.
+ * a host app may do, is served as before.
  */
 function assertInsidePackage(sourceFolder: string, command: string) {
   if (fs.existsSync(path.join(sourceFolder, 'package.ts'))) return;
@@ -260,8 +273,8 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
     fs.mkdirSync(targetFolder);
   }
 
-  // Scaffold from the canonical template repo (single source of truth; CN's
-  // server-side createProject clones the same repo). Shallow clone, then drop
+  // Scaffold from the canonical template repo (single source of truth; a host
+  // app that creates apps server-side clones the same repo). Shallow clone, then drop
   // .git so the new app starts with clean history.
   await execPromise(`git clone --depth 1 https://github.com/linked-fw/app-template.git "${targetFolder}"`, false, false);
   fs.removeSync(path.join(targetFolder, '.git'));
@@ -290,7 +303,13 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
     fs.copySync(datasetsExample, datasetsReal);
   }
 
-  // fs.copySync(path.join(__dirname, '..', 'defaults', 'app'), targetFolder);
+  // The app's prefix map: empty until `linked prefixes` (run after the install below, and by
+  // `linked generate-ontology` in the app) adds its installed ontologies.
+  const appConfigFile = path.join(targetFolder, APP_CONFIG_FILE);
+  if (!fs.existsSync(appConfigFile)) {
+    fs.writeFileSync(appConfigFile, newAppConfigText());
+  }
+
 
   log("Creating new Linked app '" + appName + "'");
 
@@ -347,6 +366,7 @@ export const createApp = async (name, basePath = process.cwd(), options: {appNam
       if (stderr && stderr.trim()) {
         process.stderr.write(stderr);
       }
+      await fillAppPrefixes(targetFolder);
     }
   }
 
@@ -537,6 +557,7 @@ export async function scaffoldReactNativeApp(
         maxBuffer: 50 * 1024 * 1024,
       });
       spinner.succeed('Dependencies installed (npm)');
+      await fillAppPrefixes(path.join(targetFolder, 'services', 'api'));
     } catch (err) {
       spinner.fail('Could not install dependencies');
       if (err?.stdout) process.stdout.write(err.stdout);
@@ -563,6 +584,38 @@ export async function scaffoldReactNativeApp(
   );
 }
 
+/**
+ * Imports `specifier` (`@_linked/core/utils/Prefix`) as the app at `appRoot` resolves it, so it is
+ * the app's copy of the package, not this cli's: `<pkg>/lib/esm/<subpath>.js` of the package its
+ * `node_modules` walk finds.
+ */
+async function importFromApp(
+  appRoot: string,
+  specifier: string,
+): Promise<Record<string, any>> {
+  const [, name, subpath] = /^(@[^/]+\/[^/]+|[^@/][^/]*)\/(.+)$/.exec(specifier) ?? [];
+  const dir = name ? resolvePackageDir(name, appRoot) : undefined;
+  if (!dir) {
+    throw new Error(`Cannot find ${specifier} from ${appRoot}: is it installed?`);
+  }
+  return import(pathToFileURL(path.join(dir, 'lib', 'esm', `${subpath}.js`)).href);
+}
+
+/**
+ * A new app's prefix map from its installed ontologies (`linked prefixes`). A failure warns: the
+ * app is created, and `linked prefixes` can be run again.
+ */
+async function fillAppPrefixes(appRoot: string): Promise<void> {
+  try {
+    const {added} = await refreshAppPrefixes(appRoot);
+    log(`${APP_CONFIG_FILE}: ${added.length} prefixes from the installed ontologies`);
+  } catch (error) {
+    warn(
+      `Could not fill ${APP_CONFIG_FILE} from the installed ontologies: ${error instanceof Error ? error.message : String(error)}. Run \`linked prefixes\` in ${appRoot}.`,
+    );
+  }
+}
+
 // Indirection so tests can replace the scaffold step when exercising createApp.
 export const reactNativeInternals = {scaffoldReactNativeApp};
 
@@ -577,7 +630,7 @@ function setEnvVar(envText: string, key: string, value: string): string {
 
 /**
  * Stamp the new app's identity into the freshly-cloned template. The template
- * ships without `${var}` placeholders (so a raw CN clone boots on defaults), so
+ * ships without `${var}` placeholders (so a raw clone boots on defaults), so
  * create-app writes the real per-app values here:
  *  - `.env.example` (committed defaults for this app) + `.env` (local): APP_NAME
  *    drives the display name; APP_PREFIX names data files.
@@ -1412,12 +1465,12 @@ var replaceCurlyVariables = function (string) {
 };
 
 export const createOntology = async (
-  prefix,
+  name,
   uriBase?,
   basePath = process.cwd(),
 ) => {
-  if (!prefix) {
-    console.warn('Please provide a suggested prefix as the first argument');
+  if (!name) {
+    console.warn("Please provide the ontology's name as the first argument");
     return;
   }
 
@@ -1426,16 +1479,16 @@ export const createOntology = async (
   let targetFolder = ensureFolderExists(sourceFolder, 'ontologies');
 
   if (!uriBase) {
-    uriBase = defaultOntologyNamespace(prefix);
+    uriBase = defaultOntologyNamespace(name);
   }
   setVariable('uri_base', asNamespace(uriBase));
 
-  let {hyphenName, camelCaseName, underscoreName} = setNameVariables(prefix);
+  let {hyphenName, camelCaseName, underscoreName} = setNameVariables(name);
 
   const namespace = asNamespace(uriBase);
   // Refused before anything is written: a name the modules, Turtle or build check cannot use.
   checkScaffoldOntology(hyphenName, namespace);
-  log("Creating files for ontology '" + prefix + "'");
+  log("Creating files for ontology '" + name + "'");
 
   // The ontology's data, Turtle. `loadData` reads it beside the compiled module
   // (`../data/<name>.ttl`), and `linked build` copies it to lib/esm/data/.
@@ -1451,17 +1504,10 @@ export const createOntology = async (
   );
   await replaceVariablesInFiles(targetDataFile);
 
-  // The accessor modules (terms, data, register), as `linked generate-ontology` writes them, and
-  // the `linkedOntologies` entry it reads, so `linked build` checks them against the Turtle.
+  // The `linkedOntologies` entry, then the package's modules as `linked generate-ontology` writes
+  // them (this ontology's terms, the index registering every ontology of the package, the entry's
+  // import of the index), so `linked build` finds them current.
   const packageRoot = path.dirname(sourceFolder);
-  for (const [rel, content] of Object.entries(
-    ontologyScaffoldModules(hyphenName, namespace),
-  )) {
-    fs.outputFileSync(
-      path.join(sourceFolder, rel.replace(/^src\//, '')),
-      content,
-    );
-  }
   const packageJsonPath = path.join(packageRoot, 'package.json');
   const declared = fs.existsSync(packageJsonPath);
   if (declared) {
@@ -1473,6 +1519,17 @@ export const createOntology = async (
         namespace,
       ),
     );
+    await writePackageOntologies(packageRoot);
+  } else {
+    for (const [rel, content] of Object.entries(
+      ontologyScaffoldModules(hyphenName, namespace),
+    )) {
+      fs.outputFileSync(
+        path.join(sourceFolder, rel.replace(/^src\//, '')),
+        content,
+      );
+    }
+    addLineToIndex(`import './ontologies/index.js';`, 'ontologies', packageRoot, true);
   }
   let targetFile = path.join(targetFolder, hyphenName + '.ts');
   log(
@@ -1480,29 +1537,17 @@ export const createOntology = async (
       targetDataFile.replace(basePath, ''),
     )}`,
     declared
-      ? `And its accessor modules in ${chalk.magenta(
+      ? `And its terms module in ${chalk.magenta(
           targetFile.replace(basePath, ''),
         )}, declared in ${chalk.magenta(
           packageJsonPath.replace(basePath, ''),
-        )} "linkedOntologies" (regenerate them from the data with \`linked generate-ontology\`)`
-      : `And its accessor modules in ${chalk.magenta(
+        )} "linkedOntologies" and registered by src/ontologies/index.ts (regenerate them from the data with \`linked generate-ontology\`)`
+      : `And its terms module in ${chalk.magenta(
           targetFile.replace(basePath, ''),
-        )}. No package.json next to ${chalk.magenta(
+        )}, registered by src/ontologies/index.ts. No package.json next to ${chalk.magenta(
           sourceFolder.replace(basePath, ''),
-        )}, so nothing declares them in "linkedOntologies" and \`linked build\` does not check them.`,
+        )}, so nothing declares it in "linkedOntologies" and \`linked build\` does not check it.`,
   );
-
-  //if this is not a lincd app (but a lincd package instead)
-  if (!sourceFolder.includes('frontend')) {
-    //then also add an import to index
-    // Import the register sibling, not the terms module: only the sibling calls
-    // linkedOntology(). See the comment in the generated <prefix>.register.ts.
-    let indexPath = addLineToIndex(
-      `import './ontologies/${hyphenName}.register.js';`,
-      'ontologies',
-    );
-    log(`Added an import of this file from ${chalk.magenta(indexPath)}`);
-  }
 };
 // The shapes barrel (src/shapes/index.ts) is imported by both the frontend index and
 // the backend entry, so every shape registers on both boot paths (and materializes into
@@ -2052,23 +2097,11 @@ export const runMethod = async (
   await ensureEnvironmentLoaded();
 
   if (options.spawn) {
-    let linkedConfig = (
-      await importFile(path.join(process.cwd(), 'linked.config.js'))
-    ).default;
-
-    // Set default loadAppComponent if not provided
-    if (!linkedConfig.server) {
-      linkedConfig.server = {};
-    }
-    if (!linkedConfig.server.loadAppComponent) {
-      linkedConfig.server.loadAppComponent = async () =>
-        (await importFile(path.join(process.cwd(), 'src', 'App'))).default;
-    }
-    // Set default loadRoutes if not provided
-    if (!linkedConfig.server.loadRoutes) {
-      linkedConfig.server.loadRoutes = async () =>
-        await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
-    }
+    const linkedConfig = linkedServerConfig(process.cwd());
+    linkedConfig.server.loadAppComponent = async () =>
+      (await importFile(path.join(process.cwd(), 'src', 'App'))).default;
+    linkedConfig.server.loadRoutes = async () =>
+      await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
 
     const ServerClass = await loadServerClass();
     await loadBackendStorageConfig();
@@ -2165,8 +2198,9 @@ export const startServer = async (
 ) => {
   await ensureEnvironmentLoaded();
 
-  let linkedConfig = (await importFile(path.join(process.cwd(), 'linked.config.js')))
-    .default;
+  // LinkedServer's options from the app's settings (linked.app.json); refuses a leftover
+  // linked.config.js.
+  const linkedConfig = linkedServerConfig(process.cwd());
 
   // function scssLoadcall(source, filename) {
   //   return 'console.log("SCSS CALL: ' + filename + '");\n' + source;
@@ -2179,39 +2213,29 @@ export const startServer = async (
   // // hook.hook('Body.module.css', scssLoadcall);
   // hook.hook('.module.css', scssLoadcall);
 
+  // The app's prefix map (linked.app.json) into the app's own copy of core, before anything else
+  // of the app loads.
+  await loadAppPrefixes(process.cwd(), (specifier) =>
+    importFromApp(process.cwd(), specifier),
+  );
+
   if (!ServerClass) {
     ServerClass = await loadServerClass();
   }
   await loadBackendStorageConfig();
 
-  // Set default loadAppComponent if not provided
-  if (!linkedConfig.server) {
-    linkedConfig.server = {};
-  }
-  if (!linkedConfig.server.loadAppComponent) {
-    let appPromise;
-    if (process.env.NODE_ENV !== 'development') {
-      appPromise = (await importFile(path.join(process.cwd(), 'lib', 'App.js')))
-        .default;
-    } else {
-      appPromise = (await importFile(path.join(process.cwd(), 'src', 'App.tsx')))
-        .default;
-    }
-    linkedConfig.server.loadAppComponent = async () => {
-      return appPromise;
-    };
-  }
-
-  // Set default loadRoutes if not provided
-  if (!linkedConfig.server.loadRoutes) {
-    linkedConfig.server.loadRoutes = async () => {
-      if (process.env.NODE_ENV !== 'development') {
-        return await importFile(path.join(process.cwd(), 'lib', 'routes.js'));
-      } else {
-        return await importFile(path.join(process.cwd(), 'src', 'routes.tsx'));
-      }
-    };
-  }
+  // The app component and routes: the compiled ones (lib/), or src/ in development.
+  const compiled = process.env.NODE_ENV !== 'development';
+  const appPromise = (
+    await importFile(
+      path.join(process.cwd(), ...(compiled ? ['lib', 'App.js'] : ['src', 'App.tsx'])),
+    )
+  ).default;
+  linkedConfig.server.loadAppComponent = async () => appPromise;
+  linkedConfig.server.loadRoutes = async () =>
+    await importFile(
+      path.join(process.cwd(), ...(compiled ? ['lib', 'routes.js'] : ['src', 'routes.tsx'])),
+    );
 
   let server = new ServerClass(linkedConfig);
   //Important to use slice, because when using clusers, child processes need to be able to read the same arguments

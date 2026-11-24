@@ -1,10 +1,10 @@
 ---
 summary: >
-  Sub-plan of Create Now master plan 057 (package repos) for `linked-fw/cli`: LK — one
+  Sub-plan of the host app's plan (package repos) for `linked-fw/cli`: LK — one
   `linkedKind(json)` helper and `linked.kind` replacing `linkedPackage`/`linkedApp` in the CLI,
-  `@_linked/server` and CN; RK — `linked.kind` in every `package.json` of the CN tree and in
-  `linked-fw/app-template`; CO — `linked checkout`, `branch fork`, `branch merge`, credentials
-  through the environment, `--json`, docs and skills. Lands on `dev`.
+  `@_linked/server` and the host app; RK — `linked.kind` in every `package.json` of the app's
+  tree and in `linked-fw/app-template`; CO — `linked checkout`, `branch fork`, `branch merge`,
+  credentials through the environment, `--json`, docs and skills. Lands on `dev`.
 status: Plan
 ---
 
@@ -12,16 +12,15 @@ status: Plan
 
 ## Master plan
 
-[CN plan 057](../../../../docs/plans/057-package-repo-creation.md) —
-`/Users/rene/web/create_now/docs/plans/057-package-repo-creation.md` (rules for every step,
+The host app's master plan for package repos, in the app's repository (rules for every step,
 status table, numbers, starter prompt). Steps land on integration branch `dev`.
 
 ## Contracts
 
-Copied verbatim from plan 057; the rest are there. A step that changes one updates it here and in
-057 in the same landing.
+Copied verbatim from the master plan; the rest are there. A step that changes one updates it here
+and in the master plan in the same landing.
 
-- **K-kind** (provider LK; consumers RK, PC, CO, CN, server): every `package.json` carries
+- **K-kind** (provider LK; consumers RK, PC, CO, the host app, server): every `package.json` carries
   `"linked": { "kind": "app" | "ontology" | "assets" | "library" }`, merged into an existing
   `linked` object (e.g. `linked.serverOnly`), never replacing it. `linkedPackage` and `linkedApp`
   are gone; no reader accepts them. One helper, `linkedKind(json)` →
@@ -29,7 +28,7 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
   (with `LinkedKind`, `LINKED_KINDS`, `isLinkedPackageJson`); `@_linked/server` keeps a
   byte-identical copy in `@_linked/server/utils/linkedDependencies`, between marker comments that
   name the twin. `discoverLinkedDependencies(appDir, pkg, isLinked?)` takes an optional test; only
-  CN's `appPackagesOf` passes one (accepting `linkedPackage: true` too, until the release). A linked package is `kind !== undefined && kind !== 'app'`.
+  the host app's graph-access reader passes one (accepting `linkedPackage: true` too, until the release). A linked package is `kind !== undefined && kind !== 'app'`.
   `ontology` packages may carry shapes for their own terms; `library` is framework code.
 - **K-unpublished** (provider CO; consumers PC, BC, RK): an app or package lists the packages it
   uses that are not on npm in its committed `package.json`:
@@ -54,10 +53,10 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
   `{code, branch, root, app: {name, repo, dir, branch, created, head, status, reason?},
   packages: [{name, repo, dir, branch, detached, fellBack, head, requiredBy, status, reason?,
   unlisted?, added?}], install: {ran, ok}, builds: [{name, result: ok|failed|skipped}], messages}`;
-  `--add <repo>` (added by plan 070 NO) checks out one more package no list names into
+  `--add <repo>` (added by a later app plan) checks out one more package no list names into
   `packages-local/` by the same branch rule (`added: true`), its name from its `package.json`; it
   never triggers the install and is never built; a later run without it reports it `unlisted`;
-  `--pin <npm>=<branch>` (added for CN plan 225 OB) puts that package on `<branch>` instead of the
+  `--pin <npm>=<branch>` (added for a later app plan) puts that package on `<branch>` instead of the
   rule (`pin` in its entry; detached at `origin/<branch>` while another worktree holds it, fast-
   forwarded and attached later), `--pins-only` drops the same-name rule (no pin = detached at
   `origin/<default>`), and in either mode a clean worktree whose head origin has moves when the
@@ -78,22 +77,22 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
   `linked.unpublishedPackages` edges), then the app; fetch; `push` (default) merges
   `origin/<branch>` `--no-ff` into `origin/<default>` in a temporary worktree and pushes
   `<default>`; `update` (protected default branches) merges `origin/<default>` into `<branch>` and
-  pushes the branch, and CN (step BC) then opens and merges one PR per repo whose `landed` is
+  pushes the branch, and the host app then opens and merges one PR per repo whose `landed` is
   false, in the order returned, with its GitHub App (0 approvals); stop at the first conflict or
   refused push. `{code, branch, into, mode, repos: [{name, dir, repo, result:
   merged|up-to-date|conflict|push-refused|skipped, sha?, files?, landed}], messages}`.
   `linked worktree remove --branch <branch> [--dir <app>] [--force] [--json]`: remove the
   checkout once every repo has landed in `origin/<default>` (an ancestor of it: a squash merge
-  reads as not landed, so CN lands with merge commits); `{code, removed, kept: [{dir,
+  reads as not landed, so the host app lands with merge commits); `{code, removed, kept: [{dir,
   reason}], branches: [{repo, branch, deleted, sha}], messages}`. Credentials only through the
   environment: `LINKED_GIT_TOKEN` (and `LINKED_GIT_USERNAME`, default `x-access-token`), used by
   remote git calls through `GIT_ASKPASS` with credential helpers and git hooks off; local git, the
   install and builds run without it; no token is ever written to `.git/config` or any file.
 - **K-repos** (provider PC; consumers BC, CS): package repos `{ws}-ont-{slug}` and
-  `{ws}-assets-{slug}` in `GITHUB_TARGET_ORG` (production `create-now-repos`, dev/test
+  `{ws}-assets-{slug}` in `GITHUB_TARGET_ORG` (production `example-org`, dev/test
   `linked-cm-testing`); npm names `{slug}-ont`, `{slug}-assets`; created with `linked.kind` and the
   asset package listing the ontology package in its `linked.unpublishedPackages`. The app is created
-  from the template and works without its packages; CN then opens and merges (as its GitHub App,
+  from the template and works without its packages; the host app then opens and merges (as its GitHub App,
   0 approvals) a PR adding both to the app's `linked.unpublishedPackages`. Failure leaves a working
   app and a retry path. The app's `packages/` directory is no longer used for packages.
 
@@ -103,24 +102,24 @@ Copied verbatim from plan 057; the rest are there. A step that changes one updat
 
 After LK, the CLI and `@_linked/server` read only `linked.kind`. Every local checkout whose
 `package.json` still says `"linkedPackage": true` then stops being a linked package for the
-owner's running CN: it drops out of boot loading, the ontology sync
-(CN `src/backend/infra/cnMainOntologySync.ts:20-27`), Vite's dependency exclusion and
+owner's running host app: it drops out of boot loading, the app's ontology sync, Vite's
+dependency exclusion and
 `build-all`. So **RK runs right after LK in the same wave, and LK does not land until RK is
 ready.** The master spawns both together; RK works on a worktree branch rebased on LK's branch,
 and they land back to back (LK first, RK immediately after, then the main-checkout rebuilds and
-one CN restart). Neither lands alone.
+one restart of the app). Neither lands alone.
 
 ## LK — `linked.kind` through one helper
 
 **Depends on:** nothing (wave 1, parallel with CK and WC); lands only together with RK (above).
-**Repos:** cli, server, CN (its readers and tests of the flags). **Plan doc:** cli
+**Repos:** cli, server, the host app (its readers and tests of the flags). **Plan doc:** cli
 `docs/plans/003-…`. **Reports:** cli `docs/reports/032-…`, server `docs/reports/020-…`.
 **Test port:** 4342. **Size:** medium, 2 phases: (1) the helper and every reader in the CLI and
-server, with tests; (2) the writers (templates, `buildPackageFiles`, the identity stampers), CN's
+server, with tests; (2) the writers (templates, `buildPackageFiles`, the identity stampers), the app's
 reader and tests, docs.
 
 **Goal.** K-kind: `linkedKind(json)` is the only way anything decides what a package is; nothing
-reads `linkedPackage` or `linkedApp`; everything the CLI or CN scaffolds writes `linked.kind`.
+reads `linkedPackage` or `linkedApp`; everything the CLI or the app scaffolds writes `linked.kind`.
 
 **Scope.**
 - `linkedKind(json)` in the CLI (next to today's `isLinkedPackageJson`,
@@ -137,26 +136,26 @@ reads `linkedPackage` or `linkedApp`; everything the CLI or CN scaffolds writes 
   `"linked": {"kind": "ontology"}` / `{"kind": "assets"}`; the react-native template writes
   `assets` for `packages/app-shapes` (shapes only, no ontology) and `app` for `services/api`. The app identity stampers write `"linked": {"kind": "app"}` and drop
   `linkedApp`, merging into an existing `linked` object: CLI `applyAppIdentity`
-  (`src/cli-methods.ts:608`) and CN `stampAppIdentity` (`src/backend/provisioners/appTemplateIdentity.ts`).
+  (`src/cli-methods.ts:608`) and the host app's own template-identity stamper.
   That way an app made from the published `linked-fw/app-template` (which keeps `linkedApp: true`
   until RK's template branch is released) is right from the start.
-- CN: `appTemplateIdentity.ts:92-94` refuses a template whose kind is not `app`/absent the way it
-  refuses `linkedPackage` today; CN tests that write or assert the flags (Files).
-- Changesets: cli (minor), server (minor). CN has none.
+- The host app: its template-identity stamper refuses a template whose kind is not `app`/absent
+  the way it refuses `linkedPackage` today; its tests that write or assert the flags (Files).
+- Changesets: cli (minor), server (minor). The app has none.
 - Not here: the `package.json` of existing packages (RK); `linked.unpublishedPackages` (CO).
 
 **Verify.**
 - `git -C packages-local/_linked-cli grep -nE '\.linkedPackage\b|linkedPackage ?(===|:) ?true|"linkedPackage"|linkedApp' -- src defaults`
-  and the same in `_linked-server/src` and CN `src` find only `linkedPackage(` registration calls
+  and the same in `_linked-server/src` and the app's `src` find only `linkedPackage(` registration calls
   and comments that explain the old field is not read.
-- cli `npm run test:unit` and `npm run test:template`; server's jest suite; CN gate (Tests).
+- cli `npm run test:unit` and `npm run test:template`; server's jest suite; the app's gate (Tests).
 - With RK applied (the joint landing), in the main checkout: `npx linked build-all` builds every
-  package it built before (compare the package list with one taken before LK); restart CN on
+  package it built before (compare the package list with one taken before LK); restart the app on
   :4040 and check the boot log lists the same linked packages and ontology sync packages as
   before; the owner's path (sign in, open a project and its Ontology Manager) works.
 
 **Done when.** One helper and its server twin; zero readers of the old fields; scaffolds and both
-identity stampers write `linked.kind`; cli, server and CN gates green; changesets in cli and
+identity stampers write `linked.kind`; cli, server and app gates green; changesets in cli and
 server; landed back to back with RK.
 
 ### Files (found in the code)
@@ -203,45 +202,41 @@ Server (`packages-local/_linked-server`, on `dev`):
 - Tests: `src/tests/boot-installed-providers.test.ts`, `nested-linked-packages.test.ts`,
   `shape-graphs-live.test.ts`, `fatal-provider-errors.test.ts`, `has-module-entry.test.ts`.
 - `package.json:93` already has `"linked": {"serverOnly": […]}` (also `_linked-server-utils`
-  `package.json:41`, read by CN `src/__tests__/clientBoundary.test.ts:100`): RK merges `kind`
+  `package.json:41`, read by the app's client-boundary test): RK merges `kind`
   into these.
 
-CN (`/Users/rene/web/create_now`):
-- `src/backend/provisioners/appTemplateIdentity.ts:18,38,82,92-94` (the refusal and comments).
-- `src/backend/infra/cnMainOntologySync.ts:20-27` and `src/backend/gateway/graphAccess.ts:155-168`
-  (`appPackagesOf`) — use the server's `discoverLinkedDependencies`; no change, but they are what
-  breaks if RK is missing (above) — and see Pitfalls for app clones.
-- `src/backend/provisioners/appProjectPackages.ts:22,51,57,118,132-133,299` — uses
-  `buildPackageFiles`; its scaffolds get `linked.kind` from the CLI.
-- Tests: `appTemplateIdentity.test.ts:9,33,40-41,93-94,104`,
-  `appProjectPackages.test.ts:30,48,111,191-230`, `ProjectCreationOrchestrator.test.ts:510-550`,
-  `gateway/graphAccess.test.ts:136-147`.
+The host app (the app's checkout):
+- Its template-identity stamper (the refusal and comments).
+- Its ontology sync and its graph-access reader — use the server's `discoverLinkedDependencies`;
+  no change, but they are what breaks if RK is missing (above) — and see Pitfalls for app clones.
+- Its project-package provisioner — uses `buildPackageFiles`; its scaffolds get `linked.kind`
+  from the CLI.
+- Tests: the template-identity, project-package, project-creation and graph-access tests.
 
 ### Pitfalls
 
 - **Merge, never replace, the `linked` object**: server and server-utils already have
   `linked.serverOnly`. `buildPackageFiles` and the stampers must spread an existing `linked`.
 - **LK and RK land together** (§Landing LK and RK together). Do not land LK alone, even with green
-  tests: the tests use fixtures, the owner's CN uses the real checkouts.
-- **App clones install `@_linked/*` from npm.** CN's managed app clones (`CN_PROJECTS_ROOT`) get
-  their framework packages from npm, published with `linkedPackage: true` only until the release.
-  CN's own `@_linked/server` (localized, with LK) runs `discoverLinkedDependencies` over a clone in
-  `graphAccess.appPackagesOf` (`graphAccess.ts:158-168`), so it finds none of the clone's npm
-  framework packages until they are republished. The clone's own server (from npm) is unaffected.
-  Check what `appPackagesOf` loses on the owner's project (the framework packages' graph roots)
+  tests: the tests use fixtures, the owner's host app uses the real checkouts.
+- **App clones install `@_linked/*` from npm.** The host app's managed app clones get their
+  framework packages from npm, published with `linkedPackage: true` only until the release.
+  The app's own `@_linked/server` (localized, with LK) runs `discoverLinkedDependencies` over a
+  clone in its graph-access reader, so it finds none of the clone's npm framework packages until
+  they are republished. The clone's own server (from npm) is unaffected.
+  Check what that reader loses on the owner's project (the framework packages' graph roots)
   before landing; if the owner's path breaks, stop and report — the master decides (K-kind says
   no reader accepts the old fields).
 - `isFrameworkPkg(name)` in `client-dep-includes.ts:683` is a separate name check; keep it.
 - `localize/app-root.ts` keeps `linkedPackage: boolean` as a field name of its own manifest type;
   rename it (`isPackage`) so no field of that name survives.
-- Build the CLI and server with `npx linked build`, never `tsc`; the CN worktree loads them from
+- Build the CLI and server with `npx linked build`, never `tsc`; the app's worktree loads them from
   the nested worktrees (`npx linked doctor resolve` shows `overlay`).
 
 ### Architecture
 
-- CN arch-03 §Package types (`docs/architecture/03-packages-and-governance.md:15`), §The CN
-  workspace model and §Local development with `linked localize` (`:684,719`): the `linked`
-  object; update where it names `linkedPackage`/`linkedApp`.
+- The host app's architecture docs (package types, its workspace model, local development with
+  `linked localize`): the `linked` object; update where they name `linkedPackage`/`linkedApp`.
 - cli `docs/architecture/vite-runtime-config.md` (Vite exclusion of linked packages), server
   `docs/architecture/01-server-only-surface.md` (`linked.serverOnly`).
 - CLI README (`linked build` / `create-package` sections) and `docs/localize.md`.
@@ -252,10 +247,10 @@ CN (`/Users/rene/web/create_now`):
   `npx jest --config jest.config.cjs tests/unit/createPackageScaffold.test.ts tests/unit/createPackageLocation.test.ts tests/unit/buildAllDiscovery.test.ts tests/unit/clientDepIncludes.test.ts tests/unit/shapeHierarchy.test.ts tests/unit/packageFiles.test.ts tests/unit/createInsidePackage.test.ts`;
   server
   `NODE_OPTIONS=--experimental-vm-modules npx jest --config jest.config.cjs src/tests/boot-installed-providers.test.ts src/tests/nested-linked-packages.test.ts`;
-  CN `npx vitest run src/backend/provisioners/appTemplateIdentity.test.ts src/backend/provisioners/appProjectPackages.test.ts src/backend/gateway/graphAccess.test.ts`.
+  the app's template-identity, project-package and graph-access tests.
 - **Full gate:** cli `npm run test:unit`, `npm run test:template`, `npx linked build`; server
-  full jest suite and `npx linked build`; CN `npm run typecheck:gate` and
-  `CN_TEST_PORT=4342 npm run test:regular`.
+  full jest suite and `npx linked build`; the app's `npm run typecheck:gate` and its regular
+  test set on port 4342.
 - New tests: `linkedKind` for each kind, absent, a non-string, and the old fields alone
   (→ `undefined`); `buildPackageFiles` keeps an existing `linked` key; both stampers turn
   `linkedApp: true` into `linked.kind: "app"`.
@@ -263,16 +258,16 @@ CN (`/Users/rene/web/create_now`):
 ## RK — `linked.kind` in every `package.json`
 
 **Depends on:** LK (runs with it in the same wave; rebases on LK's branch; lands right after it).
-**Repos:** every `_linked-*` checkout, CN, `semantu-webid-email`, `linked-fw/app-template`.
+**Repos:** every `_linked-*` checkout, the host app, `semantu-webid-email`, `linked-fw/app-template`.
 **Plan doc:** cli `docs/plans/004-…`. **Report:** cli `docs/reports/033-…`. **Test port:** 4344.
 **Size:** medium (wide, mechanical), 2 phases. *Plan-mode detail is added when its wave starts.*
 
-**Goal.** K-kind holds for every `package.json` in the CN tree and in the app template: the old
-fields gone, `linked.kind` set, so the owner's CN after LK loads exactly what it loaded before.
+**Goal.** K-kind holds for every `package.json` in the app's tree and in the app template: the
+old fields gone, `linked.kind` set, so the owner's app after LK loads exactly what it loaded before.
 
 **Scope.**
-- `linkedApp` → `app` (3): CN root, `packages/my-app`, `packages-local/semantu-webid-email`.
-- CN `packages/` (4) → `library`: access, documents, maps, execution-gateway. `packages/editor-chrome`
+- `linkedApp` → `app` (3): the app's root, `packages/my-app`, `packages-local/semantu-webid-email`.
+- The app's `packages/` (4) → `library`: access, documents, maps, execution-gateway. `packages/editor-chrome`
   has neither field today: leave it unmarked unless the agent finds a reader needs it (report).
 - `packages-local/_linked-*` (22): ontology — dcat, dcmi, org, owl, rdfs, schema, sioc, xsd (and
   npm, whose `linkedPackage: true` CK added); library — core, react, server, server-utils, cli,
@@ -281,16 +276,16 @@ fields gone, `linked.kind` set, so the owner's CN after LK loads exactly what it
 - On `dev` already: auth, cli, core, dcat, fuseki, primitives, server, server-utils, and
   `semantu-webid-email`. The other 13 `_linked-*` checkouts (css, dcmi, icons, org, owl, rdfs,
   react, s3, schema, sentry, shape-ui, sioc, translation, xsd) join `dev`
-  (`npx linked branch start dev <pkg> --target main` from CN's main checkout), plus npm (local).
+  (`npx linked branch start dev <pkg> --target main` from the app's main checkout), plus npm (local).
 - `linked-fw/app-template` (remote only) → `app`: clone it to a working dir, branch `dev` from its
   `main`, commit, never push (the release opens its PR).
 - One changeset per framework repo (patch: metadata only).
-- pg-cn and its `@linked.cm/*` packages: a backlog item in pg-cn
-  (`/Users/rene/web/pg-cn/docs/backlog/`, next free number), no changes.
+- Another app and its `@linked.cm/*` packages: a backlog item in that app's repository, no
+  changes.
 
 **Done when.** `git grep -nE '"linkedPackage"|"linkedApp"' -- '*package.json'` finds nothing in
-the CN tree (outside `node_modules`) or the template branch; every checkout has its changeset;
-build-all and the boot log list the same packages as before LK; the pg-cn backlog item exists.
+the app's tree (outside `node_modules`) or the template branch; every checkout has its changeset;
+build-all and the boot log list the same packages as before LK; the other app's backlog item exists.
 
 **Known files and pitfalls.**
 - 29 `package.json` carry a flag today (`grep -l '"linkedPackage"\|"linkedApp"' package.json packages/*/package.json packages-local/*/package.json`).
@@ -301,9 +296,9 @@ build-all and the boot log list the same packages as before LK; the pg-cn backlo
 
 ## CO — `linked checkout`, `branch fork`, `branch merge`
 
-**Depends on:** LK and RK (landed; CO rebases on them, all touch the CLI). **Repo:** cli (+ CN
+**Depends on:** LK and RK (landed; CO rebases on them, all touch the CLI). **Repo:** cli (+ the host app's
 docs, semantu-agents skills PR). **Plan doc:** cli `docs/plans/005-…`. **Report:** cli
-`docs/reports/034-…`. **Test port:** 4345 (only if a CN run is needed; the CLI gates need none).
+`docs/reports/034-…`. **Test port:** 4345 (only if a run of the app is needed; the CLI gates need none).
 **Size:** large, 4 phases (below). **Sensitive** (credentials): independent review before landing.
 
 **Goal.** K-unpublished and K-checkout: one command makes a branch checkout of an app and its
@@ -339,9 +334,10 @@ cleans such a checkout up once it has landed.
 - `dependencyOrder` (`src/commands/release.ts:182`) also follows `linked.unpublishedPackages`
   edges (an asset package lists its ontology package there, not in `dependencies`); `release
   plan`'s order gains the same edges.
-- Docs and skills (Architecture). K-checkout here and in CN 057/180 gets the final flag names and
-  JSON shape in the same landing.
-- Not here: creating repos (PC), CN's `CheckoutProvisioner` switch (BC), opening PRs on GitHub.
+- Docs and skills (Architecture). K-checkout here and in the master plan gets the final flag names
+  and JSON shape in the same landing.
+- Not here: creating repos (PC), switching the host app's checkout provisioner over, opening PRs on
+  GitHub.
 
 ### Design (proposal; the step agent may refine it inside K-checkout, K-unpublished, K-kind)
 
@@ -364,8 +360,8 @@ app checkout (it is that checkout's `origin`). `<package>` is matched like `bran
 <root>/<name>/<branch-dir>/packages-local/<dir>/  package worktree, <dir> = checkoutNameFor(npm name)
 ```
 `<owner>/<name>` from the normalized URL path (two orgs never collide); `<branch-dir>` is the
-branch with `/` → `__` (the CN caller passes `--dir` with its own `branchClonePath`, so CN's
-layout stays CN's). A base clone is a plain `git clone --bare` (not a partial clone: that needs
+branch with `/` → `__` (the host app passes `--dir` with its own clone path, so its layout
+stays its own). A base clone is a plain `git clone --bare` (not a partial clone: that needs
 the remote at every later checkout); then
 `git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'`, delete the copied local
 heads, `git fetch --prune origin`, `git remote set-head origin --auto`. Every worktree's branch is
@@ -398,7 +394,7 @@ app worktree has its own `node_modules` (never the link farm: `refuseSharedInsta
 restores the committed `package-lock.json`, so `git status` in the app worktree stays clean while
 `packages-local/*` members exist; `checkout` installs the localize git hooks
 (`installGitHooks`) in the app's base clone so they cover its worktrees (check `core.hooksPath`
-and worktree-shared hooks in a test). The docs say plainly: this is an app's own install, not CN's
+and worktree-shared hooks in a test). The docs say plainly: this is an app's own install, not a developer's
 workspace and not an agent worktree's link farm. `--no-install` skips both install and builds.
 `LINKED_GIT_TOKEN` is removed from the environment of `npm install` and every build (lifecycle
 scripts must not see it).
@@ -417,20 +413,20 @@ lockfile changed (or always with `--install`, if the agent finds `auto` unreliab
   "code": 0,
   "branch": "change-1",
   "root": "/srv/projects",
-  "app": {"name": "acme-peacegame-app", "repo": "https://github.com/create-now-repos/acme-peacegame.git",
-          "dir": "/srv/projects/acme-peacegame/change-1", "branch": "change-1", "created": true,
+  "app": {"name": "acme-planning-app", "repo": "https://github.com/example-org/acme-planning.git",
+          "dir": "/srv/projects/acme-planning/change-1", "branch": "change-1", "created": true,
           "head": "3f2c…", "status": "created"},
   "packages": [
-    {"name": "peacegame-ont", "repo": "https://github.com/create-now-repos/acme-ont-peacegame.git",
-     "dir": "/srv/projects/acme-peacegame/change-1/packages-local/peacegame-ont",
+    {"name": "planning-ont", "repo": "https://github.com/example-org/acme-ont-planning.git",
+     "dir": "/srv/projects/acme-planning/change-1/packages-local/planning-ont",
      "branch": "main", "detached": true, "fellBack": true, "head": "a91e…",
-     "requiredBy": ["acme-peacegame-app", "peacegame-assets"], "status": "created"},
-    {"name": "peacegame-assets", "repo": "https://github.com/create-now-repos/acme-assets-peacegame.git",
-     "dir": "…/packages-local/peacegame-assets", "branch": "change-1", "detached": false,
-     "fellBack": false, "head": "77b0…", "requiredBy": ["acme-peacegame-app"], "status": "updated"}
+     "requiredBy": ["acme-planning-app", "planning-assets"], "status": "created"},
+    {"name": "planning-assets", "repo": "https://github.com/example-org/acme-assets-planning.git",
+     "dir": "…/packages-local/planning-assets", "branch": "change-1", "detached": false,
+     "fellBack": false, "head": "77b0…", "requiredBy": ["acme-planning-app"], "status": "updated"}
   ],
   "install": {"ran": true, "ok": true},
-  "builds": [{"name": "peacegame-ont", "result": "ok"}],
+  "builds": [{"name": "planning-ont", "result": "ok"}],
   "messages": []
 }
 ```
@@ -448,7 +444,7 @@ variable is unset. One helper `gitRemoteEnv(env)` returns, only when `LINKED_GIT
 `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`, an empty `credential.helper` (so a keychain helper never
 *stores* the token git just used) — no `-c` on argv, so no token or helper in `ps`. Every URL the
 CLI receives is stripped of userinfo before use; one with userinfo is accepted only to strip it,
-with a warning (CN passes a clean URL plus the env). Error text from git is scrubbed of the token
+with a warning (the host app passes a clean URL plus the env). Error text from git is scrubbed of the token
 value before it is printed. A test greps every `config` and `worktrees/*/config*` under the root
 for the token and for `@github.com`.
 
@@ -493,16 +489,16 @@ agent worktrees (`commands/worktree.ts:395-399`, against the local base) is unch
 - `npx linked build` in the cli; `node lib/esm/launch.js checkout --help`, `branch fork --help`,
   `branch merge --help`, `worktree remove --help` show the flags recorded in K-checkout.
 - By hand, once, against a private repo of `linked-cm-testing` with an installation token in
-  `LINKED_GIT_TOKEN` (the master gets the token from CN's testing App key; skip and say so if not
+  `LINKED_GIT_TOKEN` (the master gets the token from the app's testing GitHub App key; skip and say so if not
   available): `linked checkout test-co --repo <url> --root $(mktemp -d) --json`, then
   `grep -r x-access-token <root>` finds nothing.
-- CN main checkout after landing and `npm run build` in the cli: `npx linked branch status` and
+- The app's main checkout after landing and `npm run build` in the cli: `npx linked branch status` and
   `npx linked worktree list` unchanged; the owner's path works.
 
 ### Done when
 
-K-unpublished and K-checkout hold, with the flag names and JSON shape recorded here and in CN
-057/180; the e2e test makes a checkout of an app with two unpublished packages (the asset package
+K-unpublished and K-checkout hold, with the flag names and JSON shape recorded here and in the master
+plan; the e2e test makes a checkout of an app with two unpublished packages (the asset package
 listing the ontology package; one package only on the default branch: fallback reported), re-runs
 it idempotently, forks the fallen-back package's branch, merges package then app into the default
 branch, removes the checkout with the landed check; no `config` under the root holds a token;
@@ -546,12 +542,11 @@ CLI (`packages-local/_linked-cli`):
   goes next to it.
 - No CLI code fetches or pushes today except `create-app`'s first push (`src/cli-methods.ts:2860`).
 
-CN (`/Users/rene/web/create_now`), read-only for CO:
-- `src/backend/provisioners/CheckoutProvisioner.ts:98-139` (`cloneBranch`: `git clone --branch
-  --single-branch`, token strip `:123-131`, `npm install` `:135-137`), `src/utils/projectsRoot.ts:19`
-  (`CN_PROJECTS_ROOT`), `:53` (`branchClonePath`: CN passes it as `--dir` in BC).
-- `src/backend/provisioners/GitHubProvisioner.ts:128-149` (`buildRepoProtectionPayload`:
-  `enforce_admins: true`, pull-request reviews required — Pitfalls).
+The host app (the app's checkout), read-only for CO:
+- Its checkout provisioner (clones with `git clone --branch --single-branch`, strips the token,
+  runs `npm install`) and its projects root and branch clone path (passed as `--dir` later).
+- Its GitHub provisioner's repo protection (`enforce_admins: true`, pull-request reviews required
+  — Pitfalls).
 
 Tests: `tests/unit/integration/{branch,worktree,repos,releasePlan}.test.ts` (real throwaway repos
 under `os.tmpdir()`: `initRepo`/`makeApp` in `worktree.test.ts:33,56`),
@@ -560,8 +555,8 @@ under `os.tmpdir()`: `initRepo`/`makeApp` in `worktree.test.ts:33,56`),
 
 ### Pitfalls
 
-- **Protected default branches refuse the push.** CN's app repos are protected with
-  `enforce_admins: true` and required pull-request reviews (`GitHubProvisioner.ts:128-149`), so
+- **Protected default branches refuse the push.** The host app's app repos are protected with
+  `enforce_admins: true` and required pull-request reviews (its GitHub provisioner), so
   `git push origin HEAD:main` from `branch merge` is refused (GH006) even for the App. K-checkout's
   "fetch, merge, push" into the default branch cannot work on them as written; `--mode update`
   (push the branch, land by PR) is the proposal. Stop and report to the master before choosing.
@@ -583,7 +578,7 @@ under `os.tmpdir()`: `initRepo`/`makeApp` in `worktree.test.ts:33,56`),
 - Do not reuse `worktree add`'s agent naming or integration-branch requirement; `checkout` needs
   neither.
 - Build with `npx linked build`; after landing, the main checkout runs `npm run build` in the cli
-  before anything else (057 Rules).
+  before anything else (the master plan's Rules).
 
 ### Architecture and docs
 
@@ -594,10 +589,9 @@ under `os.tmpdir()`: `initRepo`/`makeApp` in `worktree.test.ts:33,56`),
   layout, branch rule, JSON, credentials) and §Limitations (`:272`).
 - `docs/localize.md`: §Commands (`:189`) `--listed`, §Docker and CI (`:439`) the env token,
   §What it never does (`:500`) "never writes a token", §Exit codes (`:511`).
-- CN `docs/architecture/03-packages-and-governance.md` §Local development (`:727`, the
-  `unpublishedPackages` paragraph `:780-797`, "*Not built yet (plan 057)*" goes) and
-  `docs/how-to/develop-a-linked-package-locally.md`.
-- semantu-agents (`/Users/rene/packages/semantu-agents`, currently on branch
+- The host app's architecture docs on local development (the `unpublishedPackages` paragraph
+  loses its "not built yet" note) and its how-to on developing a linked package locally.
+- semantu-agents (its local checkout, currently on branch
   `master-agent-skill`: branch from its default branch, not from that one):
   `skills/public/workflow/SKILL.md`, `implementation/SKILL.md`, `wrapup/SKILL.md`,
   `release/SKILL.md`, `master/SKILL.md` (all name `worktree add/remove`, `localize` or `branch
@@ -623,9 +617,9 @@ under `os.tmpdir()`: `initRepo`/`makeApp` in `worktree.test.ts:33,56`),
   over HTTP (no network, no server): the unit tests assert the env and the hook directly.
 - **Quick gate (1–2 min):**
   `npx jest --config jest.config.cjs tests/unit/checkout tests/unit/integration/branch.test.ts tests/unit/integration/worktree.test.ts tests/unit/integration/releasePlan.test.ts tests/unit/localize/commands.test.ts tests/unit/localize/resolve.test.ts tests/unit/linkedKind.test.ts`.
-- **Full gate:** cli `npm run test:unit`, `npm run test:template`, `npx linked build`; CN (only
-  the docs change there) `npm run typecheck:gate`. No CN regular set unless the agent touches CN
-  code (it should not).
+- **Full gate:** cli `npm run test:unit`, `npm run test:template`, `npx linked build`; the host app
+  (only the docs change there) `npm run typecheck:gate`. No regular set of the app unless the agent
+  touches its code (it should not).
 
 ### Size and phases
 
@@ -636,7 +630,7 @@ Large, 4 phases, one commit each:
 2. `linked checkout` (base clones, worktrees, install, idempotency, JSON); the e2e checkout cases.
 3. `branch fork`, `branch merge` (order, `--no-ff`, conflict stop, the mode question settled with
    the master), `worktree remove --branch`; e2e cases.
-4. Docs, K-checkout updated in 002 and CN 057/180, changeset, semantu-agents PR, review fixes.
+4. Docs, K-checkout updated in 002 and the master plan, changeset, semantu-agents PR, review fixes.
 
 ## Progress
 

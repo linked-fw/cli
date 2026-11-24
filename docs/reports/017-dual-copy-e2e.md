@@ -20,7 +20,7 @@ summary: >
 Under `linked start` a framework module could be evaluated twice, by Vite's SSR module runner and
 by Node, so classes failed `instanceof` across the two and module state existed twice. Backlog 015
 counted 19 cases of this bug class since June 2026, each fixed on its own path; backlog 014 was the
-newest (`instanceof RemoteDataset*` false in a template app, app-template#26). CN plan 068 phase 4
+newest (`instanceof RemoteDataset*` false in a template app, app-template#26). The host app's plan
 removed the known copies in three releases: the store loader (report 014, cli 1.49.0, core
 2.34.0), the guard that prints a line for every file Node loads from a bundled package (report
 015, cli 1.50.0), and standalone apps bundling every `@_linked/*` but core and the CLI (report 016,
@@ -129,7 +129,7 @@ webid.email `LinkedEmail` provider, is gone with C and a core 2.34.0+ floor (rep
 
 What the guard and this e2e do not see: the browser, a built app, and the optimizer's copies.
 
-Case 20, 2026-10-18, browser (CN plan 068 S5): an installed linked package's `src/` `.tsx` loaded
+Case 20, 2026-10-18, browser (found under a host app's plan): an installed linked package's `src/` `.tsx` loaded
 plain and with `?v`, two React contexts in shape-ui. Fixed in [report 018](018-one-browser-copy-of-installed-linked-src.md); the browser check is
 [report 021](021-browser-side-dual-copy-check.md).
 

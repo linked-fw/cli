@@ -146,11 +146,11 @@ gained `adopt`, so one package writes that file, the hand-moved checkouts get a 
 
 ### Location and remote belong in the open-source CLI
 
-Create Now's plan 054 had put "placement" in the first-party `@semantu/cli`. Choosing between
+A host app's plan had put "placement" in the first-party `@semantu/cli`. Choosing between
 `packages/` and `packages-local/` and wiring an optional remote is structure every user needs and
 assumes no organisation, token or network — so it lives here. *Creating* the remote repository in
 an organisation and protecting it stays first-party; that tool calls
-`create-package --remote <new repo>` once the repo exists. Plan 054 carries a correction note.
+`create-package --remote <new repo>` once the repo exists. That plan carries a correction note.
 
 ### The pruned checkout (found during validation)
 
@@ -213,5 +213,5 @@ and `linked build` in one exited 0.
 
 - `docs/reports/007-localize-command.md` — the `linked localize` adapter this builds on.
 - `@_linked/localize` README — `adopt`, the manifest, the relink reinstall.
-- Create Now: `docs/how-to/develop-a-linked-package-locally.md` (creating a package, `--adopt`,
-  the postinstall contract) and `docs/plans/054-package-creation-and-governance.md` (correction).
+- The host app's how-to for developing a linked package locally (creating a package, `--adopt`,
+  the postinstall contract) and its package-creation plan (correction).

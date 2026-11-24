@@ -3,9 +3,9 @@ summary: >
   Masters run in their own worktree: `linked branch start <m> --worktree` makes the integration
   branch in a link-farm worktree (never switching the owner's checkouts), `linked worktree add
   <agent> --from <m>` gives steps flattened farms with a `parent` marker that `relink` honours,
-  CN's own `packages/*` become overlays, `worktree list/remove` know masters, and `linked branch
+  the app's own `packages/*` become overlays, `worktree list/remove` know masters, and `linked branch
   land <m>` merges the owner's branch into `<m>`, fast-forwards the owner's checkouts, builds and
-  pushes. For Create Now's master-run workflow (proposal of 2026-10-29). Lands on `dev`.
+  pushes. For the host app's master-run workflow (proposal of 2026-10-29). Lands on `dev`.
 status: Done (report 040)
 ---
 
@@ -18,7 +18,7 @@ The ideation is the proposal "Master runs in their own worktree" (2026-10-29). S
 - The owner stays on his stable branch (`dev`) in the main checkout and every `packages-local/`
   checkout; nothing but `branch land` moves them.
 - Each master gets an integration branch `<m>` in its own worktree (`../wt/<m>`) with nested
-  framework worktrees and a link farm into the one install, plus its own preview CN.
+  framework worktrees and a link farm into the one install, plus its own preview of the app.
 - Steps: option A flattened. A full app worktree on `<m>--<agent>`, nested package worktrees from
   the master's, a farm that links straight into the install with the master's overlays under its
   own, and the master recorded as `parent` so `relink` rebuilds the same farm.
@@ -32,7 +32,7 @@ Decisions taken here (automatic mode, maintainability first):
    has no `lib/`, so linking it would make tsc and Node fail where they work today. A `packages/*`
    member is an overlay when its entry point exists (`main`, or the `.` export's import/default)
    or it declares none (`editor-chrome`, `my-app`). Built later: `linked worktree relink`.
-2. **Preview env from the linked `.env`.** The CLI is not CN-specific: the start command overrides
+2. **Preview env from the linked `.env`.** The CLI is not specific to one app: the start command overrides
    `SITE_ROOT` (to `http://localhost:<port>`) whenever the linked `.env` defines it, for every
    worktree; a master's preview also overrides `CN_PROJECTS_ROOT` (to `<wt>/apps`) when the
    `.env` defines it.

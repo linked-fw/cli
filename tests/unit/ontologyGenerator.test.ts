@@ -10,6 +10,7 @@ jest.mock('ora', () => ({__esModule: true, default: () => ({})}));
 import {
   findOntologyNameCollisions,
   generateOntologyModules,
+  generateOntologyIndexModule,
   generateOntologyTermsModule,
   ontologyIdentifier,
   OntologyNameCollisionError,
@@ -17,16 +18,18 @@ import {
 } from '../../src/utils/ontologyModules.js';
 import {
   ontologyIriOf,
+  ontologySuggestedPrefix,
   ontologyTermsFromQuads,
   ontologyTermsFromTurtle,
+  OntologyVannError,
 } from '../../src/utils/ontologyTerms.js';
 import {
   checkOntologyModulesStep,
   generatePackageOntologies,
-  readOntologyConfigs,
   staleOntologyModules,
   writePackageOntologies,
 } from '../../src/utils/generateOntology.js';
+import {readOntologyConfigs} from '../../src/utils/ontologyConfig.js';
 import {planBuildSteps} from '../../src/cli-methods.js';
 
 const FIXTURE = path.join(__dirname, '..', 'fixtures', 'ontology-generator');
@@ -41,13 +44,11 @@ describe('the identifier rule', () => {
     ['yield', 'yield_'],
     ['class', 'class_'],
     ['eval', 'eval_'],
-    // bound by a CommonJS build, or overwritten by core's linkedOntology
+    // bound by a CommonJS build
     ['__esModule', '__esModule_'],
     ['exports', 'exports_'],
     ['require', 'require_'],
     ['module', 'module_'],
-    ['_data', '_data_'],
-    ['_ns', '_ns_'],
     ['null', 'null_'],
     // a leading digit gets a leading _
     ['3DModel', '_3DModel'],
@@ -87,7 +88,7 @@ describe('the identifier rule', () => {
   test('the generator refuses a collision instead of renaming', () => {
     expect(() =>
       generateOntologyTermsModule({
-        prefix: 'ex',
+        name: 'ex',
         namespace: 'https://example.test/ex/',
         dataFiles: ['../data/ex.ttl'],
         terms: [{localName: 'a-b'}, {localName: 'a_b'}],
@@ -128,13 +129,13 @@ describe('the doc line', () => {
 
   test('a module with no terms imports nothing and is still a module', () => {
     const module = generateOntologyTermsModule({
-      prefix: 'ex',
+      name: 'ex',
       namespace: 'https://example.test/ex/',
       dataFiles: ['../data/ex.ttl'],
       terms: [],
     });
     expect(module).not.toMatch(/import/);
-    // `import * as terms` from the register module needs a module (TS2306 otherwise).
+    // `import * as terms` from the index needs a module (TS2306 otherwise).
     expect(module).toMatch(/^export \{\};$/m);
   });
 
@@ -147,59 +148,102 @@ describe('the doc line', () => {
 
 describe('the modules', () => {
   test('the fixture package: golden output for two namespaces', async () => {
-    const generations = await generatePackageOntologies(FIXTURE);
+    const generated = await generatePackageOntologies(FIXTURE);
     expect(
-      generations.map((g) => [g.config.prefix, g.termCount, g.skipped]),
+      generated.ontologies.map((g) => [g.config.name, g.suggestedPrefix, g.termCount, g.skipped]),
     ).toEqual([
-      ['ex', 8, ['https://example.test/ex/sub/Deeper']],
-      ['other', 2, []],
+      ['ex', 'exa', 8, ['https://example.test/ex/sub/Deeper']],
+      ['other', 'other', 2, []],
     ]);
-    const files = Object.assign({}, ...generations.map((g) => g.files));
-    expect(Object.keys(files).sort()).toEqual([
-      'src/ontologies/ex.data.ts',
-      'src/ontologies/ex.register.ts',
+    expect(Object.keys(generated.files).sort()).toEqual([
       'src/ontologies/ex.ts',
-      'src/ontologies/other.data.ts',
-      'src/ontologies/other.register.ts',
+      'src/ontologies/index.ts',
       'src/ontologies/other.ts',
     ]);
-    for (const [file, content] of Object.entries(files)) {
+    for (const [file, content] of Object.entries(generated.files)) {
       expect(content).toBe(fs.readFileSync(path.join(FIXTURE, file), 'utf8'));
     }
+    expect(generated.edits).toEqual({});
+    expect(generated.remove).toEqual([]);
     // Each namespace has only its own terms.
-    expect(files['src/ontologies/other.ts']).not.toMatch(/Thing/);
-    expect(files['src/ontologies/ex.ts']).not.toMatch(/Elsewhere/);
+    expect(generated.files['src/ontologies/other.ts']).not.toMatch(/Thing/);
+    expect(generated.files['src/ontologies/ex.ts']).not.toMatch(/Elsewhere/);
   });
 
-  test('the terms module holds the terms only, sorted, each pure', async () => {
+  test('the terms module holds the terms only, each the {id} literal of its full IRI, and imports nothing', async () => {
     const terms = fs.readFileSync(
       path.join(FIXTURE, 'src/ontologies/ex.ts'),
       'utf8',
     );
     const exports = [
-      ...terms.matchAll(
-        /^export const (\S+) = \/\*#__PURE__\*\/ ns_\('([^']+)'\);$/gm,
-      ),
+      ...terms.matchAll(/^export const (\S+) = \{id: '([^']+)'\};$/gm),
     ];
-    expect(exports.map((m) => m[1])).toEqual([
-      'Added',
-      'Thing',
-      'Widget',
-      '_3DModel',
-      'default_',
-      'longComment',
-      'ns',
-      'odd_name_x',
+    expect(exports.map((m) => [m[1], m[2]])).toEqual([
+      ['Added', 'https://example.test/ex/Added'],
+      ['Thing', 'https://example.test/ex/Thing'],
+      ['Widget', 'https://example.test/ex/Widget'],
+      ['_3DModel', 'https://example.test/ex/3DModel'],
+      ['default_', 'https://example.test/ex/default'],
+      ['longComment', 'https://example.test/ex/longComment'],
+      ['ns', 'https://example.test/ex/ns'],
+      ['odd_name_x', 'https://example.test/ex/odd-name.x'],
     ]);
-    // Every export is a term; the only import is the namespace function, renamed past the term `ns`.
     expect(terms.match(/^export /gm)).toHaveLength(exports.length);
-    expect(terms).toMatch(/^import \{ns as ns_\} from '\.\/ex\.data\.js';$/m);
-    expect(terms.match(/^import /gm)).toHaveLength(1);
+    expect(terms).not.toMatch(/^import /m);
+  });
+
+  test('the index imports every module and registers them all with one call', () => {
+    const index = fs.readFileSync(
+      path.join(FIXTURE, 'src/ontologies/index.ts'),
+      'utf8',
+    );
+    expect(index).toMatch(/^\/\/ Generated by `linked generate-ontology`\./);
+    expect(index.match(/^import /gm)).toHaveLength(3);
+    expect(index).toContain("import {registerOntologies} from '../package.js';");
+    expect(index).toContain("import * as ex from './ex.js';");
+    expect(index.match(/registerOntologies\(/g)).toHaveLength(1);
+    expect(index).toContain(
+      [
+        '    {',
+        "      name: 'ex',",
+        "      namespace: 'https://example.test/ex/',",
+        '      terms: ex,',
+        "      data: ['../data/ex.ttl', '../data/ex-extra.ttl'],",
+        "      suggestedPrefix: 'exa',",
+        '    },',
+      ].join('\n'),
+    );
+    // Data paths are relative to the index: the module URL is its own.
+    expect(index).toMatch(/^  \],\n  import\.meta\.url,\n\);\n$/m);
+  });
+
+  test('index imports never take a binding of the index or of each other', () => {
+    const entry = (name: string, module?: string) => ({
+      name,
+      module,
+      namespace: `https://x.test/${name}/`,
+      suggestedPrefix: 'x',
+      dataFiles: [],
+    });
+    const index = generateOntologyIndexModule([
+      entry('data'),
+      entry('a-b'),
+      entry('a_b'),
+      entry('reg', 'register-ontologies'),
+    ]);
+    expect(index).toContain("import * as a_b from './a-b.js';");
+    expect(index).toContain("import * as a_b_ from './a_b.js';");
+    expect(index).toContain("import * as data from './data.js';");
+    expect(index).toContain("import * as register_ontologies from './register-ontologies.js';");
+    expect(() =>
+      generateOntologyModules([], [entry('index')]),
+    ).toThrow(/use the module src\/ontologies\/index\.ts/);
   });
 
   test('the same input gives the same bytes, in any order', () => {
     const spec = (terms: {localName: string; comment?: string}[]) => ({
-      prefix: 'ex',
+      name: 'ex',
+      suggestedPrefix: 'ex',
       namespace: 'https://example.test/ex/',
       dataFiles: ['../data/ex.ttl'],
       terms,
@@ -259,14 +303,7 @@ describe('the modules', () => {
     expect(viaParser.terms).toEqual([{localName: 'T', label: 'T label'}]);
   });
 
-  test('_ontologyResource is the IRI the data declares with owl:Ontology', async () => {
-    const [ex, other] = await generatePackageOntologies(FIXTURE);
-    expect(ex.files['src/ontologies/ex.data.ts']).toContain(
-      "export const _ontologyResource = ns('');",
-    );
-    expect(other.files['src/ontologies/other.data.ts']).toContain(
-      "export const _ontologyResource = {id: 'https://example.test/other'};",
-    );
+  test('the ontology IRI is the one the data declares with owl:Ontology', () => {
     const ns = 'http://www.w3.org/2002/07/owl#';
     expect(ontologyIriOf([ns, 'http://www.w3.org/2002/07/owl'], ns)).toBe(ns);
     expect(ontologyIriOf(['http://www.w3.org/2002/07/owl'], ns)).toBe(
@@ -280,12 +317,6 @@ describe('the modules', () => {
     expect(ontologyIriOf(['urn:x:'], 'urn:x:')).toBe('urn:x:');
     expect(ontologyIriOf(['https://x.test/a', 'https://x.test/b'], ns)).toBeUndefined();
     expect(ontologyIriOf([], ns)).toBeUndefined();
-    // Without a declaration the data module keeps the namespace.
-    expect(
-      generateOntologyModules({prefix: 'p', namespace: ns, dataFiles: [], terms: []})[
-        'src/ontologies/p.data.ts'
-      ],
-    ).toContain("export const _ontologyResource = ns('');");
   });
 
   test('a blank node typed owl:Ontology is not the ontology', () => {
@@ -308,10 +339,11 @@ describe('the modules', () => {
     ).rejects.toThrow(/src\/data\/bad\.ttl/);
   });
 
-  test('an unsafe prefix names no file', () => {
+  test('an unsafe name names no file', () => {
     expect(() =>
       generateOntologyModules({
-        prefix: '../x',
+        name: '../x',
+        suggestedPrefix: 'x',
         namespace: 'https://x.test/',
         dataFiles: [],
         terms: [],
@@ -320,12 +352,94 @@ describe('the modules', () => {
   });
 });
 
+describe('the suggested prefix', () => {
+  const NS = 'https://example.test/s/';
+  const read = (turtle: string) =>
+    ontologyTermsFromTurtle(
+      [
+        {
+          name: 's.ttl',
+          text:
+            '@prefix owl: <http://www.w3.org/2002/07/owl#> .\n' +
+            '@prefix vann: <http://purl.org/vocab/vann/> .\n' +
+            turtle,
+        },
+      ],
+      NS,
+    );
+  const prefixOf = async (turtle: string) =>
+    ontologySuggestedPrefix(await read(turtle), NS);
+
+  test('is the vann prefix of the ontology node, which need not be the name', async () => {
+    const {ontologies, files} = await generatePackageOntologies(FIXTURE);
+    expect(ontologies.map((o) => [o.config.name, o.suggestedPrefix])).toEqual([
+      ['ex', 'exa'],
+      // The vann namespace may be an IRI as well as a literal.
+      ['other', 'other'],
+    ]);
+    expect(files['src/ontologies/index.ts']).toContain(
+      "      name: 'ex',\n      namespace: 'https://example.test/ex/',\n      terms: ex,\n      data: ['../data/ex.ttl', '../data/ex-extra.ttl'],\n      suggestedPrefix: 'exa',",
+    );
+    expect(
+      await prefixOf(
+        `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s1" ; vann:preferredNamespaceUri "${NS}" .`,
+      ),
+    ).toBe('s1');
+  });
+
+  test('vann data on another node does not count', async () => {
+    const result = await read(
+      `<${NS}> a owl:Ontology .\n<https://example.test/elsewhere> vann:preferredNamespacePrefix "s" ; vann:preferredNamespaceUri "${NS}" .`,
+    );
+    expect(result.preferredPrefixes).toEqual([]);
+    expect(() => ontologySuggestedPrefix(result, NS)).toThrow(
+      /has no vann:preferredNamespacePrefix/,
+    );
+  });
+
+  test.each([
+    [`<${NS}> vann:preferredNamespacePrefix "s" .`, /declares no owl:Ontology/],
+    [`<${NS}> a owl:Ontology ; vann:preferredNamespaceUri "${NS}" .`, /no vann:preferredNamespacePrefix/],
+    [`<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s" .`, /no vann:preferredNamespaceUri/],
+    [
+      `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s", "t" ; vann:preferredNamespaceUri "${NS}" .`,
+      /more than one vann:preferredNamespacePrefix \("s", "t"\)/,
+    ],
+    [
+      `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s" ; vann:preferredNamespaceUri "${NS}", <https://example.test/t/> .`,
+      /more than one vann:preferredNamespaceUri/,
+    ],
+    [
+      `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "s" ; vann:preferredNamespaceUri "https://example.test/t/" .`,
+      /"https:\/\/example\.test\/t\/" is not its namespace/,
+    ],
+    [
+      `<${NS}> a owl:Ontology ; vann:preferredNamespacePrefix "3d" ; vann:preferredNamespaceUri "${NS}" .`,
+      /"3d" is not a prefix/,
+    ],
+  ])('refuses %s', async (turtle, message) => {
+    const result = await read(turtle);
+    let error: unknown;
+    try {
+      ontologySuggestedPrefix(result, NS);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(OntologyVannError);
+    expect((error as Error).message).toMatch(message);
+  });
+});
+
 describe('the package configuration', () => {
-  test('entries are sorted, and data defaults to <prefix>.ttl', () => {
+  test('entries are sorted; data defaults to <name>.ttl, module to the name, generated to true', () => {
     expect(
       readOntologyConfigs({
         linkedOntologies: {
-          rdfs: {namespace: 'http://www.w3.org/2000/01/rdf-schema#'},
+          rdfs: {
+            namespace: 'http://www.w3.org/2000/01/rdf-schema#',
+            module: 'rdf-schema',
+            generated: false,
+          },
           rdf: {
             namespace: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
             data: ['rdf.ttl'],
@@ -334,14 +448,18 @@ describe('the package configuration', () => {
       }),
     ).toEqual([
       {
-        prefix: 'rdf',
+        name: 'rdf',
         namespace: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
         data: ['rdf.ttl'],
+        module: 'rdf',
+        generated: true,
       },
       {
-        prefix: 'rdfs',
+        name: 'rdfs',
         namespace: 'http://www.w3.org/2000/01/rdf-schema#',
         data: ['rdfs.ttl'],
+        module: 'rdf-schema',
+        generated: false,
       },
     ]);
     expect(readOntologyConfigs({})).toEqual([]);
@@ -349,20 +467,42 @@ describe('the package configuration', () => {
 
   test.each([
     [[], /must be an object/],
-    [{'bad prefix': {namespace: 'https://x.test/'}}, /prefix must be/],
+    [{'bad name': {namespace: 'https://x.test/'}}, /name must be lowercase/],
+    // Lowercase only, so two names never differ only in case.
+    [{Ex: {namespace: 'https://x.test/'}}, /name must be lowercase/],
     [{x: 'https://x.test/'}, /must be an object with a "namespace"/],
     [{x: {namespace: 'not an iri'}}, /namespace must be an IRI/],
     [{x: {namespace: 'https://x.test/ont'}}, /ending in \/, # or :/],
-    [
-      {Ex: {namespace: 'https://x.test/'}, ex: {namespace: 'https://y.test/'}},
-      /differ only in case/,
-    ],
+    // Characters that end an IRI in SPARQL and Turtle (`<…>`) are refused.
+    [{x: {namespace: 'https://x.test/a>b/'}}, /namespace must be an IRI/],
+    [{x: {namespace: 'https://x.test/"/'}}, /namespace must be an IRI/],
+    [{x: {namespace: 'https://x.test/{a}/'}}, /namespace must be an IRI/],
+    [{x: {namespace: 'https://x.test/a\\b/'}}, /namespace must be an IRI/],
     [
       {x: {namespace: 'https://x.test/', data: ['../up.ttl']}},
       /data must list/,
     ],
     [{x: {namespace: 'https://x.test/', data: []}}, /data must list/],
     [{x: {namespace: 'https://x.test/', data: ['x.json']}}, /data must list/],
+    [
+      {x: {namespace: 'https://x.test/', module: 'Linked-Core'}},
+      /x\.module must be a file name in src\/ontologies\/ without extension/,
+    ],
+    [
+      {x: {namespace: 'https://x.test/', module: '../x'}},
+      /x\.module must be a file name/,
+    ],
+    [
+      {x: {namespace: 'https://x.test/', generated: 'no'}},
+      /x\.generated must be true \(the default\) or false/,
+    ],
+    [
+      {
+        a: {namespace: 'https://x.test/a/', module: 'b'},
+        b: {namespace: 'https://x.test/b/'},
+      },
+      /"a" and "b" both use the module src\/ontologies\/b\.ts/,
+    ],
   ])('refuses %j', (value, message) => {
     expect(() => readOntologyConfigs({linkedOntologies: value})).toThrow(
       message,
@@ -407,28 +547,99 @@ describe('writing and the build check', () => {
       '\nother:Fresh a rdfs:Class .\n',
     );
     fs.appendFileSync(path.join(dir, 'src/ontologies/ex.ts'), '// hand edit\n');
-    fs.removeSync(path.join(dir, 'src/ontologies/ex.register.ts'));
+    fs.removeSync(path.join(dir, 'src/ontologies/index.ts'));
 
-    expect(await staleOntologyModules(dir)).toEqual([
+    const stale = [
       'src/ontologies/ex.ts',
-      'src/ontologies/ex.register.ts',
+      'src/ontologies/index.ts',
       'src/ontologies/other.ts',
-    ]);
+    ];
+    expect(await staleOntologyModules(dir)).toEqual(stale);
     const result = (await step().apply()) as {error: string};
     expect(result.error).toMatch(
-      /src\/ontologies\/ex\.ts, src\/ontologies\/ex\.register\.ts, src\/ontologies\/other\.ts are not what the ontology data generates/,
+      /src\/ontologies\/ex\.ts, src\/ontologies\/index\.ts, src\/ontologies\/other\.ts are not what the ontology data generates/,
     );
     expect(result.error).toMatch(/Run `linked generate-ontology`/);
 
-    expect(await writePackageOntologies(dir)).toEqual([
-      'src/ontologies/ex.ts',
-      'src/ontologies/ex.register.ts',
-      'src/ontologies/other.ts',
-    ]);
+    expect(await writePackageOntologies(dir)).toEqual(stale);
     expect(
       fs.readFileSync(path.join(dir, 'src/ontologies/other.ts'), 'utf8'),
-    ).toMatch(/export const Fresh = \/\*#__PURE__\*\/ ns\('Fresh'\);/);
+    ).toMatch(/^export const Fresh = \{id: 'https:\/\/example\.test\/other#Fresh'\};$/m);
     expect(await step().apply()).toBe(true);
+  });
+
+  test('the files of the earlier layout are refused, then removed, and their imports become the index', async () => {
+    const generatedFile = (name: string) =>
+      '// Generated by `linked generate-ontology`. Do not edit.\nexport {};\n';
+    for (const f of ['ex.data.ts', 'ex.register.ts', 'other.register.ts']) {
+      fs.writeFileSync(path.join(dir, 'src/ontologies', f), generatedFile(f));
+    }
+    // A hand-written module of the same form stays.
+    fs.writeFileSync(path.join(dir, 'src/ontologies/other.data.ts'), 'export const extra = 1;\n');
+    fs.writeFileSync(
+      path.join(dir, 'src/index.ts'),
+      "import './types.js';\nimport './ontologies/ex.register.js';\nimport './ontologies/other.register.js';\n",
+    );
+    fs.outputFileSync(
+      path.join(dir, 'src/shapes/index.ts'),
+      "import '../ontologies/other.register.js';\nimport './Thing.js';\n",
+    );
+
+    expect(await staleOntologyModules(dir)).toEqual([
+      'src/index.ts',
+      'src/ontologies/ex.data.ts',
+      'src/ontologies/ex.register.ts',
+      'src/ontologies/other.register.ts',
+      'src/shapes/index.ts',
+    ]);
+    expect(((await step().apply()) as {error: string}).error).toMatch(
+      /^src\/index\.ts, src\/ontologies\/ex\.data\.ts, .* are not what the ontology data generates/,
+    );
+
+    await writePackageOntologies(dir);
+    expect(fs.readdirSync(path.join(dir, 'src/ontologies')).sort()).toEqual([
+      'ex.ts',
+      'index.ts',
+      'other.data.ts',
+      'other.ts',
+    ]);
+    expect(fs.readFileSync(path.join(dir, 'src/index.ts'), 'utf8')).toBe(
+      "import './types.js';\nimport './ontologies/index.js';\n",
+    );
+    expect(fs.readFileSync(path.join(dir, 'src/shapes/index.ts'), 'utf8')).toBe(
+      "import '../ontologies/index.js';\nimport './Thing.js';\n",
+    );
+    expect(await step().apply()).toBe(true);
+  });
+
+  test('an import of a register module deleted by hand becomes the index; one that exists stays', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'src/ontologies/kept.register.ts'),
+      'export {};\n',
+    );
+    fs.writeFileSync(
+      path.join(dir, 'src/index.ts'),
+      "import './types.js';\nimport './ontologies/gone.register.js';\nimport './ontologies/kept.register.js';\n",
+    );
+    expect(await staleOntologyModules(dir)).toEqual(['src/index.ts']);
+    await writePackageOntologies(dir);
+    expect(fs.readFileSync(path.join(dir, 'src/index.ts'), 'utf8')).toBe(
+      "import './types.js';\nimport './ontologies/index.js';\nimport './ontologies/kept.register.js';\n",
+    );
+    expect(await step().apply()).toBe(true);
+  });
+
+  test('the entry must import the index; without an entry the build says so', async () => {
+    fs.writeFileSync(path.join(dir, 'src/index.ts'), "import './types.js';\n");
+    expect(await staleOntologyModules(dir)).toEqual(['src/index.ts']);
+    await writePackageOntologies(dir);
+    expect(fs.readFileSync(path.join(dir, 'src/index.ts'), 'utf8')).toBe(
+      "import './ontologies/index.js';\nimport './types.js';\n",
+    );
+    fs.removeSync(path.join(dir, 'src/index.ts'));
+    expect(((await step().apply()) as {error: string}).error).toBe(
+      "ontology-generator-fixture: no src/index.ts or src/index.tsx to import ./ontologies/index.js, which registers the package's ontologies.",
+    );
   });
 
   test('a missing data file and a bad configuration fail the step with the reason', async () => {
@@ -447,6 +658,121 @@ describe('writing and the build check', () => {
     });
   });
 
+  test('an ontology without vann data fails the build, saying which triples to add and where', async () => {
+    const file = path.join(dir, 'src/data/ex.ttl');
+    fs.writeFileSync(
+      file,
+      fs
+        .readFileSync(file, 'utf8')
+        .replace(/ ;\n  vann:preferredNamespacePrefix "exa" ;\n  vann:preferredNamespaceUri "[^"]*"/, ''),
+    );
+    const {error} = (await step().apply()) as {error: string};
+    expect(error).toContain(
+      'ontology-generator-fixture: the ontology "ex" (src/data/ex.ttl, src/data/ex-extra.ttl) has no suggested prefix: <https://example.test/ex/> has no vann:preferredNamespacePrefix.',
+    );
+    expect(error).toContain(
+      '  <https://example.test/ex/>\n    vann:preferredNamespacePrefix "ex" ;\n    vann:preferredNamespaceUri "https://example.test/ex/" .',
+    );
+    expect(error).toContain('src/data/ex-added.ttl, never in the published file');
+    await expect(generatePackageOntologies(dir)).rejects.toThrow(
+      /the ontology "ex" .* has no suggested prefix/,
+    );
+  });
+
+  test('without an owl:Ontology node the message declares one; a wrong vann namespace is named', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'src/data/other.ttl'),
+      '@prefix other: <https://example.test/other#> .\nother:Elsewhere a <http://www.w3.org/2000/01/rdf-schema#Class> .\n',
+    );
+    const {error} = (await step().apply()) as {error: string};
+    expect(error).toMatch(/its data declares no owl:Ontology for the namespace <https:\/\/example\.test\/other#>/);
+    expect(error).toContain('  <https://example.test/other#> a owl:Ontology ;\n');
+
+    fs.copySync(path.join(FIXTURE, 'src/data/other.ttl'), path.join(dir, 'src/data/other.ttl'));
+    const pkg = fs.readJsonSync(path.join(dir, 'package.json'));
+    pkg.linkedOntologies.other.namespace = 'https://example.test/other/';
+    fs.writeJsonSync(path.join(dir, 'package.json'), pkg);
+    expect(((await step().apply()) as {error: string}).error).toMatch(
+      /its vann:preferredNamespaceUri "https:\/\/example\.test\/other#" is not its namespace "https:\/\/example\.test\/other\/"/,
+    );
+  });
+
+  test('an ontology whose module is written by hand: the index registers it, nothing else is generated or compared, vann data still required', async () => {
+    const pkg = fs.readJsonSync(path.join(dir, 'package.json'));
+    pkg.linkedOntologies.ex.generated = false;
+    fs.writeJsonSync(path.join(dir, 'package.json'), pkg);
+    // A hand-written module, edited with an extra export.
+    fs.appendFileSync(
+      path.join(dir, 'src/ontologies/ex.ts'),
+      'export const grouping = {};\n',
+    );
+
+    // The index is the same: it registers the hand-written module like a generated one.
+    expect(await step().apply()).toBe(true);
+    const generated = await generatePackageOntologies(dir);
+    expect(
+      generated.ontologies.map((g) => [g.config.name, g.config.generated]),
+    ).toEqual([
+      ['ex', false],
+      ['other', true],
+    ]);
+    expect(Object.keys(generated.files).sort()).toEqual([
+      'src/ontologies/index.ts',
+      'src/ontologies/other.ts',
+    ]);
+    expect(generated.files['src/ontologies/index.ts']).toContain(
+      "import * as ex from './ex.js';",
+    );
+    expect(generated.ontologies[0].termCount).toBeGreaterThan(0);
+    expect(await writePackageOntologies(dir)).toEqual([]);
+
+    // Without vann data it fails the build with the same message as a generated one.
+    const file = path.join(dir, 'src/data/ex.ttl');
+    fs.writeFileSync(
+      file,
+      fs
+        .readFileSync(file, 'utf8')
+        .replace(/ ;\n  vann:preferredNamespacePrefix "exa" ;\n  vann:preferredNamespaceUri "[^"]*"/, ''),
+    );
+    const {error} = (await step().apply()) as {error: string};
+    expect(error).toContain(
+      'ontology-generator-fixture: the ontology "ex" (src/data/ex.ttl, src/data/ex-extra.ttl) has no suggested prefix: <https://example.test/ex/> has no vann:preferredNamespacePrefix.',
+    );
+    await expect(generatePackageOntologies(dir)).rejects.toThrow(
+      /the ontology "ex" .* has no suggested prefix/,
+    );
+  });
+
+  test('a stale generated module names the option for hand-written modules', async () => {
+    fs.appendFileSync(path.join(dir, 'src/ontologies/ex.ts'), '// hand edit\n');
+    expect(((await step().apply()) as {error: string}).error).toMatch(
+      /declare it with "generated": false in "linkedOntologies"/,
+    );
+  });
+
+  test('a module other than the name: the file takes the module, the registration the name', async () => {
+    const pkg = fs.readJsonSync(path.join(dir, 'package.json'));
+    pkg.linkedOntologies.ex.module = 'linked-ex';
+    fs.writeJsonSync(path.join(dir, 'package.json'), pkg);
+    // The generated module under the old file name goes.
+    expect(await staleOntologyModules(dir)).toEqual([
+      'src/ontologies/ex.ts',
+      'src/ontologies/index.ts',
+      'src/ontologies/linked-ex.ts',
+    ]);
+    await writePackageOntologies(dir);
+    const read = (f: string) =>
+      fs.readFileSync(path.join(dir, 'src/ontologies', f), 'utf8');
+    expect(fs.existsSync(path.join(dir, 'src/ontologies/ex.ts'))).toBe(false);
+    expect(read('linked-ex.ts')).toBe(
+      fs.readFileSync(path.join(FIXTURE, 'src/ontologies/ex.ts'), 'utf8'),
+    );
+    const index = read('index.ts');
+    expect(index).toContain("import * as linked_ex from './linked-ex.js';");
+    expect(index).toContain("      name: 'ex',\n      namespace: 'https://example.test/ex/',\n      terms: linked_ex,");
+    expect(await step().apply()).toBe(true);
+  });
+
   test('a package without linkedOntologies passes untouched', async () => {
     fs.writeJsonSync(path.join(dir, 'package.json'), {
       name: 'plain',
@@ -458,8 +784,8 @@ describe('writing and the build check', () => {
 });
 
 describe('tree-shaking', () => {
-  // `import * as ex` with one term used: a bundler keeps that term and drops the rest, because
-  // every initializer is annotated pure. Core is stubbed; the data module's `Prefix.add` stays.
+  // `import * as ex` with one term used: a bundler keeps that term and drops the rest (each is a
+  // plain object literal).
   test('an esbuild bundle of one term holds only that term', async () => {
     const esbuild = await import('esbuild');
     const result = await esbuild.build({
@@ -473,26 +799,9 @@ describe('tree-shaking', () => {
       format: 'esm',
       minify: true,
       logLevel: 'silent',
-      plugins: [
-        {
-          name: 'stub-core',
-          setup(build) {
-            build.onResolve({filter: /^@_linked\/core\//}, (args) => ({
-              path: args.path,
-              namespace: 'core',
-            }));
-            build.onLoad({filter: /.*/, namespace: 'core'}, () => ({
-              contents:
-                'export const Prefix = {add() {}}; export const createNameSpace = (b) => (t) => ({id: b + t});' +
-                'export const loadOntologyFiles = () => [];',
-              loader: 'js',
-            }));
-          },
-        },
-      ],
     });
     const code = result.outputFiles[0].text;
-    expect(code).toContain('"Thing"');
+    expect(code).toContain('https://example.test/ex/Thing');
     for (const dropped of [
       'Widget',
       'Added',

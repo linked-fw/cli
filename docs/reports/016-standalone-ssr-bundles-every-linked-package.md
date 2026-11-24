@@ -6,8 +6,8 @@ summary: >
   guard: a fresh template app goes from 8 / 13 `TWO COPIES` lines (RemoteDataset / FusekiStore
   datasets file) to 0 / 0, renders and passes its own e2e; webid.email standalone goes from 17
   lines and a failing `email.spec.ts` (case 17 (a), `LinkedEmail` provider lost) to 0 lines and
-  5 passed, given core 2.34.0+; CN stays at 0 (worktree and localized layout) and its sign-in proof passes. Boot time
-  unchanged. Minor release.
+  5 passed, given core 2.34.0+; the host app stays at 0 (worktree and localized layout) and its
+  sign-in proof passes. Boot time unchanged. Minor release.
 ---
 
 # 016 — Standalone apps bundle every `@_linked/*` but core and the CLI
@@ -117,11 +117,11 @@ With core 2.35.0 they are gone. So webid.email needs its core floor raised to `^
 Renovate bump or a direct one in Semantu/webid-email); until then `FusekiStore` is a Node copy,
 as it was before this change, which webid.email only imports as a type.
 
-### CN boot proof
+### Host app boot proof
 
-A CN worktree of `main` (`c316c33da`), `npm ci`, the CLI under test installed, then
-`CN_TEST_PORT=4079 npx playwright test tests/e2e/signin.spec.ts`. CN is workspace mode
-(`packages/*`), so its list is unchanged; the count is the proof.
+A worktree of the host app's `main` (`c316c33da`), `npm ci`, the CLI under test installed, then its
+sign-in e2e (`tests/e2e/signin.spec.ts`) on port 4079. The app is workspace mode (`packages/*`),
+so its list is unchanged; the count is the proof.
 
 | CLI | Result | `TWO COPIES` |
 |---|---|---|
@@ -129,14 +129,14 @@ A CN worktree of `main` (`c316c33da`), `npm ci`, the CLI under test installed, t
 | this build | `5 passed (33.1s)` | 0 |
 
 ```
-[globalSetup] CN is healthy on :4079 after 18.3 s
+[globalSetup] app is healthy on :4079 after 18.3 s
   5 passed (33.1s)
-[CN] [linked] dual-copy guard: on
+[app] [linked] dual-copy guard: on
 ```
 
-**Localized layout** (the owner's CN: every framework package a `packages-local/` checkout, so a
-bundled source workspace), measured once nothing listened on :4040. From CN's main checkout,
-`CN_TEST_PORT=4079 npx playwright test tests/e2e/signin.spec.ts`, first with the checkout's own
+**Localized layout** (the owner's checkout: every framework package a `packages-local/` checkout,
+so a bundled source workspace), measured once nothing listened on :4040. From the app's main
+checkout, the same sign-in e2e on port 4079, first with the checkout's own
 build (1.50.0), then with this build's `lib/` rsynced over `packages-local/_linked-cli/lib/`, then
 `npx linked build` in the checkout to put main's build back (`git status`: `## main...origin/main`,
 clean):
@@ -147,17 +147,17 @@ clean):
 | this build | `5 passed (33.6s)` | 0 |
 
 ```
-[globalSetup] CN is healthy on :4079 after 17.2 s
+[globalSetup] app is healthy on :4079 after 17.2 s
   5 passed (33.6s)
-[CN] [linked] dual-copy guard: on
+[app] [linked] dual-copy guard: on
 ```
 
-This is also the first measurement of D2's guard in the localized layout: 0 lines.
+This is also the first measurement of the dual-copy guard (report 015) in the localized layout: 0 lines.
 
 ## Not done here
 
-- The CLI e2e that fails on a `TWO COPIES` line or a guard that is not `on` (option B, CN plan
-  068 step D4), which closes backlog 014 and 015.
+- The CLI e2e that fails on a `TWO COPIES` line or a guard that is not `on` (option B), which
+  closes backlog 014 and 015.
 - webid.email's core floor (`^2.34.0`), above; the webid-email backlog that tracks case 17 (a)
   is updated from this report (Semantu/webid-email).
 

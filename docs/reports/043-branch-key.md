@@ -5,8 +5,8 @@ summary: >
   never `main`), kept only from the app's own list, read by `linked checkout` as pins under
   `--pin` (`pinFrom`), followed by `localize --listed`, and landed by `linked branch merge`, which
   merges keyed package branches first (update mode refuses one the target lacks) and strips every
-  key from the app's `package.json` (`strippedKeys`, `via`). Minor. Step BK of CN plan 282 (K7),
-  sub-plan 004.
+  key from the app's `package.json` (`strippedKeys`, `via`). Minor. Part of the host app's plan
+  (K7), sub-plan 004.
 ---
 
 # 043 — The branch key
@@ -19,7 +19,7 @@ An app branch names the package branch it uses in its own `package.json`:
 `"acme-ont": {"repo": "…", "branch": "rene/topic"}`. `linked checkout` places a keyed package as a
 pin places it, `linked localize --listed` clones it on that branch, and `linked branch merge`
 lands the keyed branch before the packages on the app branch and removes every key, so `main`
-lists none. Contract K7 (Added by BK), master decisions M8, M29, M33.
+lists none. Contract K7 (added by this step), and three master decisions (below).
 
 ### Changes
 
@@ -53,7 +53,7 @@ lists none. Contract K7 (Added by BK), master decisions M8, M29, M33.
 - Docs: README (unpublished packages, branch checkouts, the merge lines), `docs/localize.md`
   (commands table, the on-disk example with `branch`, a paragraph on the key, exit code 6),
   `docs/integration-branches-and-worktrees.md` (merge: branch keys, push/update, JSON with `via`
-  and `strippedKeys`; checkout: branch rule, Pins, Create Now passes `--pins-only` only, JSON with
+  and `strippedKeys`; checkout: branch rule, Pins, a host app passes `--pins-only` only, JSON with
   `pinFrom`).
 - `.changeset/branch-key.md` (minor). Backlog 016.
 - Tests: `tests/unit/integration/branchName.test.ts` (new, 37 names against git),
@@ -66,7 +66,7 @@ lists none. Contract K7 (Added by BK), master decisions M8, M29, M33.
 ### Verification
 
 Build (`npx linked build` in the cli worktree; first one with
-`/Users/rene/web/create_now/node_modules/.bin/linked build`):
+`<main>/node_modules/.bin/linked build`, `<main>` being the app's main checkout):
 
 ```
 ✔ Checking dependencies
@@ -94,7 +94,7 @@ Time:        115.954 s, estimated 118 s
 npm run test:unit  171.77s user 186.46s system 307% cpu 1:56.53 total
 ```
 
-After the M42 condition (below), `pins.e2e` and `checkout.e2e` (50 s):
+After the master's condition (below), `pins.e2e` and `checkout.e2e` (50 s):
 
 ```
 Test Suites: 2 passed, 2 total
@@ -109,7 +109,7 @@ Tests:       1261 passed, 1261 total
 ```
 
 End to end with the built bin (`node lib/esm/launch.js`) in
-`/private/tmp/claude-501/-Users-rene-web-create-now/f0df7a7f-565a-4b79-a371-d7fb1ca89a28/scratchpad/cli-sandbox`,
+`<scratchpad>/cli-sandbox`,
 `file://` remotes `acme-app`, `acme-ont` (branch `rene/topic`), `acme-assets` (branch `change-1`);
 the app's `change-1` keys `acme-ont` to `rene/topic`. Script `bk-sandbox.sh` in the scratchpad;
 whole run 12.5 s. Packages from `--json` (paths trimmed):
@@ -149,7 +149,7 @@ branch keys on origin/main: 0
 
 (`acme-assets` is not in the merge: `--pins-only` left it detached at `origin/main`.)
 
-Not run: `npm run test:e2e` (Docker); CN's tests (CN half).
+Not run: `npm run test:e2e` (Docker); the host app's tests (the app's half).
 
 ### Deviations
 
@@ -159,7 +159,7 @@ Not run: `npm run test:e2e` (Docker); CN's tests (CN half).
   `--pin`) left it where it was, against the documented "a clean worktree whose head origin has
   moves to its target when the pins change". The pinned path now moves when origin has the head,
   as the default-branch path already did. Applies to `--pin` changes too. Test added. Accepted by
-  the master as M42 with a condition: the move happens only when the worktree has no uncommitted
+  the master with a condition: the move happens only when the worktree has no uncommitted
   changes and no commits origin lacks; otherwise it is `kept` with a reason that starts with the
   worktree's path and a run message `<dir>: not moved: …` (both refusals tested).
 - The keys become pins **before** the walk (the plan says after): packages are placed during the
@@ -174,8 +174,8 @@ Not run: `npm run test:e2e` (Docker); CN's tests (CN half).
 - Push mode with an app already in `<into>` does not strip keys `<into>` might list (message
   only); the strip reflows one-line objects; no command sets a key: cli backlog
   [016](../backlog/016-branch-key-follow-ups.md).
-- CN half (passes `--pins-only` without `--pin`, lands keyed branches by PR before update mode,
-  M41): done in the same step, CN report 291.
+- The host app's half (passes `--pins-only` without `--pin`, lands keyed branches by PR before
+  update mode, a master decision): done in the same step, in the app's own report.
 
 ## Details
 
@@ -183,13 +183,13 @@ Not run: `npm run test:e2e` (Docker); CN's tests (CN half).
 
 The parser stays pure (`isBranchName` instead of a git call); `checkout` still runs `git
 check-ref-format --branch` on each key as it does on each `--pin`. Keys are read only from the
-app's list (M8: the on-disk shape is unchanged, `{"<npm name>": {"repo", "branch"?}}`); the walk
+app's list (a master decision: the on-disk shape is unchanged, `{"<npm name>": {"repo", "branch"?}}`); the walk
 copies a transitive entry without its key, so nothing downstream can see one. In `checkout` the
 pin set is one map built once (`pinKeys`), and a `keyed` set says which pins came from keys, so
-`targetOf` and every pins-mode rule are unchanged (M29). In `branch merge` the keys come from
+`targetOf` and every pins-mode rule are unchanged (a master decision). In `branch merge` the keys come from
 `origin/<branch>` after the fetch, and every refusal (no checkout for a keyed package, no
 `origin/<k>`, update mode with `<k>` not in `<into>`) joins the existing "Nothing was merged"
-pre-check, so a refusal never leaves a half merge (M33).
+pre-check, so a refusal never leaves a half merge (a master decision).
 
 ### Autonomous decisions
 
@@ -199,19 +199,19 @@ pre-check, so a refusal never leaves a half merge (M33).
 | B2 | checkout | Keys must be pins before packages are placed, which happens inside the walk | Read the keys from the app list before the walk (after the app worktree is up to date) | After the walk, as the plan worded it | The only order that places keyed packages; same file |
 | B3 | checkout | A key git's `check-ref-format` refuses (the parser already checked) | Refused with exit 6 (a list error), not 2 | Exit 2 like a bad `--pin` | A key is committed data, not the command line; matches the parser |
 | B4 | checkout | Override message when `--pin` equals the key | No message; `pinFrom: "flag"` | Always a message | Nothing is overridden |
-| B5 ⚠ risky | checkout | A detached pinned worktree was kept on a non-fast-forward pin change (also for `--pin` alone, before this step) | Move it when origin has its head, as the default-branch path does; only a clean worktree with nothing unpushed (master M42), else `kept`, naming the worktree | Leave it; record a backlog item | Documented behaviour; without it `--pin` over a key, and a key change, never take effect on an existing checkout. Changes today's `--pin` behaviour in that case |
+| B5 ⚠ risky | checkout | A detached pinned worktree was kept on a non-fast-forward pin change (also for `--pin` alone, before this step) | Move it when origin has its head, as the default-branch path does; only a clean worktree with nothing unpushed (the master's condition), else `kept`, naming the worktree | Leave it; record a backlog item | Documented behaviour; without it `--pin` over a key, and a key change, never take effect on an existing checkout. Changes today's `--pin` behaviour in that case |
 | B6 | merge | A keyed other-name package whose checkout is on `<branch>` too | The key decides: merged from `origin/<k>` only, left out of the same-name set | Merge both | The app list says which branch the app uses |
-| B7 | merge | Strip commit message: plan says `Use main of <pkgs>` | `Use <into> of <pkgs>` | Literal `main` | Same text for `--into main` (CN's case); correct for any target |
+| B7 | merge | Strip commit message: plan says `Use main of <pkgs>` | `Use <into> of <pkgs>` | Literal `main` | Same text for `--into main` (the host app's case); correct for any target |
 | B8 | merge | Hooks on the strip commit and the amend | `--no-verify` | Run the app's hooks | A mechanical edit by the cli; the merge itself runs no pre-commit hook either; the pushes already use `--no-verify` |
 | B9 | merge | Push mode, app already in `<into>` (no merge commit to amend) | Message only | Commit on `<into>`, or refuse | No path to it in normal use; backlog 016 |
 | B10 | merge | Update mode: how to report keyed packages already in `<into>` | In `repos` as `up-to-date`, `via: "key"`, `landed: true`, `sha` = `origin/<into>` | Leave them out | The caller sees every package the merge considered |
-| B11 | merge | Update mode, app up to date but keyed | The strip commit is pushed; app `result: "merged"` | `up-to-date` | Something was pushed; CN opens the app PR on it |
+| B11 | merge | Update mode, app up to date but keyed | The strip commit is pushed; app `result: "merged"` | `up-to-date` | Something was pushed; the host app opens the app PR on it |
 | B12 | merge | App push refused after the strip | `strippedKeys` reset to `[]` | Keep the names | Nothing reached `<into>` |
-| B13 | merge | Strip commit fails | `result: "conflict"` with the message, exit 6 | A new result value | Keeps `MergeRepoResult` unchanged for CN |
+| B13 | merge | Strip commit fails | `result: "conflict"` with the message, exit 6 | A new result value | Keeps `MergeRepoResult` unchanged for the host app |
 | B14 | merge | `origin/<branch>:package.json` unreadable / invalid list | No file: no keys; invalid JSON or list: refused with the parser's message, exit 6, nothing merged | Ignore the keys | A list the cli cannot read must not be landed |
 | B15 | strip | Formatting | Parse, delete, `JSON.stringify` with the detected indent, trailing newline and CRLF kept | Text-level edit | The plan's prescription; backlog 016 for one-line objects |
 
-## Addendum: review fixes (master M44)
+## Addendum: review fixes (master decision)
 
 ### PR
 

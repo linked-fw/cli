@@ -90,8 +90,9 @@ Tests:       1127 passed, 1127 total
 
 `linked build` of the cli: `✔ Build successful` (every check step green). `tsc --noEmit`: clean.
 
-CN `npm run test:regular` in a CN worktree of `dev` (`bb8f5d8bd`) whose `@_linked/cli` resolves to
-the main checkout's cli built at `0e228d8` (`CN_TEST_PORT=4166`, under the shared lock), 389 s:
+The host app's `npm run test:regular` in a worktree of its `dev` (`bb8f5d8bd`) whose `@_linked/cli`
+resolves to the main checkout's cli built at `0e228d8` (on its own test port, under the shared
+lock), 389 s:
 
 ```
   14 skipped

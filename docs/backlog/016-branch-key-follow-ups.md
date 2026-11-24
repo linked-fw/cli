@@ -17,8 +17,8 @@ status: open
    refusal.
 2. **Formatting.** The strip parses `package.json`, deletes the keys and writes it with the file's
    indent and trailing newline (and CRLF when the file has it). An object the file kept on one line
-   (`{"repo": "…"}`) comes back expanded. npm and Create Now write `JSON.stringify(…, null, 2)`, so
+   (`{"repo": "…"}`) comes back expanded. npm and the usual tools write `JSON.stringify(…, null, 2)`, so
    in practice nothing moves; a text-level edit would keep any layout.
-3. **Setting a key.** Nothing in the cli writes a `branch` key; Create Now edits `package.json`
+3. **Setting a key.** Nothing in the cli writes a `branch` key; a host app edits `package.json`
    itself. A `linked use <pkg> --branch <b>` (and `--clear`) would give developers the same, if
    wanted.

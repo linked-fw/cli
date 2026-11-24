@@ -10,7 +10,7 @@ status: open
 
 `linked build` indexes only the linked components exported from `src/components/index.ts`
 (`Writing components.ttl`, report 042). A component defined in a module that the index does not
-export is silently absent from the component index, so Create Now's builder never offers it.
+export is silently absent from the component index, so a host app's builder never offers it.
 
 **Idea.** A step `Checking components/index`, next to `Checking shapes/index`
 (`src/utils/shapesIndex.ts` is the precedent): load each compiled module under

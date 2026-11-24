@@ -110,8 +110,8 @@ imports resolving under node10. Once it is present, `types` has to be written as
 This was already "fixed" the wrong way once, downstream, on the strength of a measurement that was
 cheap, plausible, and inverted the answer.
 
-**What was measured: file existence.** A backlog item in the consuming project (create-now
-backlog 072) observed that 22 of 24 installed `@_linked/*` packages declare `"types":
+**What was measured: file existence.** A backlog item in the consuming project's
+backlog observed that 22 of 24 installed `@_linked/*` packages declare `"types":
 "index.d.ts"` while no such file is present in the package directory, concluded that every node10
 consumer silently types those packages as `any`, and proposed a one-line fix across **20**
 separate `linked-fw/*` repositories.

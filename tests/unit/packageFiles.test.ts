@@ -85,7 +85,7 @@ describe('buildPackageFiles', () => {
   );
 
   test('with an explicit uri_base, as create-package takes it', async () => {
-    const uriBase = 'https://acme.id.create.now/ont/planning';
+    const uriBase = 'https://example.org/ont/planning';
     await createPackage('planning', uriBase, tmp, {
       kind: 'ontology',
       skipInstall: true,
@@ -103,10 +103,10 @@ describe('buildPackageFiles', () => {
     await createPackage('planning', undefined, tmp, {
       kind: 'both',
       location: 'packages',
-      baseUri: 'https://acme.id.create.now',
+      baseUri: 'https://example.org',
       skipInstall: true,
     });
-    const baseUri = 'https://acme.id.create.now/';
+    const baseUri = 'https://example.org/';
     expect(buildPackageFiles('planning-ont', 'ontology', {baseUri})).toEqual(
       files(path.join(tmp, 'packages', 'planning-ont')),
     );
@@ -128,8 +128,7 @@ describe('buildPackageFiles', () => {
       'package.json',
       'src/data/planning.ttl',
       'src/index.ts',
-      'src/ontologies/planning.data.ts',
-      'src/ontologies/planning.register.ts',
+      'src/ontologies/index.ts',
       'src/ontologies/planning.ts',
       'src/package.ts',
       'tsconfig-esm.json',
@@ -138,17 +137,17 @@ describe('buildPackageFiles', () => {
     expect(out['src/package.ts']).toContain(
       `linkedPackage('planning-ont', {baseUri: "https://acme.example/"})`,
     );
-    expect(out['src/ontologies/planning.data.ts']).toContain(
-      `createNameSpace('https://acme.example/ont/planning/')`,
+    expect(out['src/package.ts']).toMatch(/^  registerOntologies,$/m);
+    expect(out['src/ontologies/index.ts']).toContain(
+      `      name: 'planning',\n      namespace: 'https://acme.example/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,
     );
-    expect(out['src/ontologies/planning.register.ts']).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, dataFiles)`,
-    );
+    expect(out['src/ontologies/planning.ts']).toMatch(/^export \{\};$/m);
+    expect(out['src/index.ts']).toMatch(/^import '\.\/ontologies\/index\.js';$/m);
     expect(JSON.parse(out['package.json']).linkedOntologies).toEqual({
       planning: {namespace: 'https://acme.example/ont/planning/'},
     });
     expect(out['src/data/planning.ttl']).toContain(
-      `<https://acme.example/ont/planning/> a owl:Ontology .`,
+      `<https://acme.example/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://acme.example/ont/planning/" .`,
     );
     for (const [file, content] of Object.entries(out)) {
       expect([file, content]).not.toEqual([
@@ -180,7 +179,7 @@ describe('buildPackageFiles', () => {
   });
 
   test('a slug or namespace the scaffold cannot use is refused', () => {
-    expect(() => buildPackageFiles('3d-ont', 'ontology')).toThrow(/start with a letter/);
+    expect(() => buildPackageFiles('3d-ont', 'ontology')).toThrow(/start with a lowercase letter/);
     expect(() =>
       buildPackageFiles('planning-ont', 'ontology', {uriBase: 'ex.test/x'}),
     ).toThrow(/not an ontology namespace/);

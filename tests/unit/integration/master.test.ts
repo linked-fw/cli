@@ -4,7 +4,7 @@
  * them, and `linked branch land <m>`.
  *
  * Each test gets a container dir holding the owner's app root `app/` on `dev`
- * (an integration branch with target `main`, as Create Now's is) with
+ * (an integration branch with target `main`, as a host app's may be) with
  * `packages-local/_linked-server` and `packages-local/_linked-core` on `dev`,
  * and two app workspace members: `packages/access` (its entry is a build
  * output, built in the owner's checkout only) and `packages/chrome` (no
@@ -77,7 +77,7 @@ function makeApp(): App {
     '.gitignore': 'node_modules\npackages-local/\n.env\n.vite-cache/\n/apps\nlib/\n',
     'src.txt': 'app\n',
     'packages/access/package.json': JSON.stringify({name: '@_linked/access', main: 'lib/esm/index.js'}),
-    'packages/chrome/package.json': JSON.stringify({name: '@create-now/chrome', exports: {'./chrome.css': './src/chrome.css'}}),
+    'packages/chrome/package.json': JSON.stringify({name: '@my-app/chrome', exports: {'./chrome.css': './src/chrome.css'}}),
   });
   fs.writeFileSync(path.join(root, '.env'), `PORT=4040\nSITE_ROOT=http://localhost:4040\nCN_PROJECTS_ROOT=${root}/apps\n`);
   fs.mkdirSync(path.join(root, 'packages', 'access', 'lib', 'esm'), {recursive: true});
@@ -99,11 +99,11 @@ function makeApp(): App {
   fs.mkdirSync(path.join(nm, 'react'), {recursive: true});
   fs.mkdirSync(path.join(nm, '.bin'));
   fs.mkdirSync(path.join(nm, '@_linked'));
-  fs.mkdirSync(path.join(nm, '@create-now'));
+  fs.mkdirSync(path.join(nm, '@my-app'));
   fs.symlinkSync('../../packages-local/_linked-server', path.join(nm, '@_linked', 'server'));
   fs.symlinkSync('../../packages-local/_linked-core', path.join(nm, '@_linked', 'core'));
   fs.symlinkSync('../../packages/access', path.join(nm, '@_linked', 'access'));
-  fs.symlinkSync('../../packages/chrome', path.join(nm, '@create-now', 'chrome'));
+  fs.symlinkSync('../../packages/chrome', path.join(nm, '@my-app', 'chrome'));
   return {container, root, server, core, origin};
 }
 
@@ -163,7 +163,7 @@ describe('linked branch start --worktree', () => {
     assert.equal(real(path.join(dir, 'node_modules', '@_linked', 'server')), real(pkgDir));
     assert.equal(real(path.join(dir, 'node_modules', '@_linked', 'core')), real(app.core));
     // packages/chrome needs no build: the worktree's; packages/access is unbuilt there: the install's.
-    assert.equal(real(path.join(dir, 'node_modules', '@create-now', 'chrome')), real(path.join(dir, 'packages', 'chrome')));
+    assert.equal(real(path.join(dir, 'node_modules', '@my-app', 'chrome')), real(path.join(dir, 'packages', 'chrome')));
     assert.equal(real(path.join(dir, 'node_modules', '@_linked', 'access')), real(path.join(app.root, 'packages', 'access')));
     assert.equal(fs.readlinkSync(path.join(dir, 'packages', 'access', 'node_modules')), path.join(app.root, 'packages', 'access', 'node_modules'));
     assert.equal(fs.readlinkSync(path.join(pkgDir, 'node_modules')), path.join(app.server, 'node_modules'));
@@ -580,6 +580,56 @@ describe('linked branch land', () => {
     assert.deepEqual(builds, [app.server]);
     assert.equal(git(app.origin, 'rev-parse', 'dev'), git(app.root, 'rev-parse', 'dev'));
     assert.equal(fs.readFileSync(path.join(app.root, 'src.txt'), 'utf8'), 'master\n');
+  });
+
+  test('builds core, then the build tool, then the packages that build with it, through the core/cli cycle', async () => {
+    const app = makeApp();
+    // The real shape: cli depends on core, core devDepends on cli (a cycle), and auth, which sorts
+    // before cli, devDepends on both.
+    fs.writeFileSync(path.join(app.core, 'package.json'), JSON.stringify({name: '@_linked/core', devDependencies: {'@_linked/cli': '^1.57.1'}}));
+    git(app.core, 'commit', '-q', '-am', 'core devDepends on cli');
+    const auth = path.join(app.root, 'packages-local', '_linked-auth');
+    initRepo(auth, {'package.json': JSON.stringify({name: '@_linked/auth', dependencies: {'@_linked/core': '*'}, devDependencies: {'@_linked/cli': '^1.57.1'}}), 'auth.txt': 'auth\n'});
+    const cli = path.join(app.root, 'packages-local', '_linked-cli');
+    initRepo(cli, {'package.json': JSON.stringify({name: '@_linked/cli', dependencies: {'@_linked/core': '*'}}), 'cli.txt': 'cli\n'});
+    for (const [name, dir] of [['auth', '_linked-auth'], ['cli', '_linked-cli']]) {
+      fs.symlinkSync(`../../packages-local/${dir}`, path.join(app.root, 'node_modules', '@_linked', name));
+    }
+    await startMaster(app, 'm1', ['auth', 'cli', 'core', 'server']);
+    const masterDir = path.join(app.container, 'wt', 'm1');
+    for (const [dir, file] of [['_linked-auth', 'auth.txt'], ['_linked-cli', 'cli.txt'], ['_linked-core', 'core.txt'], ['_linked-server', 'server.txt']]) {
+      commit(path.join(masterDir, 'packages-local', dir), file, 'master\n');
+    }
+
+    const {run, builds} = fakeBuilds();
+    const r = await branchLand(app.root, 'm1', {push: false}, run);
+    assert.equal(r.code, 0, r.messages.join('\n'));
+    // core (which cli depends on), then cli alone, then the rest in dependency order.
+    assert.deepEqual(builds, [app.core, cli, auth, app.server]);
+  });
+
+  test('when the build tool fails to build, the packages that build with it are not built', async () => {
+    const app = makeApp();
+    const cli = path.join(app.root, 'packages-local', '_linked-cli');
+    initRepo(cli, {'package.json': JSON.stringify({name: '@_linked/cli'}), 'cli.txt': 'cli\n'});
+    fs.symlinkSync('../../packages-local/_linked-cli', path.join(app.root, 'node_modules', '@_linked', 'cli'));
+    await startMaster(app, 'm1', ['cli', 'server']);
+    const masterDir = path.join(app.container, 'wt', 'm1');
+    commit(path.join(masterDir, 'packages-local', '_linked-cli'), 'cli.txt', 'master\n');
+    commit(path.join(masterDir, 'packages-local', '_linked-server'), 'server.txt', 'master\n');
+
+    const builds: string[] = [];
+    const realRun = makeRun(process.cwd());
+    const run: Run = (cmd, args, opts) => {
+      if (cmd !== 'npx') return realRun(cmd, args, opts);
+      builds.push(opts?.cwd ?? '');
+      return {status: 1, stdout: '', stderr: 'boom'};
+    };
+    const r = await branchLand(app.root, 'm1', {push: false}, run);
+    assert.equal(r.code, 5, r.messages.join('\n'));
+    assert.deepEqual(builds, [cli]);
+    assert.match(r.messages.join('\n'), /_linked-server: not built, because packages-local\/_linked-cli \(its build tool\) failed/);
+    assert.equal(r.repos.find((x) => x.rel === 'packages-local/_linked-server')?.built, false);
   });
 
   test('a conflict stays in progress in the master and blocks the next run until it is committed', async () => {

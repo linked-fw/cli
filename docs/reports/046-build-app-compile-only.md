@@ -3,17 +3,17 @@ date: 2026-10-30
 summary: >
   `linked build-app --compile-only` (also `compileViteApp`): compile and check an app's client and
   backend without a release: no file store, no store accessURL, no revision, no manifest. Asked for
-  by Create Now's hub-update check (CN backlog 322, plan 311 decision E8).
+  by the host app's hub-update check (a decision in its plan).
 ---
 
 # 046 — `build-app --compile-only`
 
 ## Why
 
-Create Now's hub-update check builds an app's clone at a new dependency version to learn whether it
-still builds. `build-app` is a release build: a web build resolves the `appAssets` store first (the
+The host app's hub-update check builds an app's clone at a new dependency version to learn whether
+it still builds. `build-app` is a release build: a web build resolves the `appAssets` store first (the
 client bundle's base URL is under the release prefix) and writes a release manifest that needs the
-store's `accessURL`. The check runs sandboxed with none of CN's environment, so it stopped at
+store's `accessURL`. The check runs sandboxed with none of the host app's environment, so it stopped at
 `A web release manifest requires the accessURL of the store it will be published to`.
 
 ## What changed
@@ -53,4 +53,5 @@ Time:        87.496 s
 
 ## Consumer
 
-CN runs it with its own cli (`linkedBin()`), not the clone's npm-installed copy: CN report 322.
+The host app runs it with its own cli, not the clone's npm-installed copy (recorded in its own
+report).

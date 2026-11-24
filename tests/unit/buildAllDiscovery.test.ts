@@ -9,7 +9,7 @@ import {
 
 // `build-all` used to discover only packages carrying the linked-package flag,
 // inside the `workspaces` globs only, and printed nothing about anything it
-// passed over. Measured against Create Now on 2026-09-29 that meant 3 of 6
+// passed over. Measured against a host app on 2026-09-29 that meant 3 of 6
 // tracked workspace members built, `@_linked/maps` (a shipped dependency that
 // simply never got the flag) silently dropped, and the 25 localized checkouts
 // under `packages-local/` never looked at — all of it behind `exit 0`.

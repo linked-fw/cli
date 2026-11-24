@@ -14,9 +14,7 @@
  * app's package and shape IRIs", read with the same precedence `linked start`
  * gives the app's `.env` (the shell wins over the file). The file is parsed, not
  * loaded, so creating a package never changes this process's environment.
- * `linked.config.js` is not a source: it is a module that would have to be
- * imported (running the app's code) just to scaffold a package, and it has no
- * IRI setting today.
+ * `linked.app.json` is not a source: it has no IRI setting.
  */
 import fs from 'fs';
 import path from 'path';

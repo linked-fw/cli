@@ -37,7 +37,7 @@ export const isFrameworkPkg = (name: string): boolean =>
  *
  * Declaring the globs is not enough. An app made from the app template lists
  * `packages-local/*` so it can localize packages standalone; run inside a
- * parent workspace (CN's `packages-local/<app>`) with no checkouts of its own,
+ * parent workspace (a host app's `packages-local/<app>`) with no checkouts of its own,
  * it has nothing installed and npm hoisted its dependencies to the parent.
  * Stopping at the app then missed the parent's `node_modules`: no localized
  * package was registered as source, while Node walked up to the parent's

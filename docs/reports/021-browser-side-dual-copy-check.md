@@ -16,7 +16,7 @@ summary: >
 Report 017's `tests/e2e/dual-copy.spec.ts` read only the boot's output, which covers Node loading
 a file the SSR runner bundles. The browser has its own ways to get two copies: Vite's optimizer
 (cli#272) and the `?v` split of report 018 (case 20, two React contexts in shape-ui). Nothing in
-the CLI's tests loaded a page in a browser, so case 20 was found by CN's e2e, not here.
+the CLI's tests loaded a page in a browser, so case 20 was found by the host app's e2e, not here.
 
 ## What changed
 

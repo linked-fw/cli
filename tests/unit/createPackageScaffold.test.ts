@@ -68,8 +68,7 @@ describe('createPackage kinds', () => {
       'package.json',
       'src/data/planning.ttl',
       'src/index.ts',
-      'src/ontologies/planning.data.ts',
-      'src/ontologies/planning.register.ts',
+      'src/ontologies/index.ts',
       'src/ontologies/planning.ts',
       'src/package.ts',
       'tsconfig-esm.json',
@@ -83,25 +82,19 @@ describe('createPackage kinds', () => {
 
     // The package is `planning-ont`; the ontology slug is `planning`.
     expect(read(pkg, 'src/package.ts')).toContain(`linkedPackage('planning-ont')`);
-    expect(read(pkg, 'src/ontologies/planning.data.ts')).toContain(
-      `createNameSpace('https://linked.cm/ont/planning/')`,
-    );
-    expect(read(pkg, 'src/ontologies/planning.register.ts')).toContain(
-      `linkedOntology(terms, ns, 'planning', loadData, dataFiles)`,
-    );
-    expect(read(pkg, 'src/ontologies/planning.data.ts')).toContain(
-      `export const dataFiles = ['../data/planning.ttl'];`,
+    expect(read(pkg, 'src/ontologies/index.ts')).toContain(
+      `      name: 'planning',\n      namespace: 'https://linked.cm/ont/planning/',\n      terms: planning,\n      data: ['../data/planning.ttl'],\n      suggestedPrefix: 'planning',`,
     );
     expect(manifest.linkedOntologies).toEqual({
       planning: {namespace: 'https://linked.cm/ont/planning/'},
     });
-    expect(read(pkg, 'src/index.ts')).toContain(`./ontologies/planning.register.js`);
+    expect(read(pkg, 'src/index.ts')).toContain(`import './ontologies/index.js';`);
     expect(read(pkg, 'src/index.ts')).not.toContain(`import './shapes`);
     expect(read(pkg, 'src/data/planning.ttl')).toContain(
       `@prefix planning: <https://linked.cm/ont/planning/> .`,
     );
     expect(read(pkg, 'src/data/planning.ttl')).toContain(
-      `<https://linked.cm/ont/planning/> a owl:Ontology .`,
+      `<https://linked.cm/ont/planning/> a owl:Ontology ;\n    vann:preferredNamespacePrefix "planning" ;\n    vann:preferredNamespaceUri "https://linked.cm/ont/planning/" .`,
     );
 
     // No `${...}` placeholder survives.
@@ -111,12 +104,12 @@ describe('createPackage kinds', () => {
   });
 
   test('an explicit uri_base is the ontology namespace, as before', async () => {
-    await createPackage('planning', 'https://acme.id.create.now/ont/planning', tmp, {
+    await createPackage('planning', 'https://example.org/ont/planning', tmp, {
       kind: 'ontology',
       skipInstall: true,
     });
-    expect(read(tmp, 'planning-ont', 'src/ontologies/planning.data.ts')).toContain(
-      `createNameSpace('https://acme.id.create.now/ont/planning/')`,
+    expect(read(tmp, 'planning-ont', 'src/ontologies/index.ts')).toContain(
+      `namespace: 'https://example.org/ont/planning/',`,
     );
   });
 
@@ -231,8 +224,8 @@ describe('createPackage kinds', () => {
     expect(exists(tmp, 'planning-ont-ont')).toBe(false);
     expect(exists(tmp, 'planning-assets-assets')).toBe(false);
     expect(JSON.parse(read(tmp, 'planning-ont', 'package.json')).name).toBe('planning-ont');
-    expect(read(tmp, 'planning-ont', 'src/ontologies/planning.data.ts')).toContain(
-      `createNameSpace('https://linked.cm/ont/planning/')`,
+    expect(read(tmp, 'planning-ont', 'src/ontologies/index.ts')).toContain(
+      `namespace: 'https://linked.cm/ont/planning/',`,
     );
     expect(JSON.parse(read(tmp, 'planning-assets', 'package.json')).name).toBe(
       'planning-assets',
@@ -278,7 +271,7 @@ describe('createPackage kinds', () => {
       [...(console.log as jest.Mock).mock.calls, ...warn.mock.calls].map((c) => c.join(' ')).join('\n');
 
     test("comes from the app's .env and is declared in src/package.ts", async () => {
-      fs.writeFileSync(path.join(tmp, '.env'), 'LINKED_BASE_URI=https://acme.id.create.now\n');
+      fs.writeFileSync(path.join(tmp, '.env'), 'LINKED_BASE_URI=https://example.org\n');
       await createPackage('planning', undefined, tmp, {
         kind: 'both',
         location: 'packages',
@@ -287,14 +280,14 @@ describe('createPackage kinds', () => {
       const ont = path.join(tmp, 'packages', 'planning-ont');
       const assets = path.join(tmp, 'packages', 'planning-assets');
       expect(read(assets, 'src/package.ts')).toContain(
-        `linkedPackage('planning-assets', {baseUri: "https://acme.id.create.now/"})`,
+        `linkedPackage('planning-assets', {baseUri: "https://example.org/"})`,
       );
       expect(read(ont, 'src/package.ts')).toContain(
-        `linkedPackage('planning-ont', {baseUri: "https://acme.id.create.now/"})`,
+        `linkedPackage('planning-ont', {baseUri: "https://example.org/"})`,
       );
       // The ontology's terms mint {baseUri}ont/{ontologySlug}/{Term}.
-      expect(read(ont, 'src/ontologies/planning.data.ts')).toContain(
-        `createNameSpace('https://acme.id.create.now/ont/planning/')`,
+      expect(read(ont, 'src/ontologies/index.ts')).toContain(
+        `namespace: 'https://example.org/ont/planning/',`,
       );
       for (const pkg of [ont, assets]) {
         expect([pkg, fs.readJsonSync(path.join(pkg, 'package.json')).linked.kind]).toEqual([
@@ -302,7 +295,7 @@ describe('createPackage kinds', () => {
           pkg === ont ? 'ontology' : 'assets',
         ]);
       }
-      expect(logged()).toMatch(/https:\/\/acme\.id\.create\.now\/ \(from \.env\)/);
+      expect(logged()).toMatch(/https:\/\/example\.org\/ \(from \.env\)/);
     });
 
     test('--base-uri wins over the env file', async () => {

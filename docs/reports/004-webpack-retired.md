@@ -14,7 +14,7 @@ anything could be deleted. All four were answered by measurement, and the answer
 ## What the scan found
 
 **Does any app still build with webpack?** `linked build-app` dispatched on `hasViteConfig()`, so
-the question is "which app roots have no `vite.config.{ts,js,mjs}`". Across the create-now
+the question is "which app roots have no `vite.config.{ts,js,mjs}`". Across the host app's
 workspace — the only workspace where this CLI is consumed locally — exactly one did:
 `packages/my-app`, a drifted copy of `linked-fw/app-template`. It was given the template's
 `vite.config.ts` as part of this change, so the webpack path had no consumer left when it was
@@ -23,7 +23,7 @@ already, so nothing was creating new webpack apps. `defaults/app-react-native` i
 `defaults/app-static` is a Capacitor overlay; neither emits webpack configuration.
 
 **Does `generateWebpackConfig` have consumers?** It was re-exported from `src/index.ts`, so it was
-public API. No importer was found anywhere in the create-now workspace, including the 25 local
+public API. No importer was found anywhere in that workspace, including the 25 local
 framework checkouts under `packages-local/`. External consumers cannot be ruled out from here —
 hence `major` rather than a patch.
 

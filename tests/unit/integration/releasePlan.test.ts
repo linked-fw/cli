@@ -11,6 +11,7 @@ import path from 'node:path';
 import {branchStart} from '../../../src/commands/branch.js';
 import {
   NO_PR_SECTION,
+  dependencyOrder,
   extractPrSection,
   formatReleasePlan,
   releasePlan,
@@ -274,5 +275,44 @@ describe('linked release plan', () => {
     assert.equal(plan.integration, null);
     assert.deepEqual(plan.repos, []);
     assert.match(formatReleasePlan(plan), /No integration branch/);
+  });
+});
+
+describe('dependencyOrder and the build tool', () => {
+  const repos = (pkgs: Record<string, object>) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'order-'));
+    tmpDirs.push(tmp);
+    return Object.entries(pkgs).map(([rel, pkg]) => {
+      const dir = path.join(tmp, rel);
+      fs.mkdirSync(dir, {recursive: true});
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+      return {rel, dir, packageName: (pkg as {name?: string}).name};
+    });
+  };
+
+  test('the core/cli cycle: core, then cli, then the packages that build with it, then the app', () => {
+    // cli depends on core, core devDepends on cli; auth devDepends on both and sorts before cli.
+    const all = repos({
+      '.': {name: 'app', dependencies: {'@_linked/auth': '*', '@_linked/server': '*'}},
+      'packages-local/_linked-auth': {name: '@_linked/auth', dependencies: {'@_linked/core': '*'}, devDependencies: {'@_linked/cli': '^1.57.1'}},
+      'packages-local/_linked-cli': {name: '@_linked/cli', dependencies: {'@_linked/core': '*'}},
+      'packages-local/_linked-core': {name: '@_linked/core', devDependencies: {'@_linked/cli': '^1.57.1'}},
+      'packages-local/_linked-server': {name: '@_linked/server', dependencies: {'@_linked/core': '*'}, devDependencies: {'@_linked/cli': '^1.57.1'}},
+    });
+    assert.deepEqual(dependencyOrder(all).map((r) => r.rel), [
+      'packages-local/_linked-core',
+      'packages-local/_linked-cli',
+      'packages-local/_linked-auth',
+      'packages-local/_linked-server',
+      '.',
+    ]);
+  });
+
+  test('a package that does not list the cli still comes after it; one the cli does not need is not pulled before it', () => {
+    const all = repos({
+      'packages-local/_linked-a': {name: '@_linked/a'},
+      'packages-local/_linked-cli': {name: '@_linked/cli'},
+    });
+    assert.deepEqual(dependencyOrder(all).map((r) => r.rel), ['packages-local/_linked-cli', 'packages-local/_linked-a']);
   });
 });

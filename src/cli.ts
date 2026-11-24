@@ -41,10 +41,25 @@ import {unknownCommandError} from './unknown-command.js';
 import {installDriftHook} from './localize/drift-hook.js';
 import {
   generatePackageOntologies,
-  ONTOLOGIES_KEY,
   staleOntologyModules,
   writePackageOntologies,
 } from './utils/generateOntology.js';
+import {ONTOLOGIES_KEY} from './utils/ontologyConfig.js';
+import {
+  APP_CONFIG_FILE,
+  findAppRoot,
+  refreshAppPrefixes,
+  type AddedPrefix,
+} from './utils/appConfig.js';
+
+/** One line per prefix `linked prefixes` added. */
+const reportAddedPrefixes = (file: string, added: AddedPrefix[]): void => {
+  for (const a of added) {
+    console.log(
+      `${file}: added "${a.prefix}": "${a.namespace}" (${a.packageName}, ontology "${a.name}")`,
+    );
+  }
+};
 
 /**
  * Run an async command action and report a failure the way the rest of this
@@ -298,15 +313,15 @@ program
 
 program
   .command('create-ontology')
-  .action((prefix, uriBase) => {
-    return createOntology(prefix, uriBase).catch(reportRefusal);
+  .action((name, uriBase) => {
+    return createOntology(name, uriBase).catch(reportRefusal);
   })
   .description(
     'Creates a new ontology file for your package. Execute this from your package folder.',
   )
   .argument(
-    '<suggested-prefix>',
-    'The suggested prefix for your ontology. Also the shorthand code used for the file name and the exported ontology object',
+    '<name>',
+    "The ontology's name within the package: the key in package.json \"linkedOntologies\", the modules' file name, and its suggested prefix in the data (vann:preferredNamespacePrefix)",
   )
   .argument(
     '[uribase]',
@@ -314,9 +329,30 @@ program
   );
 
 program
+  .command('prefixes')
+  .description(
+    `Adds to the app's ${APP_CONFIG_FILE} "prefixes" a prefix for every ontology the app has installed whose namespace the map does not have yet: its suggested prefix (the vann data of its owl:Ontology), or <prefix>_2, _3, … when taken. Never changes or removes an entry. Creates the file when the app has none. Run it from the app folder`,
+  )
+  .action(() =>
+    runAppCommand(async () => {
+      const appRoot = findAppRoot(process.cwd());
+      if (!appRoot) {
+        throw new Error(
+          `No linked app here or above (a package.json with "linked": {"kind": "app"}). ${APP_CONFIG_FILE} belongs to an app.`,
+        );
+      }
+      const {file, created, added} = await refreshAppPrefixes(appRoot);
+      const name = path.relative(process.cwd(), file) || APP_CONFIG_FILE;
+      if (created) console.log(`Created ${name}`);
+      reportAddedPrefixes(name, added);
+      if (!created && !added.length) console.log(`${name}: every installed ontology has a prefix.`);
+    }),
+  );
+
+program
   .command('generate-ontology')
   .description(
-    `Writes src/ontologies/<prefix>.ts, <prefix>.data.ts and <prefix>.register.ts for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/. Run it from the package folder`,
+    `Writes src/ontologies/<module>.ts (the terms; the module defaults to the name) for each ontology in package.json "${ONTOLOGIES_KEY}", from its Turtle in src/data/, and src/ontologies/index.ts, which registers every ontology of the package with its suggested prefix (the vann data of its owl:Ontology); the package entry imports it. An entry with "generated": false has its module written by hand: the index registers it and its vann data is checked. Removes the .data.ts and .register.ts files it generated before. Inside an app, also adds the prefixes of new ontologies to its linked.app.json. Run it from the package folder`,
   )
   .option(
     '--check',
@@ -330,28 +366,42 @@ program
         if (parent === dir) throw new Error('No package.json found here or above.');
         dir = parent;
       }
-      const generations = await generatePackageOntologies(dir);
-      if (!generations.length) {
+      const generated = await generatePackageOntologies(dir);
+      if (!generated.ontologies.length) {
         throw new Error(
-          `package.json has no "${ONTOLOGIES_KEY}". Declare each ontology as {"<prefix>": {"namespace": "<IRI>", "data": ["<file>.ttl"]}}.`,
+          `package.json has no "${ONTOLOGIES_KEY}". Declare each ontology by its name as {"<name>": {"namespace": "<IRI>", "data": ["<file>.ttl"]}}.`,
         );
       }
-      for (const g of generations) {
+      for (const g of generated.ontologies) {
         console.log(
-          `${g.config.prefix}: ${g.termCount} terms from ${g.config.data.map((f) => 'src/data/' + f).join(', ')}` +
+          `${g.config.name}: ${g.termCount} terms from ${g.config.data.map((f) => 'src/data/' + f).join(', ')}` +
+            (g.config.generated ? '' : ' (module written by hand: registered by the index, vann data checked)') +
             (g.skipped.length ? ` (${g.skipped.length} subjects under the namespace are not terms: ${g.skipped.slice(0, 3).join(', ')}${g.skipped.length > 3 ? ', …' : ''})` : ''),
         );
       }
       if (options.check) {
-        const stale = await staleOntologyModules(dir, generations);
+        const stale = await staleOntologyModules(dir, generated);
         if (stale.length) {
-          throw new Error(`Out of date: ${stale.join(', ')}. Run \`linked generate-ontology\`.`);
+          throw new Error(
+            `Out of date: ${stale.join(', ')}. Run \`linked generate-ontology\`, or declare an ontology whose module is written by hand with "generated": false.`,
+          );
         }
         console.log('Every ontology module is current.');
         return;
       }
-      const changed = await writePackageOntologies(dir, generations);
-      console.log(changed.length ? `Wrote ${changed.join(', ')}` : 'Every ontology module is current.');
+      const changed = await writePackageOntologies(dir, generated);
+      const removed = new Set(generated.remove);
+      const written = changed.filter((file) => !removed.has(file));
+      if (written.length) console.log(`Wrote ${written.join(', ')}`);
+      if (removed.size) console.log(`Removed ${[...removed].join(', ')}`);
+      if (!changed.length) console.log('Every ontology module is current.');
+      // Inside an app (the package is the app, or lies under it in the same repository), the app's
+      // map gets the prefixes of ontologies it does not map yet.
+      const appRoot = findAppRoot(dir);
+      if (appRoot) {
+        const {file, added} = await refreshAppPrefixes(appRoot);
+        reportAddedPrefixes(path.relative(process.cwd(), file) || APP_CONFIG_FILE, added);
+      }
     }),
   );
 
@@ -720,7 +770,7 @@ branch
   .option('--worktree', "Start a master: <name> in a worktree of its own; the checkouts stay where they are.")
   .option('--with <packages>', 'With --worktree: comma-separated packages-local/ checkouts to give a worktree on <name> (as the positional packages).')
   .option('--port <n>', "With --worktree: the master's preview port.")
-  .option('--dataset <name>', "With --worktree: a dataset of the master's own for its preview (FUSEKI_DATASET).")
+  .option('--dataset <name>', "With --worktree: a dataset of the master's own for its preview (FUSEKI_DATASET), with the clone command as for worktree add --dataset.")
   .option('--dir <path>', "With --worktree: where to put the master's worktree.")
   .action(async (name: string, packages: string[], options) => {
     if (options.worktree) {
@@ -824,7 +874,7 @@ worktree
   .option('--with <packages>', 'Comma-separated packages-local/ checkouts to change: @_linked/core, core or _linked-core.')
   .option('--app-detached', 'Check the app out detached at the base tip: for work that changes only packages.')
   .option('--port <n>', 'The port for the printed start command.')
-  .option('--dataset <name>', 'A dataset of its own for the printed start command (FUSEKI_DATASET).')
+  .option('--dataset <name>', "A dataset of its own for the printed start command (FUSEKI_DATASET), with the command that clones the app's data into it (its clone-dataset npm script, or the one datasetCloneScript names in linked.app.json).")
   .option('--dir <path>', 'Where to put the worktree.')
   .option('--from <master>', "A step of this master (linked branch start <master> --worktree): branch <master>--<agent> from <master>, default dir <master's worktree dir>/../<master>--<agent>, --with from the master's package worktrees, node_modules linking straight into the master's install with the master's packages under the step's own. Implied when run in the master's worktree.")
   .action(async (agent: string, options) => {

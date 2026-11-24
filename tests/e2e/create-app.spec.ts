@@ -27,7 +27,7 @@ import {
   type ScaffoldedApp,
 } from './helpers/app.js';
 
-const APP_PORT = 4400 + (process.pid % 100); // avoid collision with a CN backend on 4040
+const APP_PORT = 4400 + (process.pid % 100); // avoid collision with a host app backend on 4040
 // The image every linked app runs on: Fuseki with RDFS inference over the stored
 // rdfs:subClassOf hierarchy. Build it locally with
 // `docker build -t linked-fuseki:dev <linked-fw/fuseki>/server`.

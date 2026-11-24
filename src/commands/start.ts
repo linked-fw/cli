@@ -16,12 +16,13 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
-import {importFile, isPathInside} from '../utils/platform.js';
+import {isPathInside} from '../utils/platform.js';
 import fsExtra from 'fs-extra';
 import {parseWorkspacePatterns, isWorkspacePathNegated} from '../workspace-globs.js';
 import {isBundled, packageNameOf, type SsrMatcher} from '../utils/ssrBundled.js';
 
 import type {InlineConfig, UserConfigExport, ViteDevServer} from 'vite';
+import type {LinkedConfig} from '../interfaces.js';
 import {keepDevServerAlive} from '../plugins/keep-dev-server-alive.js';
 
 export interface StartOptions {
@@ -37,33 +38,16 @@ export interface StartOptions {
 
 export const VITE_CONFIG_FILES = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs'];
 
-/**
- * Names for the app's linked config, in priority order. `lincd.config.js` is
- * the legacy name: apps predating the rename still ship it, and dropping it
- * would silently discard their whole `server` config (cachePaths, `apiOnly`, …).
- */
-export const LINKED_CONFIG_FILES = ['linked.config.js', 'lincd.config.js'];
-
-/**
- * Absolute path to the app's linked config. Returns the first name that exists;
- * when none does, the current name — the caller still `existsSync`-guards the
- * import, so this is simply the "no config here" path, not a promise of a file.
- */
-export function resolveLinkedConfigPath(cwd: string): string {
-  return (
-    LINKED_CONFIG_FILES.map((name) => path.join(cwd, name)).find((candidate) =>
-      fsExtra.existsSync(candidate),
-    ) ?? path.join(cwd, LINKED_CONFIG_FILES[0])
-  );
-}
+/** The port an app listens on when neither `PORT` nor its config sets one. */
+export const DEFAULT_APP_PORT = 4040;
 
 /**
  * API-only mode is explicit: `linked start --api-only`, or `server.apiOnly: true`
- * in `linked.config.js`. It is never inferred from missing frontend files, so a
+ * in `linked.app.json`. It is never inferred from missing frontend files, so a
  * web app that lost its `vite.config.ts` still fails loudly instead of silently
  * serving no pages.
  */
-export function isApiOnly(opts: StartOptions, linkedConfig: any): boolean {
+export function isApiOnly(opts: StartOptions, linkedConfig: LinkedConfig): boolean {
   return opts.apiOnly === true || linkedConfig?.server?.apiOnly === true;
 }
 
@@ -201,8 +185,8 @@ export async function discoverWorkspacePackages(cwd: string): Promise<WorkspaceP
   const out: WorkspacePackage[] = [];
 
   // Include the root app itself so edits to <cwd>/src/* trigger HMR for
-  // the app's own providers (e.g. CN's src/backend.ts which registers ~25
-  // Express routes).
+  // the app's own providers (e.g. a host app's src/backend.ts that registers
+  // its own Express routes).
   if (pkgJson.name && (await fsExtra.pathExists(path.join(cwd, 'src')))) {
     out.push({name: pkgJson.name, root: cwd, srcDir: path.join(cwd, 'src')});
   }
@@ -308,7 +292,7 @@ export function resolveAppUrl(
   env: Record<string, string | undefined>,
   configuredPort?: number,
 ): string {
-  const port = parseInt(env.PORT ?? '', 10) || configuredPort || 4040;
+  const port = parseInt(env.PORT ?? '', 10) || configuredPort || DEFAULT_APP_PORT;
   return `http://localhost:${port}/`;
 }
 
@@ -429,8 +413,8 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
 
   // Load the app's own `.env` (Node 20.12+ `process.loadEnvFile`) if present — the
   // standard, dependency-free env source for a linked app. Node does NOT override
-  // vars already set in the environment, so CN's injected per-(project,branch) vars
-  // (PORT, FUSEKI_DATASET, CN_APP_ADMIN_SECRET, …) take precedence over the file.
+  // vars already set in the environment, so vars a host app injects per
+  // (project, branch) (PORT, FUSEKI_DATASET, …) take precedence over the file.
   try {
     const envPath = path.join(cwd, '.env');
     if (
@@ -443,23 +427,24 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
     // best-effort — a missing/invalid .env never blocks start
   }
 
-  // `--env` still loads env-cmd (`.env-cmdrc.json`) for CN's own start:local flow.
+  // `--env` still loads env-cmd (`.env-cmdrc.json`) for apps that still use it.
   const {ensureEnvironmentLoaded} = await import('../lifecycle.js');
   await ensureEnvironmentLoaded();
 
-  // Load user's linked.config.js (legacy hook). It still drives things
-  // like server.cachePaths and the rest of LinkedServer's options.
-  const linkedConfigPath = resolveLinkedConfigPath(cwd);
-  let linkedConfig: any = {};
-  if (fsExtra.existsSync(linkedConfigPath)) {
-    linkedConfig = (await importFile(linkedConfigPath)).default ?? {};
-  }
-  linkedConfig.server = linkedConfig.server || {};
+  // LinkedServer's options from the app's settings (linked.app.json); refuses a
+  // leftover linked.config.js.
+  const {linkedServerConfig} = await import('../utils/appConfig.js');
+  const linkedConfig = linkedServerConfig(cwd);
   const apiOnly = isApiOnly(opts, linkedConfig);
 
   const {createServer: createViteServer} = await import('vite');
   const vite = await createViteServer(await resolveViteServerConfig(cwd, apiOnly));
   configureLinkedServer(linkedConfig.server, vite, cwd, apiOnly);
+
+  // The app's prefix map (linked.app.json) into core, through the SSR runner so it is the copy
+  // the app's modules use; before the storage config and the server load.
+  const {loadAppPrefixes} = await import('../utils/appConfig.js');
+  await loadAppPrefixes(cwd, (specifier) => vite.ssrLoadModule(specifier));
 
   // Stores named in a datasets file load through this server's runner or
   // Node, whichever gives the app's own copy (see createStoreLoader). Set
@@ -475,7 +460,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
 
   // Load the storage config through Vite SSR so it
   // configures the SAME LinkedStorage instance the rest of the SSR graph
-  // (LinkedServer, CN providers) uses. Replaces the former Node-direct
+  // (LinkedServer, the app's providers) uses. Replaces the former Node-direct
   // `loadBackendStorageConfig()` (which resolved @_linked/core via the
   // `default`→lib condition, a SEPARATE instance). Safe now that core's lib
   // `initTree` is idempotent. `loadBackendStorageConfig` stays in
@@ -500,7 +485,7 @@ export async function startWithVite(opts: StartOptions = {}): Promise<void> {
 
   // Load LinkedServer through Vite SSR so it shares the SAME
   // module instances as everything else in the SSR call graph. Without
-  // this, LinkedServer is loaded by Node (→ lib/esm) while CN's App.tsx +
+  // this, LinkedServer is loaded by Node (→ lib/esm) while the app's App.tsx +
   // its transitive imports are loaded by Vite (→ src/). React contexts
   // created in one tree don't reach consumers in the other, causing
   // "Cannot destructure property 'isNativeApp' of useAppContext()" type

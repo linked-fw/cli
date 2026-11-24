@@ -133,7 +133,7 @@ describe('ssr.noExternal', () => {
     expect(await shim('@_linked/cli')).toBe('export {};\n');
     // The shim's own re-export resolves past the shim. Under `linked start` Vite externalizes it
     // before resolving; under Vitest (which inlines @_linked/*) it reaches the resolver, and the
-    // shim re-exporting itself was an empty module (create-now backlog 130).
+    // shim re-exporting itself was an empty module (a host app backlog item).
     const shimId = ssrNodeShim('@_linked/cli/utils').id;
     expect(await plugin.resolveId.call({}, '@_linked/cli/utils', shimId, {ssr: true})).toBe(
       path.join(cli, 'src', 'utils.ts'),

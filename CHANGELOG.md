@@ -462,14 +462,14 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
 
   - **Two kinds of package.** An ontology package `<name>-ont` holds exactly one ontology (`src/ontologies/<name>.ts` and its register sibling) and no shapes, components or backend. Its ontology slug is `<name>`, without `-ont`, so its terms mint `https://linked.cm/ont/<name>/{Term}` (or `<uri_base>{Term}` when a namespace is given). An asset package `<name>-assets` holds shapes, components and a backend (`src/shapes`, `src/backend.ts`, the barrels) and no ontology. Both are ordinary linked packages (`linkedPackage: true`).
   - **`linked create-ont-package <name>`** and **`linked create-asset-package <name>`** create one kind each. **`linked create-package <name>`** asks which on a terminal; `--kind ontology|assets|both` answers it, and `both` creates the pair. Without a terminal and without `--kind` it exits 1 and names the flag, as `--location` does. `--kind both` refuses `--remote`: one repository cannot hold two packages. `--location`, `--remote` and `--push` work for all three commands, and `--skip-install` writes the files only.
-  - **With `--kind both --location packages` the asset package depends on the ontology package:** a regular `dependencies` entry `"<name>-ont": "^<its version>"`, as Create Now's project scaffold writes, which npm workspaces link locally. With `packages-local` or outside an app it gets no such entry (`npm install` would fail with E404 on the unpublished `-ont` package); one line says to run `npm install <name>-ont` once it is published. A package created on its own gets no such entry.
+  - **With `--kind both --location packages` the asset package depends on the ontology package:** a regular `dependencies` entry `"<name>-ont": "^<its version>"`, as the host app's project scaffold writes, which npm workspaces link locally. With `packages-local` or outside an app it gets no such entry (`npm install` would fail with E404 on the unpublished `-ont` package); one line says to run `npm install <name>-ont` once it is published. A package created on its own gets no such entry.
   - **The suffix is never doubled:** `create-ont-package foo-ont` creates `foo-ont`, and `@acme/foo` becomes `@acme/foo-ont`.
   - **`linked create-app` no longer rewrites `src/package.ts`.** A new app is a `linkedApp`, not a linked package: its root registers no package, so `create-app` stamps `package.json`, the env files and the process names and leaves `src/` alone.
   - **Every created package has `"linkedPackage": true`.**
   - **A package created inside an app is minted under the app's root:** `linkedPackage(name, {baseUri})`, and an ontology package's namespace is `{baseUri}ont/<name>/`. The root comes from `--base-uri <uri>`, else `LINKED_BASE_URI` in the shell, else the app's `.env.local`, else its `.env`. A malformed root is refused before anything is written. With no root the package declares none and mints under `https://linked.cm/`, the normal default; that is no warning, one informational line says so: `Shapes and terms in <package> mint under https://linked.cm/. They resolve once the package is published (npx linked publish, coming soon).`
-  - **`create-shape`, `create-component`, `create-set-component` and `create-ontology` refuse where there is no `src/package.ts`** (a new app root has none) with `run this inside a package (packages/<name>)`, instead of writing a file whose `../package.js` import cannot resolve. An app with its own root `src/package.ts` (create-now) is served as before.
+  - **`create-shape`, `create-component`, `create-set-component` and `create-ontology` refuse where there is no `src/package.ts`** (a new app root has none) with `run this inside a package (packages/<name>)`, instead of writing a file whose `../package.js` import cannot resolve. An app with its own root `src/package.ts` is served as before.
   - **The `create-shape` template compiles:** it imported `NamedNode` from `@_linked/core`, which core does not export (TS2305). It is the getter-only shape form now.
-  - The templates moved with the kinds: `defaults/package/` is the asset package, whose manifest, tsconfigs, dotfiles and `src/package.ts` every kind shares, and `defaults/package-ontology/` holds the example ontology. The template files create-now reads from `defaults/package/` (`package.json`, the tsconfigs, `src/shapes/index.ts`, `src/backend.ts`) are where they were.
+  - The templates moved with the kinds: `defaults/package/` is the asset package, whose manifest, tsconfigs, dotfiles and `src/package.ts` every kind shares, and `defaults/package-ontology/` holds the example ontology. The template files a host app reads from `defaults/package/` (`package.json`, the tsconfigs, `src/shapes/index.ts`, `src/backend.ts`) are where they were.
   - `create-component` and `create-set-component` resolve their templates from the built CLI again (they looked one directory too high).
 
 - [#234](https://github.com/linked-fw/cli/pull/234) [`362f890`](https://github.com/linked-fw/cli/commit/362f890941c973d257bcbd1218f0b78ffcf3ea23) Thanks [@flyon](https://github.com/flyon)! - Apps now get a `dependencies` relink hook next to `postinstall`, so `npm update`, `npm install <pkg>`, `npm uninstall` and `npm dedupe` keep localized links. npm runs a root `postinstall` only on a bare `npm install` / `npm ci`, but runs a root `dependencies` script after any command that changes `node_modules`. `linked create-package` sets up both scripts, and `linked localize` / `--adopt` add whichever is missing when they record a package (an existing script is kept and the command appended with `&&`; a script that already relinks, including the old `linked-localize --relink` spelling, is left alone).
@@ -574,7 +574,7 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
 
 ### Minor Changes
 
-- [#202](https://github.com/linked-fw/cli/pull/202) [`a05333d`](https://github.com/linked-fw/cli/commit/a05333d7e3bc6b69878e07608eb5165d49437635) Thanks [@flyon](https://github.com/flyon)! - `create-package` and `create-ontology` scaffold new ontologies at `https://linked.cm/ont/{slug}/` instead of the legacy `http://lincd.org/ont/{name}/`, matching the first-party packages (arch-02). The slug is derived the way core derives a package's publicSlug: the npm scope is dropped and the rest kebab-cased, so `linked create-package @_linked/foo` now gets `https://linked.cm/ont/foo/` (it used to get `http://lincd.org/ont/@_linked/foo/`). An explicit `uri_base` argument still wins, which is how a private package gets its workspace-scoped root (`https://{workspaceSlug}.id.create.now/ont/{slug}/`); a `uri_base` that already ends in `/` or `#` is no longer given a second `/`.
+- [#202](https://github.com/linked-fw/cli/pull/202) [`a05333d`](https://github.com/linked-fw/cli/commit/a05333d7e3bc6b69878e07608eb5165d49437635) Thanks [@flyon](https://github.com/flyon)! - `create-package` and `create-ontology` scaffold new ontologies at `https://linked.cm/ont/{slug}/` instead of the legacy `http://lincd.org/ont/{name}/`, matching the first-party packages. The slug is derived the way core derives a package's publicSlug: the npm scope is dropped and the rest kebab-cased, so `linked create-package @_linked/foo` now gets `https://linked.cm/ont/foo/` (it used to get `http://lincd.org/ont/@_linked/foo/`). An explicit `uri_base` argument still wins, which is how a private package gets its workspace-scoped root (`https://{workspaceSlug}.example.org/ont/{slug}/`); a `uri_base` that already ends in `/` or `#` is no longer given a second `/`.
 
 ## 1.37.0
 
@@ -759,7 +759,7 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
   A property that names its value shape by `[package, name]` (`shape: ['@_linked/schema', 'ImageObject']`)
   does not load that shape, and consumers deep-import single shape modules. So a package could ship a
   module whose query `workspace.image.contentUrl` threw `Shape class not found for …/ImageObject` in a
-  production bundle where nothing else happened to load ImageObject — which is how Create Now came to
+  production bundle where nothing else happened to load ImageObject — which is how the host app came to
   show "No organizations found". `@_linked/sioc` also named shapes under its old package name
   (`lincd-sioc`), which could never resolve.
 
@@ -805,7 +805,7 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
 
 - [#162](https://github.com/linked-fw/cli/pull/162) [`e965600`](https://github.com/linked-fw/cli/commit/e9656005679f137b023d811fc057409071109d27) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now keeps compiled decorated classes named as written. Vite re-prints any published module that mentions `process.env` or `import.meta.env` (client build) or `process.env.NODE_ENV` (dev client) with esbuild, which renamed tsc's `let Foo = class Foo` to `class Foo2` — and an unnamed shape's IRI is its class name. A new `linked:pin-compiled-class-names` plugin pins each such class's name right after its declaration, before its decorators run.
 
-- [#170](https://github.com/linked-fw/cli/pull/170) [`7a9e465`](https://github.com/linked-fw/cli/commit/7a9e465d498ff01247967d586b17e81c29536e08) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now bundles `@_linked/server` in the dev SSR runner (`ssr.noExternal`), in workspace and standalone mode alike. `linked start` loads `LinkedServer` through `vite.ssrLoadModule`, so Vite already evaluated that entry and every file it reaches by relative import, while bare `@_linked/server/...` imports from the app and its storage config went to Node. The package was split across two loaders, and which one evaluated a given file depended on import order: in Create Now, `package.js` and `ontologies/lincd-server.js` evaluated once in each, and `shapes/filestores/LocalFileStore.js` too once the package's `backend` loaded. Vite is now the only loader for it. The new `SSR_ENTRY_PACKAGES` export names the packages this applies to.
+- [#170](https://github.com/linked-fw/cli/pull/170) [`7a9e465`](https://github.com/linked-fw/cli/commit/7a9e465d498ff01247967d586b17e81c29536e08) Thanks [@flyon](https://github.com/flyon)! - `createViteConfig` now bundles `@_linked/server` in the dev SSR runner (`ssr.noExternal`), in workspace and standalone mode alike. `linked start` loads `LinkedServer` through `vite.ssrLoadModule`, so Vite already evaluated that entry and every file it reaches by relative import, while bare `@_linked/server/...` imports from the app and its storage config went to Node. The package was split across two loaders, and which one evaluated a given file depended on import order: in the host app, `package.js` and `ontologies/lincd-server.js` evaluated once in each, and `shapes/filestores/LocalFileStore.js` too once the package's `backend` loaded. Vite is now the only loader for it. The new `SSR_ENTRY_PACKAGES` export names the packages this applies to.
 
 ## 1.28.1
 
@@ -837,7 +837,7 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
 
   `build-all` discovered only packages declaring `linkedPackage: true`, only inside the
   `workspaces` globs, and printed nothing about anything it passed over. Measured against
-  Create Now, that meant `Found 3 total LINCD packages in use by this app` and `exit 0` for a
+  the host app, that meant `Found 3 total LINCD packages in use by this app` and `exit 0` for a
   workspace of six tracked members plus 25 localized checkouts — with `@_linked/maps`, a shipped
   dependency that had simply never been given the flag, dropped from a green build in silence.
 
@@ -982,7 +982,7 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
   The declared range was wide enough that the resolved core depended on whatever the
   consumer — or this repo's own CI, via `package-lock.json` — happened to install. Core
   decides how a shape's IRI is minted, so a stale core made this package emit legacy
-  `data.lincd.org` IRIs instead of the arch-02 `linked.cm` scheme. Which IRIs a published
+  `data.lincd.org` IRIs instead of the `linked.cm` scheme. Which IRIs a published
   package produces should not be a function of the installer's dependency tree.
 
   Minor rather than patch: this raises the minimum core a consumer must resolve, so it
@@ -1747,7 +1747,7 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
 - [#59](https://github.com/linked-cm/cli/pull/59) [`647417b`](https://github.com/linked-cm/cli/commit/647417bdcfbd5603daeb02ffd9ddc94f702a960e) Thanks [@flyon](https://github.com/flyon)! - Standalone dev + template git-clone scaffolding:
 
   - **Standalone dev resolution** — `createViteConfig` now detects when an app is NOT inside a workspace (lib-only npm install of `@_linked/*`) and resolves those deps via `import → lib/esm` (conditions `['module','node']`) instead of the `development → src` export they don't ship. Fixes "Failed to load `@_linked/server/shapes/LinkedServer`" on a clean install. Monorepo/workspace dev is unchanged.
-  - **`create-app` clones the template repo** — new apps are scaffolded by `git clone`-ing `linked-cm/app-template` (single source of truth, same repo CN's server-side project creation uses) instead of copying a bundled defaults tree. The bundled `defaults/app-with-backend` is removed.
+  - **`create-app` clones the template repo** — new apps are scaffolded by `git clone`-ing `linked-cm/app-template` (single source of truth, same repo the host app's server-side project creation uses) instead of copying a bundled defaults tree. The bundled `defaults/app-with-backend` is removed.
   - Removed the orphaned tsx `register`/`register-css-only` loaders (+ `tsx` dep); apps run plain `linked start` (Vite handles TS transform).
 
 ## 1.8.2
@@ -1776,8 +1776,6 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
   hit "Cannot find name NamedNode" or "Cannot find name Literal" errors
   in scaffolded files, you've hit the documented gap. The fix path is the
   template rewrite, not reverting to legacy lincd.
-
-  Context: see create-now plan-011 report (docs/reports/009-legacy-lincd-eradication.md).
 
 ## 1.8.1
 
@@ -1938,7 +1936,7 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
   - `@_linked/react: ^1.3` (needs the loader/errorElement resolution chain + `_refresh` on `linkedSetComponent`)
   - `@_linked/cli: ^1.4` (template uses the loader bin)
 
-  Also: `theme.css` top-comment no longer references the colours as "CN-branded" — they're just the default palette; users override `--color-primary-*` / `--color-secondary-*` to brand. README workspace-note generalized to "another repo's `packages/`" instead of a specific path.
+  Also: `theme.css` top-comment no longer references the colours as brand colours — they're just the default palette; users override `--color-primary-*` / `--color-secondary-*` to brand. README workspace-note generalized to "another repo's `packages/`" instead of a specific path.
 
 ## 1.4.0
 
@@ -1948,9 +1946,9 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
 
   Plus: CLI command help text refresh (`LINCD app` → `Linked app`, etc.). Config file name `lincd.config.{js,json}` → `linked.config.{js,json}` (hard cut, no fallback) — was previously rolled out separately.
 
-- [#23](https://github.com/linked-cm/cli/pull/23) [`a00168d`](https://github.com/linked-cm/cli/commit/a00168d0e55a3f7f8164df1ea90e8fe52aefd5d4) Thanks [@flyon](https://github.com/flyon)! - Starter template: CN-branded CSS theme + `@_linked/react` integration in the example components.
+- [#23](https://github.com/linked-cm/cli/pull/23) [`a00168d`](https://github.com/linked-cm/cli/commit/a00168d0e55a3f7f8164df1ea90e8fe52aefd5d4) Thanks [@flyon](https://github.com/flyon)! - Starter template: a branded CSS theme + `@_linked/react` integration in the example components.
 
-  **Brand defaults.** The `app-with-backend` template now ships with the CN palette (`--color-primary-*` mapped to a teal-blue ramp, `--color-secondary-*` to mint green) as a default-branded baseline. Apps override `@theme { --color-primary-500: ... }` to swap brand.
+  **Brand defaults.** The `app-with-backend` template now ships with a default palette (`--color-primary-*` mapped to a teal-blue ramp, `--color-secondary-*` to mint green) as a default-branded baseline. Apps override `@theme { --color-primary-500: ... }` to swap brand.
 
   **Semantic-token shell.** `App.module.css`, `DefaultLayout.module.css`, `Header.module.css` rewritten using `@_linked/css` semantic tokens (`--bg-page`, `--bg-card`, `--color-primary-*`) instead of hardcoded hex. Module CSS files using `--spacing(N)` import `@_linked/css/package.css` per the documented pattern.
 
@@ -1974,7 +1972,7 @@ update`, which refuses a keyed branch the target does not contain yet. `MergeRes
 
   The exports entry `"./preflight.css": "./preflight.css"` is also removed from `package.json`.
 
-- [`2b40588`](https://github.com/linked-cm/cli/commit/2b405880cbb21992c5005cb048f910df79c32145) - Relax `typescript` dep from `^5.7.3` to `^5.4.0` so consumers that pin a lower 5.x version (e.g. CN at 5.4.5) don't end up with a nested `typescript@5.9.x` install in `packages/cli/node_modules/`. The nested 5.9.x was incompatible with `react-refresh-typescript@2.0.12`'s AST walk — crashed frontend builds with `TypeError: Cannot read properties of undefined (reading 'declarations')` inside `VariableStatement.declarationList.declarations` traversal.
+- [`2b40588`](https://github.com/linked-cm/cli/commit/2b405880cbb21992c5005cb048f910df79c32145) - Relax `typescript` dep from `^5.7.3` to `^5.4.0` so consumers that pin a lower 5.x version (e.g. the host app at 5.4.5) don't end up with a nested `typescript@5.9.x` install in `packages/cli/node_modules/`. The nested 5.9.x was incompatible with `react-refresh-typescript@2.0.12`'s AST walk — crashed frontend builds with `TypeError: Cannot read properties of undefined (reading 'declarations')` inside `VariableStatement.declarationList.declarations` traversal.
 
 ## 1.3.3
 

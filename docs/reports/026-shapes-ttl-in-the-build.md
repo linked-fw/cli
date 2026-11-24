@@ -8,14 +8,14 @@ summary: >
   A package without shapes gets no file (a stale one is removed); a core without
   `shapes/shapesToTurtle` warns and writes none. `npm pack --dry-run` lists the file only for a
   package with shapes; two builds give the same bytes; core's file equals its golden (`fbe7639d…`).
-  Part of CN plan 071 (step L1).
+  Part of the host app's plan (its step L1).
 ---
 
 # 026 — `shapes.ttl` in the build
 
 ## Plan-mode detail
 
-CN plan 071 §L1 is the sub-plan; §Contracts "Shape graphs" (as landed in core report 052) is the
+The host app's plan §L1 is the sub-plan; its §Contracts "Shape graphs" (as landed in core report 052) is the
 contract: L1 writes `lib/esm/data/shapes.ttl` with `packageShapesTurtle(pkg)` and no options, so a
 built file and the server's in-process generation are the same bytes. Open question 6 (owner,
 2026-10-23): a package without shapes gets no file, and nothing falls back.
@@ -33,9 +33,9 @@ built file and the server's in-process generation are the same bytes. Open quest
 - **Pitfalls.** `removeOldFiles` deletes `lib` files older than 120 s, so a stale file usually goes,
   but a package that loses its shapes within two minutes of a build would keep one: the step removes
   it itself. A core older than the generator (npm's before R2) must not fail every build: it warns,
-  as the hierarchy check does for its module. CN backlog 130 (the SSR shim empties `@_linked/cli/*`
-  under Vitest) does not apply: nothing in CN imports this module; CN code that needs the Turtle
-  calls core.
+  as the hierarchy check does for its module. The host app's backlog item on the SSR shim (it empties
+  `@_linked/cli/*` under Vitest) does not apply: nothing in the app imports this module; its code
+  that needs the Turtle calls core.
 - **Tests.** Fixture packages in tmp dirs with a real child against the repository's core: file
   written in core's form, bytes stable across runs, no index, `npm pack --dry-run` with and without
   shapes, no shapes (stale file removed), shape modules registering nothing, no core dependency, an
@@ -73,7 +73,7 @@ fallback).
 
 ## Gate
 
-Worktree `named-graphs--l1` (`~/web/wt/l1/packages-local/_linked-cli`), core from the main
+Worktree `named-graphs--l1` (`<worktree>/packages-local/_linked-cli`), core from the main
 checkout's `named-graphs` at `200037d` (built; `shapes/shapesToTurtle` not yet on npm). No Fuseki
 of my own was needed: the e2e's testcontainer takes a random port.
 
@@ -101,10 +101,10 @@ Fixture packages (`tests/unit/shapesTurtle.test.ts`, 10 tests, all passing):
 ✓ is byte-identical to core's in-process generation (its golden file)
 ```
 
-Real packages, built with this cli (`node ~/web/wt/l1/packages-local/_linked-cli/lib/esm/launch.js
+Real packages, built with this cli (`node <worktree>/packages-local/_linked-cli/lib/esm/launch.js
 build`):
 
-- **`packages/documents`** (CN worktree copy): `✔ Writing shapes.ttl - lib/esm/data/shapes.ttl`,
+- **`packages/documents`** (its copy in a host app worktree): `✔ Writing shapes.ttl - lib/esm/data/shapes.ttl`,
   `✔ Build successful with warnings` (the existing `@jest/globals`, `ajv` dependency warning),
   22.2 s. 1365 lines, `sha256 1b520bceca8aab2fdccc5a905281218372b78f557b0258eb19fe9e7f3b60812b`;
   a second build gave the same hash, and a separate `node` importing `package.js`,

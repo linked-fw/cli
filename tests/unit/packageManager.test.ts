@@ -1,6 +1,6 @@
 // npm is the CLI's default package manager. yarn is only used when the tree
 // itself says it is a yarn project — that keeps existing yarn monorepos
-// (create_now pins yarn 3.6.1) working without assuming yarn anywhere else.
+// (a host app pinned yarn 3.6.1) working without assuming yarn anywhere else.
 import path from 'path';
 import {
   detectPackageManager,

@@ -181,16 +181,27 @@ describe('linked worktree add', () => {
     assert.equal(hasBranch(app.root, 'overhaul--a1'), false);
   });
 
-  test('--dataset adds FUSEKI_DATASET and, when the app has the scripts, the clone commands', async () => {
+  test('--dataset adds FUSEKI_DATASET and, when the app has a clone-dataset script, its command', async () => {
     const app = makeApp();
-    fs.mkdirSync(path.join(app.root, 'scripts'));
-    fs.writeFileSync(path.join(app.root, 'scripts', 'backup-cn-state.sh'), '');
-    fs.writeFileSync(path.join(app.root, 'scripts', 'restore-fuseki-dataset.sh'), '');
-    const result = await worktreeAdd(app.root, 'a1', {port: 4063, dataset: 'cn-wt-a1'});
+    const pkgFile = path.join(app.root, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'));
+    fs.writeFileSync(pkgFile, JSON.stringify({...pkg, scripts: {...pkg.scripts, 'clone-dataset': 'scripts/clone.sh'}}));
+    git(app.root, 'commit', '-qam', 'clone-dataset script');
+    const result = await worktreeAdd(app.root, 'a1', {port: 4063, dataset: 'wt-a1'});
     assert.equal(result.code, 0, result.messages.join('\n'));
     const text = result.messages.join('\n');
-    assert.ok(text.includes('PORT=4063 FUSEKI_DATASET=cn-wt-a1 npm run start:local'), text);
-    assert.match(text, /restore-fuseki-dataset\.sh .* cn-wt-a1 --yes/);
+    assert.ok(text.includes('PORT=4063 FUSEKI_DATASET=wt-a1 npm run start:local'), text);
+    assert.ok(text.includes(`Clone the data into wt-a1 first (from ${app.root}): npm run clone-dataset -- wt-a1`), text);
+  });
+
+  test('--dataset without a clone script warns that the dataset starts empty; no port names the app port', async () => {
+    const app = makeApp();
+    fs.writeFileSync(path.join(app.root, '.env'), 'PORT=4100\n');
+    const result = await worktreeAdd(app.root, 'a1', {dataset: 'wt-a1'});
+    assert.equal(result.code, 0, result.messages.join('\n'));
+    const text = result.messages.join('\n');
+    assert.match(text, /Warning: the app has no clone-dataset script, so wt-a1 starts empty/);
+    assert.ok(text.includes('(pick a free port: the main checkout uses 4100)'), text);
   });
 
   test('add refuses dir inside packages-local', async () => {

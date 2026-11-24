@@ -3,8 +3,8 @@ date: 2026-10-28
 summary: >
   `linked checkout <branch> --add <repo>` (repeatable): one more package worktree in the app
   checkout's `packages-local/` that no list names, by the same branch rule and base clone lock,
-  marked `added`, never a reason to install and never built. Minor. For Create Now plan 070 step
-  NO (editing a workspace ontology the app does not use), CN report 210.
+  marked `added`, never a reason to install and never built. Minor. For a step of the host app's
+  plan (editing a workspace ontology the app does not use).
 ---
 
 # 037 — `linked checkout --add`
@@ -13,8 +13,8 @@ summary: >
 
 ### Summary
 
-Create Now edits a workspace ontology package that the app does not list in
-`linked.unpublishedPackages` (CN plan 070, design choice D-NO2): its worktree goes into the
+The host app edits a workspace ontology package that the app does not list in
+`linked.unpublishedPackages` (a design choice in its plan): its worktree goes into the
 branch checkout's `packages-local/`, unlisted, so `linked branch fork`, `push` and `merge`, which
 already take every checkout there, cover it. `linked checkout <branch> --add <repo>` places it.
 
@@ -39,7 +39,7 @@ already take every checkout there, cover it. `linked checkout <branch> --add <re
   the text output.
 - `src/cli.ts`: `--add <repo>` (repeatable).
 - `README.md`, `docs/integration-branches-and-worktrees.md` (flag table, **Added packages**),
-  K-checkout in `docs/plans/002-package-repos-cli-steps.md` (and CN 057, 180, 200).
+  K-checkout in `docs/plans/002-package-repos-cli-steps.md` (and in the host app's plans).
 - Tests: two cases in `tests/unit/checkout/checkout.e2e.test.ts`.
 - Changeset `checkout-add` (minor).
 
@@ -62,11 +62,11 @@ None.
 
 ### Follow-ups
 
-None in this repo. CN's use of it: CN report 210.
+None in this repo. The host app's use of it is recorded in its own report.
 
 ## Details
 
-CN's independent review of the step found the name taken as a directory unchecked (low, fixed in
-the second commit) and that the added checkout joins a later install (documented, by design).
+The host app's independent review of the step found the name taken as a directory unchecked (low,
+fixed in the second commit) and that the added checkout joins a later install (documented, by design).
 
 The skills in `semantu-agents` do not describe `linked checkout`, so they need no change.
